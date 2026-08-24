@@ -1,8 +1,10 @@
 using System.Text;
 using Infrastructure;
+using Infrastructure.Authorization;
 using Infrastructure.Data;
 using Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -31,14 +33,36 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ClockSkew = TimeSpan.FromMinutes(1)
         };
     });
-builder.Services.AddAuthorization();
+
+// Add Authorization with custom policies
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("CanCreateEvent", policy =>
+        policy.Requirements.Add(new PermissionRequirement("create_event")));
+    
+    options.AddPolicy("CanCreateGuest", policy =>
+        policy.Requirements.Add(new PermissionRequirement("create_guest", requiresGroup: true)));
+    
+    options.AddPolicy("CanCreateGroup", policy =>
+        policy.Requirements.Add(new PermissionRequirement("create_group", requiresGroup: true)));
+    
+    options.AddPolicy("CanApproveGuest", policy =>
+        policy.Requirements.Add(new PermissionRequirement("approve_guest", requiresGroup: true)));
+    
+    options.AddPolicy("CanCreateUser", policy =>
+        policy.Requirements.Add(new PermissionRequirement("create_user", requiresGroup: true)));
+});
+
+// Register authorization handler
+builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new()
     {
-        Title = "Server Equipment API",
+        Title = "Event Management System API",
         Version = "v1",
-        Description = "API для тестирования сервисов серверного оборудования"
+        Description = "API для управления мероприятиями с ролевой моделью доступа"
     });
     options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
@@ -68,7 +92,7 @@ await using (var scope = app.Services.CreateAsyncScope())
 app.UseSwagger();
 app.UseSwaggerUI(options =>
 {
-    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Server Equipment API v1");
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Event Management System API v1");
 });
 
 app.UseAuthentication();

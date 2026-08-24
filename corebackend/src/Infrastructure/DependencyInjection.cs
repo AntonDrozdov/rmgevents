@@ -17,11 +17,31 @@ public static class DependencyInjection
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(connectionString, npgsqlOptions =>
                 npgsqlOptions.EnableRetryOnFailure()));
+        
+        // Old services
         services.AddScoped<IImageRepository, ImageRepository>();
         services.AddScoped<IImageService, ImageService>();
         services.AddScoped<ICatalogRepository, CatalogRepository>();
         services.AddScoped<ICatalogService, CatalogService>();
         services.AddSingleton<IAdminTokenService, AdminTokenService>();
+        
+        // New repositories
+        services.AddScoped<ILoginRepository, LoginRepository>();
+        services.AddScoped<IEventRepository, EventRepository>();
+        services.AddScoped<IRoleRepository, RoleRepository>();
+        services.AddScoped<IPermissionRepository, PermissionRepository>();
+        services.AddScoped<IGroupRepository, GroupRepository>();
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IGuestRepository, GuestRepository>();
+        
+        // New services
+        services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IEventService, EventService>();
+        services.AddScoped<IGroupService, GroupService>();
+        services.AddScoped<IGuestService, GuestService>();
+        services.AddScoped<IUserService, UserService>();
+        services.AddScoped<IPermissionService, PermissionService>();
+        services.AddScoped<IRoleService, RoleService>();
 
         return services;
     }
