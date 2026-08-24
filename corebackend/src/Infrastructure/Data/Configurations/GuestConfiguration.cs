@@ -40,7 +40,7 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
         builder.Property(x => x.Phone)
             .HasColumnName("phone")
             .HasMaxLength(20);
-        
+
         builder.Property(x => x.Status)
             .HasColumnName("status")
             .IsRequired()
@@ -56,7 +56,7 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
         
         builder.Property(x => x.ApprovedAt)
             .HasColumnName("approved_at");
-        
+
         builder.HasOne(x => x.Event)
             .WithMany(x => x.Guests)
             .HasForeignKey(x => x.EventId)

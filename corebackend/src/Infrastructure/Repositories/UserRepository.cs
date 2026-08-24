@@ -20,6 +20,7 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
     {
         return await db.Users
             .Where(x => x.LoginId == loginId)
+            .Include(x => x.Event)
             .Include(x => x.Role)
             .Include(x => x.Group)
             .ToListAsync();

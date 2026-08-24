@@ -34,6 +34,13 @@ public class PermissionAuthorizationHandler(IPermissionService permissionService
         
         if (string.IsNullOrEmpty(routeEventId) || !Guid.TryParse(routeEventId, out var eventId))
         {
+            if (!requirement.RequiresGroup &&
+                await permissionService.HasPermissionInAnyEventAsync(userId, requirement.Permission))
+            {
+                context.Succeed(requirement);
+                return;
+            }
+
             context.Fail();
             return;
         }

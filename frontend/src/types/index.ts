@@ -1,4 +1,10 @@
-// Authentication
+export type PermissionCode =
+  | "create_event"
+  | "create_guest"
+  | "create_group"
+  | "approve_guest"
+  | "create_user";
+
 export interface LoginRequest {
   username: string;
   password: string;
@@ -15,11 +21,11 @@ export interface EventOption {
   roleName: string;
 }
 
-// Event
 export interface EventDto {
   id: string;
   name: string;
-  description?: string;
+  description?: string | null;
+  logoImageId?: string | null;
   ownerId: string;
   createdAt: string;
   isArchived: boolean;
@@ -28,66 +34,43 @@ export interface EventDto {
 export interface CreateEventRequest {
   name: string;
   description?: string;
+  logoImageId?: string;
 }
 
-export interface EventDetailDto extends EventDto {
-  roles: RoleDto[];
-  groups: GroupDto[];
-  users: UserDto[];
-  guests: GuestDto[];
+export interface EventDetailDto {
+  id: string;
+  name: string;
+  description?: string | null;
+  logoImageId?: string | null;
+  ownerId: string;
+  createdAt: string;
+  currentUserProfile: UserProfileDto;
 }
 
 export interface UserProfileDto {
   userId: string;
   displayName: string;
   roleName: string;
-  groupName: string;
-  permissions: string[];
+  groupId: string;
+  permissions: PermissionCode[];
 }
 
-// Role
-export interface RoleDto {
-  id: string;
-  eventId: string;
-  name: string;
-  permissions: PermissionDto[];
-  createdAt: string;
-}
-
-export interface CreateRoleRequest {
-  name: string;
-  permissionCodes: string[];
-}
-
-export interface UpdateRoleRequest {
-  name: string;
-  permissionCodes: string[];
-}
-
-// Permission
-export interface PermissionDto {
-  id: string;
-  code: string;
-  description: string;
-  createdAt: string;
-}
-
-// Group
 export interface GroupDto {
   id: string;
   eventId: string;
-  parentGroupId?: string;
+  parentGroupId?: string | null;
   name: string;
   quota: number;
   usedQuota: number;
   availableQuota: number;
+  children: GroupDto[];
   createdAt: string;
 }
 
 export interface CreateGroupRequest {
   name: string;
   quota: number;
-  parentGroupId?: string;
+  parentGroupId?: string | null;
 }
 
 export interface UpdateGroupRequest {
@@ -95,11 +78,15 @@ export interface UpdateGroupRequest {
   quota: number;
 }
 
-export interface GroupTreeDto extends GroupDto {
+export interface GroupTreeDto {
+  id: string;
+  name: string;
+  quota: number;
+  usedQuota: number;
+  availableQuota: number;
   children: GroupTreeDto[];
 }
 
-// User
 export interface UserDto {
   id: string;
   loginId: string;
@@ -107,7 +94,6 @@ export interface UserDto {
   roleId: string;
   groupId: string;
   displayName: string;
-  meta?: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -118,25 +104,16 @@ export interface CreateUserRequest {
   groupId: string;
 }
 
-export interface UpdateUserRequest {
-  displayName: string;
-  roleId: string;
-  groupId: string;
-}
-
-// Guest
 export interface GuestDto {
   id: string;
   eventId: string;
   groupId: string;
-  createdByUserId: string;
   name: string;
-  email?: string;
-  phone?: string;
-  status: "pending" | "approved" | "rejected";
-  meta?: Record<string, unknown>;
+  email?: string | null;
+  phone?: string | null;
+  status: "pending" | "approved" | "rejected" | string;
   createdAt: string;
-  approvedAt?: string;
+  approvedAt?: string | null;
 }
 
 export interface CreateGuestRequest {
@@ -147,10 +124,10 @@ export interface CreateGuestRequest {
 }
 
 export interface ApproveGuestRequest {
-  status: "approved" | "rejected";
+  guestId: string;
+  approve: boolean;
 }
 
-// Auth Context
 export interface AuthContextType {
   token: string | null;
   currentUser: UserProfileDto | null;
@@ -158,5 +135,6 @@ export interface AuthContextType {
   events: EventOption[];
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
-  selectEvent: (event: EventOption) => void;
+  selectEvent: (event: EventOption) => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }

@@ -12,48 +12,19 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260824141839_AddEventManagementSystem")]
-    partial class AddEventManagementSystem
+    [Migration("20260824184049_InitialCorebackendSchema")]
+    partial class InitialCorebackendSchema
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
+                .HasDefaultSchema("corebackend")
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
-            modelBuilder.Entity("Application.Entities.Category", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<Guid>("ImageId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ImageId");
-
-                    b.ToTable("categories", (string)null);
-                });
 
             modelBuilder.Entity("Application.Entities.Event", b =>
                 {
@@ -76,6 +47,10 @@ namespace Infrastructure.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("is_archived");
 
+                    b.Property<Guid?>("LogoImageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("logo_image_id");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -88,9 +63,11 @@ namespace Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("LogoImageId");
+
                     b.HasIndex("OwnerId");
 
-                    b.ToTable("events", (string)null);
+                    b.ToTable("events", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.Group", b =>
@@ -128,7 +105,7 @@ namespace Infrastructure.Migrations
                     b.HasIndex("EventId", "Name")
                         .IsUnique();
 
-                    b.ToTable("groups", (string)null);
+                    b.ToTable("groups", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.Guest", b =>
@@ -193,7 +170,7 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("GroupId");
 
-                    b.ToTable("guests", (string)null);
+                    b.ToTable("guests", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.ImageEntity", b =>
@@ -226,7 +203,7 @@ namespace Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("images", (string)null);
+                    b.ToTable("images", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.Login", b =>
@@ -255,7 +232,7 @@ namespace Infrastructure.Migrations
                     b.HasIndex("Username")
                         .IsUnique();
 
-                    b.ToTable("logins", (string)null);
+                    b.ToTable("logins", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.Permission", b =>
@@ -285,42 +262,7 @@ namespace Infrastructure.Migrations
                     b.HasIndex("Code")
                         .IsUnique();
 
-                    b.ToTable("permissions", (string)null);
-                });
-
-            modelBuilder.Entity("Application.Entities.Product", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CategoryId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<Guid>("ImageId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CategoryId");
-
-                    b.HasIndex("ImageId");
-
-                    b.ToTable("products", (string)null);
+                    b.ToTable("permissions", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.Role", b =>
@@ -348,7 +290,7 @@ namespace Infrastructure.Migrations
                     b.HasIndex("EventId", "Name")
                         .IsUnique();
 
-                    b.ToTable("roles", (string)null);
+                    b.ToTable("roles", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.RolePermission", b =>
@@ -365,7 +307,7 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("PermissionId");
 
-                    b.ToTable("role_permissions", (string)null);
+                    b.ToTable("role_permissions", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.User", b =>
@@ -415,25 +357,23 @@ namespace Infrastructure.Migrations
                     b.HasIndex("LoginId", "EventId")
                         .IsUnique();
 
-                    b.ToTable("users", (string)null);
-                });
-
-            modelBuilder.Entity("Application.Entities.Category", b =>
-                {
-                    b.HasOne("Application.Entities.ImageEntity", null)
-                        .WithMany()
-                        .HasForeignKey("ImageId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                    b.ToTable("users", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.Event", b =>
                 {
+                    b.HasOne("Application.Entities.ImageEntity", "LogoImage")
+                        .WithMany("LogoEvents")
+                        .HasForeignKey("LogoImageId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Application.Entities.User", "Owner")
                         .WithMany("OwnedEvents")
                         .HasForeignKey("OwnerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("LogoImage");
 
                     b.Navigation("Owner");
                 });
@@ -481,21 +421,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("Event");
 
                     b.Navigation("Group");
-                });
-
-            modelBuilder.Entity("Application.Entities.Product", b =>
-                {
-                    b.HasOne("Application.Entities.Category", null)
-                        .WithMany("Products")
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Application.Entities.ImageEntity", null)
-                        .WithMany()
-                        .HasForeignKey("ImageId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Application.Entities.Role", b =>
@@ -563,11 +488,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("Role");
                 });
 
-            modelBuilder.Entity("Application.Entities.Category", b =>
-                {
-                    b.Navigation("Products");
-                });
-
             modelBuilder.Entity("Application.Entities.Event", b =>
                 {
                     b.Navigation("Groups");
@@ -586,6 +506,11 @@ namespace Infrastructure.Migrations
                     b.Navigation("Guests");
 
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("Application.Entities.ImageEntity", b =>
+                {
+                    b.Navigation("LogoEvents");
                 });
 
             modelBuilder.Entity("Application.Entities.Login", b =>

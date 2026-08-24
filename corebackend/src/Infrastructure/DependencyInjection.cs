@@ -16,13 +16,13 @@ public static class DependencyInjection
     {
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(connectionString, npgsqlOptions =>
-                npgsqlOptions.EnableRetryOnFailure()));
+            {
+                npgsqlOptions.EnableRetryOnFailure();
+                npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "corebackend");
+            }));
         
-        // Old services
         services.AddScoped<IImageRepository, ImageRepository>();
         services.AddScoped<IImageService, ImageService>();
-        services.AddScoped<ICatalogRepository, CatalogRepository>();
-        services.AddScoped<ICatalogService, CatalogService>();
         services.AddSingleton<IAdminTokenService, AdminTokenService>();
         
         // New repositories

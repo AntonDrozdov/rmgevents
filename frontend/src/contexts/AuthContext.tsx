@@ -4,6 +4,18 @@ import { AuthContextType, EventOption, UserProfileDto } from "../types";
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const readJson = <T,>(key: string): T | null => {
+  const value = localStorage.getItem(key);
+  if (!value) return null;
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfileDto | null>(null);
@@ -11,50 +23,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [events, setEvents] = useState<EventOption[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Restore session on mount
-  useEffect(() => {
-    const savedToken = localStorage.getItem("token");
-    const savedEvent = localStorage.getItem("currentEvent");
-    
-    if (savedToken) {
-      setToken(savedToken);
-      
-      if (savedEvent) {
-        const event = JSON.parse(savedEvent);
-        setCurrentEvent(event);
-        
-        // Fetch user profile
-        fetchUserProfile(event.id, savedToken);
-      }
-    }
-    
-    setLoading(false);
-  }, []);
-
-  const fetchUserProfile = async (eventId: string, authToken: string) => {
-    try {
-      const profile = await apiClient.getCurrentUserProfile(eventId);
-      setCurrentUser(profile);
-    } catch (error) {
-      console.error("Failed to fetch user profile:", error);
-    }
+  const fetchUserProfile = async (eventId: string) => {
+    const profile = await apiClient.getCurrentUserProfile(eventId);
+    setCurrentUser(profile);
   };
 
-  const login = async (username: string, password: string) => {
-    try {
-      const response = await apiClient.login({ username, password });
-      setToken(response.token);
-      setEvents(response.events);
-      
-      if (response.events.length > 0) {
-        const defaultEvent = response.events[0];
-        setCurrentEvent(defaultEvent);
-        localStorage.setItem("currentEvent", JSON.stringify(defaultEvent));
-        await fetchUserProfile(defaultEvent.id, response.token);
+  useEffect(() => {
+    const restoreSession = async () => {
+      const savedToken = localStorage.getItem("token");
+      const savedEvent = readJson<EventOption>("currentEvent");
+      const savedEvents = readJson<EventOption[]>("events") ?? [];
+
+      if (!savedToken) {
+        setLoading(false);
+        return;
       }
-    } catch (error) {
-      console.error("Login failed:", error);
-      throw error;
+
+      apiClient.setToken(savedToken);
+      setToken(savedToken);
+      setEvents(savedEvents);
+
+      if (savedEvent) {
+        setCurrentEvent(savedEvent);
+        try {
+          await fetchUserProfile(savedEvent.id);
+        } catch {
+          apiClient.clearToken();
+          localStorage.removeItem("currentEvent");
+          localStorage.removeItem("events");
+          setToken(null);
+          setCurrentEvent(null);
+          setEvents([]);
+        }
+      }
+
+      setLoading(false);
+    };
+
+    restoreSession();
+  }, []);
+
+  const login = async (username: string, password: string) => {
+    const response = await apiClient.login({ username, password });
+    setToken(response.token);
+    setEvents(response.events);
+    localStorage.setItem("events", JSON.stringify(response.events));
+
+    const defaultEvent = response.events[0] ?? null;
+    setCurrentEvent(defaultEvent);
+
+    if (defaultEvent) {
+      localStorage.setItem("currentEvent", JSON.stringify(defaultEvent));
+      await fetchUserProfile(defaultEvent.id);
+    } else {
+      localStorage.removeItem("currentEvent");
+      setCurrentUser(null);
     }
   };
 
@@ -64,32 +87,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentEvent(null);
     setEvents([]);
     apiClient.clearToken();
-    localStorage.removeItem("token");
     localStorage.removeItem("currentEvent");
+    localStorage.removeItem("events");
   };
 
-  const selectEvent = (event: EventOption) => {
+  const selectEvent = async (event: EventOption) => {
     setCurrentEvent(event);
     localStorage.setItem("currentEvent", JSON.stringify(event));
-    if (token) {
-      fetchUserProfile(event.id, token);
+    await fetchUserProfile(event.id);
+  };
+
+  const refreshProfile = async () => {
+    if (currentEvent) {
+      await fetchUserProfile(currentEvent.id);
     }
   };
 
   if (loading) {
-    return <div>Loading...</div>;
+    return <div className="app-loading">Загрузка...</div>;
   }
 
   return (
     <AuthContext.Provider
       value={{
-        token: token || "",
+        token,
         currentUser,
         currentEvent,
         events,
         login,
         logout,
         selectEvent,
+        refreshProfile,
       }}
     >
       {children}

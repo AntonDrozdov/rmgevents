@@ -1,9 +1,11 @@
 import React from "react";
+import { Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { PermissionCode } from "../types";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredPermission?: string;
+  requiredPermission?: PermissionCode;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
@@ -13,20 +15,17 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const { token, currentUser } = useAuth();
 
   if (!token) {
-    return (
-      <div style={{ padding: "20px", textAlign: "center" }}>
-        <h2>Доступ запрещен</h2>
-        <p>Пожалуйста, войдите в систему</p>
-      </div>
-    );
+    return <Navigate to="/login" replace />;
   }
 
   if (requiredPermission && currentUser && !currentUser.permissions.includes(requiredPermission)) {
     return (
-      <div style={{ padding: "20px", textAlign: "center" }}>
-        <h2>Доступ запрещен</h2>
-        <p>У вас недостаточно прав для доступа к этой странице</p>
-      </div>
+      <main className="page-shell">
+        <section className="empty-state">
+          <h1>Доступ запрещен</h1>
+          <p>У вашей роли нет права для открытия этой страницы.</p>
+        </section>
+      </main>
     );
   }
 

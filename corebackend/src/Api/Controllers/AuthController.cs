@@ -13,18 +13,15 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
     {
-        var token = await authService.LoginAsync(request.Username, request.Password);
-        if (token == null)
+        var loginResult = await authService.LoginAsync(request.Username, request.Password);
+        if (loginResult == null)
             return Unauthorized();
         
-        // Get available events for this login
-        // Note: We need to get loginId from the token, but since login was successful,
-        // we can get the user from the login
-        var login = await authService.GetAvailableEventsAsync(Guid.Parse(request.Username));
+        var login = await authService.GetAvailableEventsAsync(loginResult.Value.LoginId);
         
         var events = login.Select(l => new EventOption(l.EventId, l.EventName, l.RoleName)).ToList();
         
-        return Ok(new LoginResponse(token, events));
+        return Ok(new LoginResponse(loginResult.Value.Token, events));
     }
     
     [AllowAnonymous]

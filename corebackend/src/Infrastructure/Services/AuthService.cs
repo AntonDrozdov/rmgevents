@@ -13,13 +13,13 @@ public sealed class AuthService(
     IUserRepository userRepository,
     IConfiguration configuration) : IAuthService
 {
-    public async Task<string?> LoginAsync(string username, string password)
+    public async Task<(Guid LoginId, string Token)?> LoginAsync(string username, string password)
     {
         var login = await loginRepository.GetByUsernameAsync(username);
         if (login == null || !VerifyPassword(password, login.PasswordHash))
             return null;
         
-        return CreateToken(login.Id, login.Username);
+        return (login.Id, CreateToken(login.Id, login.Username));
     }
     
     public async Task<List<(Guid EventId, string EventName, string RoleName)>> GetAvailableEventsAsync(Guid loginId)

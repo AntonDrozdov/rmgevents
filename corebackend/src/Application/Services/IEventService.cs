@@ -2,7 +2,7 @@ namespace Application.Services;
 
 public interface IEventService
 {
-    Task<Entities.Event> CreateEventAsync(Guid ownerId, string name, string? description);
+    Task<Entities.Event> CreateEventAsync(Guid ownerId, string name, string? description, Guid? logoImageId = null);
     Task<Entities.Event?> GetEventAsync(Guid eventId);
     Task<List<Entities.Event>> GetEventsByUserAsync(Guid userId);
     Task<List<Entities.Event>> GetEventsByOwnerAsync(Guid ownerId);

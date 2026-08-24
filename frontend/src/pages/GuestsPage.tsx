@@ -1,14 +1,22 @@
-import React, { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
-import { GuestDto } from "../types";
+import { GroupTreeDto, GuestDto } from "../types";
+import { flattenGroups, groupNameById } from "../utils/groups";
+
+const statusLabel: Record<string, string> = {
+  pending: "Ожидает",
+  approved: "Одобрен",
+  rejected: "Отклонен",
+};
 
 export const GuestsPage: React.FC = () => {
-  const { eventId } = useParams<{ eventId: string }>();
-  const { token, currentUser } = useAuth();
+  const { eventId = "" } = useParams<{ eventId: string }>();
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
   const [guests, setGuests] = useState<GuestDto[]>([]);
+  const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -19,329 +27,184 @@ export const GuestsPage: React.FC = () => {
     groupId: "",
   });
 
-  useEffect(() => {
-    if (!token || !eventId) {
-      navigate("/login");
-      return;
-    }
+  const canCreate = currentUser?.permissions.includes("create_guest") ?? false;
+  const canApprove = currentUser?.permissions.includes("approve_guest") ?? false;
+  const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
 
-    if (!currentUser?.permissions.includes("create_guest")) {
-      setError("У вас нет прав для управления гостями");
-      return;
-    }
-
-    loadGuests();
-  }, [token, eventId, currentUser, navigate]);
-
-  const loadGuests = async () => {
+  const loadData = async () => {
     if (!eventId) return;
 
     setLoading(true);
     setError("");
 
     try {
-      const data = await apiClient.getGuests(eventId);
-      setGuests(data);
+      const [guestList, groupTree] = await Promise.all([
+        apiClient.getGuests(eventId),
+        apiClient.getGroupTree(eventId),
+      ]);
+      setGuests(guestList);
+      setGroups(groupTree);
+
+      if (!formData.groupId && groupTree.length > 0) {
+        setFormData((value) => ({ ...value, groupId: flattenGroups(groupTree)[0]?.id ?? "" }));
+      }
     } catch (err) {
-      setError("Ошибка загрузки гостей");
+      setError("Ошибка загрузки гостей.");
       console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateGuest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!eventId) return;
+  useEffect(() => {
+    if (!canCreate && !canApprove) {
+      setError("У вас нет прав для управления гостями.");
+      setLoading(false);
+      return;
+    }
+
+    loadData();
+  }, [eventId, canCreate, canApprove]);
+
+  const handleCreateGuest = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
 
     try {
       await apiClient.createGuest(eventId, {
-        name: formData.name,
-        email: formData.email || undefined,
-        phone: formData.phone || undefined,
+        name: formData.name.trim(),
+        email: formData.email.trim() || undefined,
+        phone: formData.phone.trim() || undefined,
         groupId: formData.groupId,
       });
 
-      setFormData({ name: "", email: "", phone: "", groupId: "" });
+      setFormData({ name: "", email: "", phone: "", groupId: flatGroups[0]?.id ?? "" });
       setShowForm(false);
-      loadGuests();
+      await loadData();
     } catch (err) {
-      setError("Ошибка создания гостя");
+      setError("Не удалось создать гостя. Проверьте группу и доступную квоту.");
       console.error(err);
     }
   };
 
-  const handleApproveGuest = async (guestId: string) => {
-    if (!eventId) return;
+  const updateGuestStatus = async (guestId: string, approve: boolean) => {
+    setError("");
 
     try {
-      await apiClient.approveGuest(eventId, guestId, { status: "approved" });
-      loadGuests();
+      await apiClient.approveGuest(eventId, { guestId, approve });
+      await loadData();
     } catch (err) {
-      console.error("Ошибка при одобрении гостя:", err);
-    }
-  };
-
-  const handleRejectGuest = async (guestId: string) => {
-    if (!eventId) return;
-
-    try {
-      await apiClient.approveGuest(eventId, guestId, { status: "rejected" });
-      loadGuests();
-    } catch (err) {
-      console.error("Ошибка при отклонении гостя:", err);
+      setError("Не удалось обновить статус гостя.");
+      console.error(err);
     }
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h1>Управление гостями</h1>
-        <button onClick={() => navigate("/dashboard")} style={styles.backButton}>
-          ← Назад
-        </button>
-      </div>
-
-      {error && <div style={styles.error}>{error}</div>}
-
-      {currentUser?.permissions.includes("create_guest") && (
-        <button onClick={() => setShowForm(!showForm)} style={styles.createButton}>
-          {showForm ? "Отмена" : "+ Добавить гостя"}
-        </button>
-      )}
-
-      {showForm && (
-        <form onSubmit={handleCreateGuest} style={styles.form}>
-          <div style={styles.formGroup}>
-            <label>Имя *</label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
-              style={styles.input}
-            />
-          </div>
-          <div style={styles.formGroup}>
-            <label>Email</label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              style={styles.input}
-            />
-          </div>
-          <div style={styles.formGroup}>
-            <label>Телефон</label>
-            <input
-              type="tel"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              style={styles.input}
-            />
-          </div>
-          <div style={styles.formGroup}>
-            <label>ID группы *</label>
-            <input
-              type="text"
-              value={formData.groupId}
-              onChange={(e) => setFormData({ ...formData, groupId: e.target.value })}
-              required
-              style={styles.input}
-              placeholder="UUID группы"
-            />
-          </div>
-          <button type="submit" style={styles.submitButton}>
-            Создать
-          </button>
-        </form>
-      )}
-
-      {loading ? (
-        <div style={styles.loading}>Загрузка...</div>
-      ) : guests.length === 0 ? (
-        <div style={styles.empty}>Гостей не найдено</div>
-      ) : (
-        <div style={styles.table}>
-          <table>
-            <thead>
-              <tr>
-                <th>Имя</th>
-                <th>Email</th>
-                <th>Телефон</th>
-                <th>Статус</th>
-                <th>Создан</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {guests.map((guest) => (
-                <tr key={guest.id}>
-                  <td>{guest.name}</td>
-                  <td>{guest.email || "-"}</td>
-                  <td>{guest.phone || "-"}</td>
-                  <td>
-                    <span
-                      style={{
-                        ...styles.status,
-                        ...(guest.status === "pending"
-                          ? styles.statusPending
-                          : guest.status === "approved"
-                          ? styles.statusApproved
-                          : styles.statusRejected),
-                      }}
-                    >
-                      {guest.status}
-                    </span>
-                  </td>
-                  <td>{new Date(guest.createdAt).toLocaleDateString()}</td>
-                  <td style={styles.actions}>
-                    {guest.status === "pending" &&
-                      currentUser?.permissions.includes("approve_guest") && (
-                        <>
-                          <button
-                            onClick={() => handleApproveGuest(guest.id)}
-                            style={styles.approveButton}
-                          >
-                            ✓
-                          </button>
-                          <button
-                            onClick={() => handleRejectGuest(guest.id)}
-                            style={styles.rejectButton}
-                          >
-                            ✕
-                          </button>
-                        </>
-                      )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <main className="page-shell">
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">Мероприятие</p>
+          <h1>Гости</h1>
+          <p className="muted">Список гостей, их группы и статус согласования.</p>
         </div>
-      )}
-    </div>
-  );
-};
+        <button className="secondary-button" onClick={() => navigate("/dashboard")}>Назад</button>
+      </header>
 
-const styles = {
-  container: {
-    padding: "20px",
-    maxWidth: "1200px",
-    margin: "0 auto",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: "20px",
-  },
-  backButton: {
-    padding: "8px 16px",
-    backgroundColor: "#666",
-    color: "white",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-  },
-  createButton: {
-    padding: "10px 20px",
-    backgroundColor: "#28a745",
-    color: "white",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-    marginBottom: "20px",
-  },
-  form: {
-    backgroundColor: "white",
-    padding: "20px",
-    borderRadius: "8px",
-    marginBottom: "20px",
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-    gap: "15px",
-  },
-  formGroup: {
-    display: "flex",
-    flexDirection: "column" as const,
-  },
-  input: {
-    padding: "8px",
-    border: "1px solid #ddd",
-    borderRadius: "4px",
-    fontSize: "14px",
-  },
-  submitButton: {
-    padding: "10px 20px",
-    backgroundColor: "#007bff",
-    color: "white",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-    gridColumn: "1 / -1",
-  },
-  table: {
-    backgroundColor: "white",
-    borderRadius: "8px",
-    overflow: "hidden",
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
-  },
-  status: {
-    padding: "4px 8px",
-    borderRadius: "3px",
-    fontSize: "12px",
-    fontWeight: "600" as const,
-  },
-  statusPending: {
-    backgroundColor: "#fff3cd",
-    color: "#856404",
-  },
-  statusApproved: {
-    backgroundColor: "#d4edda",
-    color: "#155724",
-  },
-  statusRejected: {
-    backgroundColor: "#f8d7da",
-    color: "#721c24",
-  },
-  actions: {
-    display: "flex",
-    gap: "5px",
-  },
-  approveButton: {
-    padding: "4px 8px",
-    backgroundColor: "#28a745",
-    color: "white",
-    border: "none",
-    borderRadius: "3px",
-    cursor: "pointer",
-    fontSize: "12px",
-  },
-  rejectButton: {
-    padding: "4px 8px",
-    backgroundColor: "#dc3545",
-    color: "white",
-    border: "none",
-    borderRadius: "3px",
-    cursor: "pointer",
-    fontSize: "12px",
-  },
-  loading: {
-    textAlign: "center" as const,
-    padding: "40px",
-    color: "#666",
-  },
-  empty: {
-    textAlign: "center" as const,
-    padding: "40px",
-    color: "#999",
-  },
-  error: {
-    padding: "15px",
-    backgroundColor: "#ffebee",
-    color: "#d32f2f",
-    borderRadius: "4px",
-    marginBottom: "20px",
-  },
+      {error && <div className="alert alert-error">{error}</div>}
+
+      {canCreate && (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2>Добавление гостя</h2>
+              <p className="muted">Гость создаётся в выбранной группе с учетом квоты.</p>
+            </div>
+            <button className="primary-button" onClick={() => setShowForm((value) => !value)}>
+              {showForm ? "Скрыть форму" : "Добавить гостя"}
+            </button>
+          </div>
+
+          {showForm && (
+            <form className="form-grid" onSubmit={handleCreateGuest}>
+              <label className="field">
+                <span>Имя</span>
+                <input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} required />
+              </label>
+              <label className="field">
+                <span>Email</span>
+                <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} />
+              </label>
+              <label className="field">
+                <span>Телефон</span>
+                <input type="tel" value={formData.phone} onChange={(event) => setFormData({ ...formData, phone: event.target.value })} />
+              </label>
+              <label className="field">
+                <span>Группа</span>
+                <select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} required>
+                  {flatGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="primary-button form-submit" type="submit">Создать гостя</button>
+            </form>
+          )}
+        </section>
+      )}
+
+      <section className="panel">
+        <div className="section-heading">
+          <h2>Список гостей</h2>
+          <span className="badge">{guests.length}</span>
+        </div>
+
+        {loading ? (
+          <div className="empty-state compact">Загрузка...</div>
+        ) : guests.length === 0 ? (
+          <div className="empty-state compact">Гостей пока нет.</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Имя</th>
+                  <th>Контакты</th>
+                  <th>Группа</th>
+                  <th>Статус</th>
+                  <th>Создан</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {guests.map((guest) => (
+                  <tr key={guest.id}>
+                    <td>{guest.name}</td>
+                    <td>
+                      <div>{guest.email || "-"}</div>
+                      <small>{guest.phone || ""}</small>
+                    </td>
+                    <td>{groupNameById(groups, guest.groupId)}</td>
+                    <td><span className={`status ${guest.status}`}>{statusLabel[guest.status] ?? guest.status}</span></td>
+                    <td>{new Date(guest.createdAt).toLocaleDateString("ru-RU")}</td>
+                    <td>
+                      {guest.status === "pending" && canApprove ? (
+                        <div className="inline-actions">
+                          <button className="success-button" onClick={() => updateGuestStatus(guest.id, true)}>Одобрить</button>
+                          <button className="danger-button" onClick={() => updateGuestStatus(guest.id, false)}>Отклонить</button>
+                        </div>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </main>
+  );
 };

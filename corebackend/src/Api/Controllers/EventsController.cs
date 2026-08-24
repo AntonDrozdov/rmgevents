@@ -23,6 +23,7 @@ public sealed class EventsController(
             e.Id,
             e.Name,
             e.Description,
+            e.LogoImageId,
             e.OwnerId,
             e.CreatedAt,
             e.IsArchived))
@@ -52,6 +53,7 @@ public sealed class EventsController(
             @event.Id,
             @event.Name,
             @event.Description,
+            @event.LogoImageId,
             @event.OwnerId,
             @event.CreatedAt,
             userProfile));
@@ -78,7 +80,7 @@ public sealed class EventsController(
     public async Task<ActionResult<EventDto>> CreateEvent(CreateEventRequest request)
     {
         var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var @event = await eventService.CreateEventAsync(userId, request.Name, request.Description);
+        var @event = await eventService.CreateEventAsync(userId, request.Name, request.Description, request.LogoImageId);
         
         return Created(
             $"/events/{@event.Id}",
@@ -86,6 +88,7 @@ public sealed class EventsController(
                 @event.Id,
                 @event.Name,
                 @event.Description,
+                @event.LogoImageId,
                 @event.OwnerId,
                 @event.CreatedAt,
                 @event.IsArchived));

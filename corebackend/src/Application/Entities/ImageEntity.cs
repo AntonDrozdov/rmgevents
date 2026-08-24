@@ -8,4 +8,6 @@ public sealed class ImageEntity
     public required byte[] Data { get; set; }
     public string? AltText { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+
+    public ICollection<Event> LogoEvents { get; set; } = [];
 }

@@ -7,13 +7,18 @@ public sealed class EventService(
     IEventRepository eventRepository,
     IGroupRepository groupRepository) : IEventService
 {
-    public async Task<Application.Entities.Event> CreateEventAsync(Guid ownerId, string name, string? description)
+    public async Task<Application.Entities.Event> CreateEventAsync(
+        Guid ownerId,
+        string name,
+        string? description,
+        Guid? logoImageId = null)
     {
         var @event = new Application.Entities.Event
         {
             Id = Guid.NewGuid(),
             Name = name,
             Description = description,
+            LogoImageId = logoImageId,
             OwnerId = ownerId,
             CreatedAt = DateTimeOffset.UtcNow,
             IsArchived = false

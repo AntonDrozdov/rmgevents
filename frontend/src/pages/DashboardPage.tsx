@@ -1,329 +1,177 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
-import { EventDetailDto, EventOption } from "../types";
+import { EventDetailDto, GroupTreeDto, GuestDto, UserDto } from "../types";
+import { flattenGroups } from "../utils/groups";
 
 export const DashboardPage: React.FC = () => {
-  const { token, currentUser, currentEvent, events, selectEvent, logout } = useAuth();
+  const { currentUser, currentEvent, events, selectEvent, logout } = useAuth();
   const [eventDetails, setEventDetails] = useState<EventDetailDto | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [groups, setGroups] = useState<GroupTreeDto[]>([]);
+  const [guests, setGuests] = useState<GuestDto[]>([]);
+  const [users, setUsers] = useState<UserDto[]>([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
+  const permissions = currentUser?.permissions ?? [];
+  const groupCount = useMemo(() => flattenGroups(groups).length, [groups]);
+  const approvedGuests = guests.filter((guest) => guest.status === "approved").length;
+  const pendingGuests = guests.filter((guest) => guest.status === "pending").length;
+
   useEffect(() => {
-    if (!token) {
-      navigate("/login");
-      return;
-    }
+    const loadDashboard = async () => {
+      if (!currentEvent) return;
 
-    if (currentEvent) {
-      loadEventDetails();
-    }
-  }, [currentEvent, token, navigate]);
+      setLoading(true);
+      setError("");
 
-  const loadEventDetails = async () => {
-    if (!currentEvent) return;
-    
-    setLoading(true);
-    setError("");
-    
-    try {
-      const details = await apiClient.getEvent(currentEvent.id);
-      setEventDetails(details);
-    } catch (err) {
-      setError("Ошибка загрузки данных мероприятия");
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+      try {
+        const [details, groupTree, guestList, userList] = await Promise.all([
+          apiClient.getEvent(currentEvent.id),
+          apiClient.getGroupTree(currentEvent.id),
+          apiClient.getGuests(currentEvent.id),
+          apiClient.getUsers(currentEvent.id),
+        ]);
+
+        setEventDetails(details);
+        setGroups(groupTree);
+        setGuests(guestList);
+        setUsers(userList);
+      } catch (err) {
+        setError("Не удалось загрузить данные мероприятия.");
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDashboard();
+  }, [currentEvent]);
 
   const handleLogout = () => {
     logout();
-    navigate("/login");
+    navigate("/login", { replace: true });
   };
 
+  if (!currentEvent) {
+    return (
+      <main className="page-shell">
+        <section className="empty-state">
+          <h1>Нет доступных мероприятий</h1>
+          <p>После входа система должна вернуть хотя бы одно мероприятие с ролью пользователя.</p>
+          <button className="secondary-button" onClick={handleLogout}>Выйти</button>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <div style={styles.headerLeft}>
-          <h1 style={styles.title}>Панель управления</h1>
-          {currentEvent && (
-            <p style={styles.subtitle}>Мероприятие: {currentEvent.name} ({currentEvent.roleName})</p>
-          )}
+    <main className="app-layout">
+      <aside className="sidebar">
+        <div>
+          <p className="eyebrow">RMG Events</p>
+          <h1>Панель управления</h1>
         </div>
-        <div style={styles.headerRight}>
-          <span style={styles.userInfo}>{currentUser?.displayName}</span>
-          <button onClick={handleLogout} style={styles.logoutBtn}>
-            Выход
-          </button>
-        </div>
-      </header>
 
-      <div style={styles.mainContent}>
-        {events.length > 1 && (
-          <aside style={styles.sidebar}>
-            <h3 style={styles.sidebarTitle}>Выбор мероприятия</h3>
-            <div style={styles.eventList}>
-              {events.map((event) => (
-                <button
-                  key={event.id}
-                  onClick={() => selectEvent(event)}
-                  style={{
-                    ...styles.eventItem,
-                    ...(currentEvent?.id === event.id ? styles.eventItemActive : {}),
-                  }}
-                >
-                  <div style={styles.eventName}>{event.name}</div>
-                  <div style={styles.eventRole}>{event.roleName}</div>
-                </button>
-              ))}
-            </div>
-          </aside>
+        <div className="event-switcher">
+          <span className="sidebar-label">Мероприятия</span>
+          {events.map((event) => (
+            <button
+              className={event.id === currentEvent.id ? "event-button active" : "event-button"}
+              key={event.id}
+              onClick={() => selectEvent(event)}
+              type="button"
+            >
+              <span>{event.name}</span>
+              <small>{event.roleName}</small>
+            </button>
+          ))}
+        </div>
+
+        <button className="secondary-button full-width" onClick={handleLogout}>Выйти</button>
+      </aside>
+
+      <section className="content">
+        <header className="page-header">
+          <div>
+            <p className="eyebrow">Текущее мероприятие</p>
+            <h2>{eventDetails?.name ?? currentEvent.name}</h2>
+            <p className="muted">{eventDetails?.description || "Описание мероприятия не заполнено."}</p>
+          </div>
+          <div className="profile-pill">
+            <span>{currentUser?.displayName ?? "Пользователь"}</span>
+            <small>{currentUser?.roleName ?? currentEvent.roleName}</small>
+          </div>
+        </header>
+
+        {error && <div className="alert alert-error">{error}</div>}
+        {loading && <div className="panel">Загрузка данных...</div>}
+
+        {!loading && (
+          <>
+            <section className="stats-grid">
+              <article className="metric">
+                <span>Группы</span>
+                <strong>{groupCount}</strong>
+              </article>
+              <article className="metric">
+                <span>Гости</span>
+                <strong>{guests.length}</strong>
+              </article>
+              <article className="metric">
+                <span>Ожидают решения</span>
+                <strong>{pendingGuests}</strong>
+              </article>
+              <article className="metric">
+                <span>Одобрены</span>
+                <strong>{approvedGuests}</strong>
+              </article>
+              <article className="metric">
+                <span>Сотрудники</span>
+                <strong>{users.length}</strong>
+              </article>
+            </section>
+
+            <section className="panel">
+              <div className="section-heading">
+                <div>
+                  <h3>Доступные действия</h3>
+                  <p className="muted">Интерфейс показывает операции по разрешениям текущей роли.</p>
+                </div>
+              </div>
+
+              <div className="action-grid">
+                {(permissions.includes("create_guest") || permissions.includes("approve_guest")) && (
+                  <button className="action-card" onClick={() => navigate(`/events/${currentEvent.id}/guests`)}>
+                    <strong>Гости</strong>
+                    <span>Создание, просмотр и согласование заявок</span>
+                  </button>
+                )}
+                {permissions.includes("create_group") && (
+                  <button className="action-card" onClick={() => navigate(`/events/${currentEvent.id}/groups`)}>
+                    <strong>Группы</strong>
+                    <span>Иерархия групп и квоты вместимости</span>
+                  </button>
+                )}
+                {permissions.includes("create_user") && (
+                  <button className="action-card" onClick={() => navigate(`/events/${currentEvent.id}/users`)}>
+                    <strong>Сотрудники</strong>
+                    <span>Назначение пользователей на роли и группы</span>
+                  </button>
+                )}
+                {permissions.includes("create_event") && (
+                  <button className="action-card" onClick={() => navigate("/events/create")}>
+                    <strong>Новое мероприятие</strong>
+                    <span>Создание мероприятия и стартовой группы</span>
+                  </button>
+                )}
+              </div>
+            </section>
+          </>
         )}
-
-        <main style={styles.content}>
-          {loading ? (
-            <div style={styles.loading}>Загрузка...</div>
-          ) : error ? (
-            <div style={styles.error}>{error}</div>
-          ) : eventDetails ? (
-            <div>
-              <section style={styles.section}>
-                <h2 style={styles.sectionTitle}>Информация о мероприятии</h2>
-                <div style={styles.infoGrid}>
-                  <div style={styles.infoItem}>
-                    <label>Название</label>
-                    <p>{eventDetails.name}</p>
-                  </div>
-                  <div style={styles.infoItem}>
-                    <label>Описание</label>
-                    <p>{eventDetails.description || "Нет описания"}</p>
-                  </div>
-                  <div style={styles.infoItem}>
-                    <label>Статус</label>
-                    <p>{eventDetails.isArchived ? "Архивирован" : "Активен"}</p>
-                  </div>
-                </div>
-              </section>
-
-              <section style={styles.section}>
-                <h2 style={styles.sectionTitle}>Быстрые ссылки</h2>
-                <div style={styles.quickLinks}>
-                  {currentUser?.permissions.includes("create_guest") && (
-                    <button style={styles.linkButton} onClick={() => navigate(`/events/${currentEvent?.id}/guests`)}>
-                      Управление гостями
-                    </button>
-                  )}
-                  {currentUser?.permissions.includes("create_group") && (
-                    <button style={styles.linkButton} onClick={() => navigate(`/events/${currentEvent?.id}/groups`)}>
-                      Управление группами
-                    </button>
-                  )}
-                  {currentUser?.permissions.includes("create_user") && (
-                    <button style={styles.linkButton} onClick={() => navigate(`/events/${currentEvent?.id}/users`)}>
-                      Управление пользователями
-                    </button>
-                  )}
-                  {currentUser?.permissions.includes("create_event") && (
-                    <button style={styles.linkButton} onClick={() => navigate("/events/create")}>
-                      Создать мероприятие
-                    </button>
-                  )}
-                </div>
-              </section>
-
-              <section style={styles.section}>
-                <h2 style={styles.sectionTitle}>Статистика</h2>
-                <div style={styles.statsGrid}>
-                  <div style={styles.statCard}>
-                    <div style={styles.statLabel}>Роли</div>
-                    <div style={styles.statValue}>{eventDetails.roles.length}</div>
-                  </div>
-                  <div style={styles.statCard}>
-                    <div style={styles.statLabel}>Группы</div>
-                    <div style={styles.statValue}>{eventDetails.groups.length}</div>
-                  </div>
-                  <div style={styles.statCard}>
-                    <div style={styles.statLabel}>Пользователи</div>
-                    <div style={styles.statValue}>{eventDetails.users.length}</div>
-                  </div>
-                  <div style={styles.statCard}>
-                    <div style={styles.statLabel}>Гости</div>
-                    <div style={styles.statValue}>{eventDetails.guests.length}</div>
-                  </div>
-                </div>
-              </section>
-            </div>
-          ) : (
-            <div>Данные не найдены</div>
-          )}
-        </main>
-      </div>
-    </div>
+      </section>
+    </main>
   );
-};
-
-const styles = {
-  container: {
-    display: "flex",
-    flexDirection: "column" as const,
-    minHeight: "100vh",
-    backgroundColor: "#f5f5f5",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#333",
-    color: "white",
-    padding: "20px",
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  title: {
-    margin: "0 0 8px 0",
-    fontSize: "28px",
-  },
-  subtitle: {
-    margin: "0",
-    fontSize: "14px",
-    opacity: "0.8",
-  },
-  headerRight: {
-    display: "flex",
-    alignItems: "center",
-    gap: "20px",
-  },
-  userInfo: {
-    fontSize: "14px",
-  },
-  logoutBtn: {
-    padding: "8px 16px",
-    backgroundColor: "#d32f2f",
-    color: "white",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-    fontSize: "14px",
-  },
-  mainContent: {
-    display: "flex",
-    flex: 1,
-  },
-  sidebar: {
-    width: "250px",
-    backgroundColor: "white",
-    padding: "20px",
-    borderRight: "1px solid #ddd",
-  },
-  sidebarTitle: {
-    margin: "0 0 15px 0",
-    fontSize: "16px",
-    color: "#333",
-  },
-  eventList: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "8px",
-  },
-  eventItem: {
-    padding: "12px",
-    backgroundColor: "#f5f5f5",
-    border: "1px solid #ddd",
-    borderRadius: "4px",
-    cursor: "pointer",
-    textAlign: "left" as const,
-    transition: "all 0.2s",
-  },
-  eventItemActive: {
-    backgroundColor: "#007bff",
-    color: "white",
-    borderColor: "#007bff",
-  },
-  eventName: {
-    fontWeight: "600" as const,
-    marginBottom: "4px",
-  },
-  eventRole: {
-    fontSize: "12px",
-    opacity: "0.8",
-  },
-  content: {
-    flex: 1,
-    padding: "20px",
-  },
-  section: {
-    backgroundColor: "white",
-    padding: "20px",
-    borderRadius: "8px",
-    marginBottom: "20px",
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
-  },
-  sectionTitle: {
-    margin: "0 0 15px 0",
-    fontSize: "18px",
-    color: "#333",
-  },
-  infoGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-    gap: "15px",
-  },
-  infoItem: {
-    paddingBottom: "10px",
-    borderBottom: "1px solid #eee",
-  },
-  quickLinks: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-    gap: "10px",
-  },
-  linkButton: {
-    padding: "12px",
-    backgroundColor: "#007bff",
-    color: "white",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-    fontSize: "14px",
-    fontWeight: "600" as const,
-  },
-  statsGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-    gap: "15px",
-  },
-  statCard: {
-    backgroundColor: "#f9f9f9",
-    padding: "20px",
-    borderRadius: "4px",
-    textAlign: "center" as const,
-    border: "1px solid #eee",
-  },
-  statLabel: {
-    fontSize: "12px",
-    color: "#999",
-    marginBottom: "8px",
-    textTransform: "uppercase" as const,
-  },
-  statValue: {
-    fontSize: "32px",
-    fontWeight: "700" as const,
-    color: "#007bff",
-  },
-  loading: {
-    textAlign: "center" as const,
-    padding: "40px",
-    color: "#666",
-  },
-  error: {
-    padding: "15px",
-    backgroundColor: "#ffebee",
-    color: "#d32f2f",
-    borderRadius: "4px",
-  },
 };

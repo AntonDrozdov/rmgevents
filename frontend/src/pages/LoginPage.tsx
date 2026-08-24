@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -10,23 +10,22 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login, token } = useAuth();
 
-  // Redirect if already logged in
-  React.useEffect(() => {
+  useEffect(() => {
     if (token) {
-      navigate("/dashboard");
+      navigate("/dashboard", { replace: true });
     }
   }, [token, navigate]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      await login(username, password);
-      navigate("/dashboard");
+      await login(username.trim(), password);
+      navigate("/dashboard", { replace: true });
     } catch (err) {
-      setError("Ошибка входа. Проверьте учетные данные.");
+      setError("Не удалось войти. Проверьте логин и пароль.");
       console.error(err);
     } finally {
       setLoading(false);
@@ -34,112 +33,44 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>Система управления мероприятиями</h1>
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.formGroup}>
-            <label htmlFor="username" style={styles.label}>
-              Имя пользователя
-            </label>
+    <main className="login-page">
+      <section className="login-card">
+        <p className="eyebrow">RMG Events</p>
+        <h1>Система управления мероприятиями</h1>
+        <p className="muted">Войдите, чтобы выбрать мероприятие и работать с гостями, группами и сотрудниками.</p>
+
+        <form className="form" onSubmit={handleSubmit}>
+          <label className="field">
+            <span>Логин</span>
             <input
-              id="username"
               type="text"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Введите имя пользователя"
-              style={styles.input}
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="Введите логин"
               disabled={loading}
               required
             />
-          </div>
+          </label>
 
-          <div style={styles.formGroup}>
-            <label htmlFor="password" style={styles.label}>
-              Пароль
-            </label>
+          <label className="field">
+            <span>Пароль</span>
             <input
-              id="password"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
               placeholder="Введите пароль"
-              style={styles.input}
               disabled={loading}
               required
             />
-          </div>
+          </label>
 
-          {error && <div style={styles.error}>{error}</div>}
+          {error && <div className="alert alert-error">{error}</div>}
 
-          <button type="submit" style={styles.button} disabled={loading}>
-            {loading ? "Вход..." : "Войти"}
+          <button className="primary-button" type="submit" disabled={loading}>
+            {loading ? "Входим..." : "Войти"}
           </button>
         </form>
-      </div>
-    </div>
+      </section>
+    </main>
   );
-};
-
-const styles = {
-  container: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    minHeight: "100vh",
-    backgroundColor: "#f5f5f5",
-  },
-  card: {
-    backgroundColor: "white",
-    padding: "40px",
-    borderRadius: "8px",
-    boxShadow: "0 2px 10px rgba(0, 0, 0, 0.1)",
-    width: "100%",
-    maxWidth: "400px",
-  },
-  title: {
-    textAlign: "center" as const,
-    marginBottom: "30px",
-    color: "#333",
-    fontSize: "24px",
-  },
-  form: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "16px",
-  },
-  formGroup: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: "8px",
-  },
-  label: {
-    fontWeight: "600" as const,
-    color: "#555",
-  },
-  input: {
-    padding: "10px 12px",
-    border: "1px solid #ddd",
-    borderRadius: "4px",
-    fontSize: "14px",
-    fontFamily: "inherit",
-  },
-  button: {
-    padding: "12px",
-    backgroundColor: "#007bff",
-    color: "white",
-    border: "none",
-    borderRadius: "4px",
-    fontSize: "16px",
-    fontWeight: "600" as const,
-    cursor: "pointer",
-    marginTop: "10px",
-  },
-  error: {
-    color: "#d32f2f",
-    padding: "10px",
-    backgroundColor: "#ffebee",
-    borderRadius: "4px",
-    fontSize: "14px",
-  },
 };

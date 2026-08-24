@@ -24,6 +24,9 @@ public sealed class EventConfiguration : IEntityTypeConfiguration<Event>
         builder.Property(x => x.Description)
             .HasColumnName("description")
             .HasMaxLength(2000);
+
+        builder.Property(x => x.LogoImageId)
+            .HasColumnName("logo_image_id");
         
         builder.Property(x => x.OwnerId)
             .HasColumnName("owner_id")
@@ -35,6 +38,13 @@ public sealed class EventConfiguration : IEntityTypeConfiguration<Event>
         builder.Property(x => x.IsArchived)
             .HasColumnName("is_archived")
             .HasDefaultValue(false);
+
+        builder.HasIndex(x => x.LogoImageId);
+
+        builder.HasOne(x => x.LogoImage)
+            .WithMany(x => x.LogoEvents)
+            .HasForeignKey(x => x.LogoImageId)
+            .OnDelete(DeleteBehavior.SetNull);
         
         builder.HasOne(x => x.Owner)
             .WithMany(x => x.OwnedEvents)

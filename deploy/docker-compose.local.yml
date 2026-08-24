@@ -1,0 +1,38 @@
+name: rmgevents-app
+
+services:
+  corebackend:
+    build:
+      context: ../corebackend
+      dockerfile: Dockerfile
+    image: rmgevents-corebackend:latest
+    container_name: rmgevents-corebackend
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=rmgevents;Username=postgres;Password=admin
+      ASPNETCORE_URLS: http://+:8080
+      Jwt__Key: local-development-key-change-in-production-2026
+      Jwt__Issuer: ServerEquipment
+      Jwt__Audience: ServerEquipment.Admin
+      Admin__Username: admin
+      Admin__Password: admin
+    ports:
+      - "5000:8080"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    image: rmgevents-frontend:latest
+    container_name: rmgevents-frontend
+    depends_on:
+      - corebackend
+    ports:
+      - "5173:8080"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: danetwork
+    external: true
