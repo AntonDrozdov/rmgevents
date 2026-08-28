@@ -2,10 +2,10 @@ namespace Application.Entities;
 
 public sealed class Guest
 {
-    public Guid Id { get; set; }
-    public Guid EventId { get; set; }
-    public Guid GroupId { get; set; }
-    public Guid CreatedByUserId { get; set; }
+    public long Id { get; set; }
+    public long EventId { get; set; }
+    public long GroupId { get; set; }
+    public long CreatedByUserId { get; set; }
     public required string Name { get; set; }
     public string? Email { get; set; }
     public string? Phone { get; set; }

@@ -11,21 +11,22 @@ namespace Infrastructure.Services;
 public sealed class AuthService(
     ILoginRepository loginRepository,
     IUserRepository userRepository,
-    IConfiguration configuration) : IAuthService
+    IConfiguration configuration,
+    ISidProtector sidProtector) : IAuthService
 {
-    public async Task<(Guid LoginId, string Token)?> LoginAsync(string username, string password)
+    public async Task<(long LoginId, string Sid)?> LoginAsync(string loginValue, string password)
     {
-        var login = await loginRepository.GetByUsernameAsync(username);
+        var login = await loginRepository.GetByLoginAsync(loginValue);
         if (login == null || !VerifyPassword(password, login.PasswordHash))
             return null;
         
-        return (login.Id, CreateToken(login.Id, login.Username));
+        return (login.Id, sidProtector.Protect(CreateToken(login.Id, login.LoginValue)));
     }
     
-    public async Task<List<(Guid EventId, string EventName, string RoleName)>> GetAvailableEventsAsync(Guid loginId)
+    public async Task<List<(long EventId, string EventName, string RoleName)>> GetAvailableEventsAsync(long loginId)
     {
         var users = await userRepository.GetByLoginIdAsync(loginId);
-        var result = new List<(Guid, string, string)>();
+        var result = new List<(long, string, string)>();
         
         foreach (var user in users)
         {
@@ -38,17 +39,17 @@ public sealed class AuthService(
         return result;
     }
     
-    public async Task<Guid?> RegisterUserAsync(string username, string password, string displayName)
+    public async Task<long?> RegisterUserAsync(string loginValue, string password)
     {
-        var existingLogin = await loginRepository.GetByUsernameAsync(username);
+        var existingLogin = await loginRepository.GetByLoginAsync(loginValue);
         if (existingLogin != null)
             return null;
         
         var passwordHash = HashPassword(password);
         var login = new Application.Entities.Login
         {
-            Id = Guid.NewGuid(),
-            Username = username,
+            Id = 0,
+            LoginValue = loginValue,
             PasswordHash = passwordHash,
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -59,7 +60,7 @@ public sealed class AuthService(
         return login.Id;
     }
     
-    private string CreateToken(Guid loginId, string username)
+    private string CreateToken(long loginId, string login)
     {
         var jwtKey = configuration["Jwt:Key"]!;
         var jwtIssuer = configuration["Jwt:Issuer"]!;
@@ -71,7 +72,7 @@ public sealed class AuthService(
         var claims = new List<System.Security.Claims.Claim>
         {
             new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, loginId.ToString()),
-            new System.Security.Claims.Claim("username", username)
+            new System.Security.Claims.Claim("login", login)
         };
         
         var token = new JwtSecurityToken(

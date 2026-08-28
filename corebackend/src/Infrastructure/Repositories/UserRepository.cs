@@ -6,7 +6,7 @@ namespace Infrastructure.Repositories;
 
 public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
 {
-    public async Task<Application.Entities.User?> GetByIdAsync(Guid id)
+    public async Task<Application.Entities.User?> GetByIdAsync(long id)
     {
         return await db.Users
             .Include(x => x.Role)
@@ -16,7 +16,7 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .FirstOrDefaultAsync(x => x.Id == id);
     }
     
-    public async Task<List<Application.Entities.User>> GetByLoginIdAsync(Guid loginId)
+    public async Task<List<Application.Entities.User>> GetByLoginIdAsync(long loginId)
     {
         return await db.Users
             .Where(x => x.LoginId == loginId)
@@ -26,7 +26,7 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .ToListAsync();
     }
     
-    public async Task<Application.Entities.User?> GetByLoginAndEventAsync(Guid loginId, Guid eventId)
+    public async Task<Application.Entities.User?> GetByLoginAndEventAsync(long loginId, long eventId)
     {
         return await db.Users
             .Where(x => x.LoginId == loginId && x.EventId == eventId)
@@ -37,7 +37,7 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .FirstOrDefaultAsync();
     }
     
-    public async Task<List<Application.Entities.User>> GetByEventIdAsync(Guid eventId)
+    public async Task<List<Application.Entities.User>> GetByEventIdAsync(long eventId)
     {
         return await db.Users
             .Where(x => x.EventId == eventId)
@@ -46,7 +46,7 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .ToListAsync();
     }
     
-    public async Task<List<Application.Entities.User>> GetByGroupIdAsync(Guid groupId)
+    public async Task<List<Application.Entities.User>> GetByGroupIdAsync(long groupId)
     {
         return await db.Users
             .Where(x => x.GroupId == groupId)
@@ -65,7 +65,7 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
         await Task.CompletedTask;
     }
     
-    public async Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(long id)
     {
         var user = await db.Users.FindAsync(id);
         if (user != null)

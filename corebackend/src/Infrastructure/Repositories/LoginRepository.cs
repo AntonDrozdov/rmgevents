@@ -6,13 +6,13 @@ namespace Infrastructure.Repositories;
 
 public sealed class LoginRepository(ApplicationDbContext db) : ILoginRepository
 {
-    public async Task<Application.Entities.Login?> GetByUsernameAsync(string username)
+    public async Task<Application.Entities.Login?> GetByLoginAsync(string login)
     {
         return await db.Logins
-            .FirstOrDefaultAsync(x => x.Username == username);
+            .FirstOrDefaultAsync(x => x.LoginValue == login);
     }
     
-    public async Task<Application.Entities.Login?> GetByIdAsync(Guid id)
+    public async Task<Application.Entities.Login?> GetByIdAsync(long id)
     {
         return await db.Logins.FindAsync(id);
     }

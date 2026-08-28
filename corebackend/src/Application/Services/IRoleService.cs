@@ -2,10 +2,10 @@ namespace Application.Services;
 
 public interface IRoleService
 {
-    Task<Entities.Role> CreateRoleAsync(Guid eventId, string name, List<string> permissionCodes);
-    Task<Entities.Role?> GetRoleAsync(Guid roleId);
-    Task<List<Entities.Role>> GetRolesByEventAsync(Guid eventId);
-    Task UpdateRoleAsync(Guid roleId, string name, List<string> permissionCodes);
-    Task DeleteRoleAsync(Guid roleId);
-    Task SeedDefaultRolesAsync(Guid eventId);
+    Task<Entities.Role> CreateRoleAsync(long eventId, string name, List<string> permissionCodes);
+    Task<Entities.Role?> GetRoleAsync(long roleId);
+    Task<List<Entities.Role>> GetRolesByEventAsync(long eventId);
+    Task UpdateRoleAsync(long roleId, string name, List<string> permissionCodes);
+    Task DeleteRoleAsync(long roleId);
+    Task SeedDefaultRolesAsync(long eventId);
 }

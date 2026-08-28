@@ -1,24 +1,35 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
 import { GroupTreeDto, UserDto } from "../types";
 import { flattenGroups, groupNameById } from "../utils/groups";
 
+const formatUserName = (user: Pick<UserDto, "surname" | "name" | "additionalName">) =>
+  [user.surname, user.name, user.additionalName].filter(Boolean).join(" ");
+
+const emptyForm = (groupId = "") => ({
+  loginId: "",
+  surname: "",
+  name: "",
+  additionalName: "",
+  email: "",
+  tel: "",
+  roleId: "",
+  groupId,
+});
+
 export const UsersPage: React.FC = () => {
   const { eventId = "" } = useParams<{ eventId: string }>();
   const { currentUser } = useAuth();
-  const navigate = useNavigate();
   const [users, setUsers] = useState<UserDto[]>([]);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [formData, setFormData] = useState({
-    username: "",
-    displayName: "",
-    roleId: "",
-    groupId: "",
-  });
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [formData, setFormData] = useState(emptyForm());
 
   const canCreate = currentUser?.permissions.includes("create_user") ?? false;
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
@@ -34,7 +45,10 @@ export const UsersPage: React.FC = () => {
       ]);
       setUsers(userList);
       setGroups(groupTree);
-      setFormData((value) => ({ ...value, groupId: value.groupId || flattenGroups(groupTree)[0]?.id || "" }));
+      setFormData((value) => ({
+        ...value,
+        groupId: value.groupId || String(flattenGroups(groupTree)[0]?.id ?? ""),
+      }));
     } catch (err) {
       setError("Не удалось загрузить сотрудников.");
       console.error(err);
@@ -53,81 +67,58 @@ export const UsersPage: React.FC = () => {
     loadData();
   }, [eventId, canCreate]);
 
+  const closeCreateModal = () => {
+    if (saving) return;
+    setIsCreateModalOpen(false);
+    setError("");
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
+    setSaving(true);
 
     try {
       await apiClient.createUser(eventId, {
-        username: formData.username.trim(),
-        displayName: formData.displayName.trim(),
-        roleId: formData.roleId.trim(),
-        groupId: formData.groupId,
+        loginId: Number(formData.loginId),
+        name: formData.name.trim(),
+        surname: formData.surname.trim(),
+        additionalName: formData.additionalName.trim() || undefined,
+        email: formData.email.trim() || undefined,
+        tel: formData.tel.trim() || undefined,
+        roleId: Number(formData.roleId),
+        groupId: Number(formData.groupId),
       });
-      setFormData({ username: "", displayName: "", roleId: "", groupId: flatGroups[0]?.id ?? "" });
+      setFormData(emptyForm(String(flatGroups[0]?.id ?? "")));
+      setIsCreateModalOpen(false);
       await loadData();
     } catch (err) {
-      setError("Не удалось создать сотрудника. Бэкенд ожидает существующие ID логина и роли.");
+      setError("Не удалось создать сотрудника. Проверьте ID логина, ID роли и группу.");
       console.error(err);
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
-    <main className="page-shell">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Команда</p>
-          <h1>Сотрудники</h1>
-          <p className="muted">Назначение пользователей на роли и группы внутри мероприятия.</p>
+    <div className="tab-content">
+      <div className="section-heading">
+        <div className="section-title-row">
+          <h2>Сотрудники</h2>
+          <span className="badge">Всего: {users.length}</span>
         </div>
-        <button className="secondary-button" onClick={() => navigate("/dashboard")}>Назад</button>
-      </header>
+        <div className="section-actions">
+          {canCreate && (
+            <button className="primary-button create-action-button" onClick={() => setIsCreateModalOpen(true)}>
+              Создать сотрудника
+            </button>
+          )}
+        </div>
+      </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
-
-      {canCreate && (
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <h2>Создать сотрудника</h2>
-              <p className="muted">Сейчас API принимает ID логина в поле логина и ID роли. Когда на бэке появится справочник ролей, селект можно подключить сюда.</p>
-            </div>
-          </div>
-
-          <form className="form-grid" onSubmit={handleSubmit}>
-            <label className="field">
-              <span>ID логина</span>
-              <input value={formData.username} onChange={(event) => setFormData({ ...formData, username: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>Имя сотрудника</span>
-              <input value={formData.displayName} onChange={(event) => setFormData({ ...formData, displayName: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>ID роли</span>
-              <input value={formData.roleId} onChange={(event) => setFormData({ ...formData, roleId: event.target.value })} required />
-            </label>
-            <label className="field">
-              <span>Группа</span>
-              <select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} required>
-                {flatGroups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {"- ".repeat(group.level)}{group.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button className="primary-button form-submit" type="submit">Создать сотрудника</button>
-          </form>
-        </section>
-      )}
+      {error && !isCreateModalOpen && <div className="alert alert-error">{error}</div>}
 
       <section className="panel">
-        <div className="section-heading">
-          <h2>Список сотрудников</h2>
-          <span className="badge">{users.length}</span>
-        </div>
-
         {loading ? (
           <div className="empty-state compact">Загрузка...</div>
         ) : users.length === 0 ? (
@@ -137,7 +128,9 @@ export const UsersPage: React.FC = () => {
             <table>
               <thead>
                 <tr>
-                  <th>Имя</th>
+                  <th>ФИО</th>
+                  <th>Email</th>
+                  <th>Телефон</th>
                   <th>Группа</th>
                   <th>ID роли</th>
                   <th>ID логина</th>
@@ -147,7 +140,9 @@ export const UsersPage: React.FC = () => {
               <tbody>
                 {users.map((user) => (
                   <tr key={user.id}>
-                    <td>{user.displayName}</td>
+                    <td>{formatUserName(user)}</td>
+                    <td>{user.email || "-"}</td>
+                    <td>{user.tel || "-"}</td>
                     <td>{groupNameById(groups, user.groupId)}</td>
                     <td><code>{user.roleId}</code></td>
                     <td><code>{user.loginId}</code></td>
@@ -159,6 +154,65 @@ export const UsersPage: React.FC = () => {
           </div>
         )}
       </section>
-    </main>
+
+      {isCreateModalOpen && (
+        <Modal
+          title="Создать сотрудника"
+          description="Укажите ID существующего логина и роли, затем заполните данные сотрудника."
+          onClose={closeCreateModal}
+        >
+          {error && <div className="alert alert-error">{error}</div>}
+
+          <form className="form" onSubmit={handleSubmit}>
+            <label className="field">
+              <span>ID логина</span>
+              <input type="number" min={1} value={formData.loginId} onChange={(event) => setFormData({ ...formData, loginId: event.target.value })} disabled={saving} required />
+            </label>
+            <label className="field">
+              <span>Фамилия</span>
+              <input value={formData.surname} onChange={(event) => setFormData({ ...formData, surname: event.target.value })} disabled={saving} required />
+            </label>
+            <label className="field">
+              <span>Имя</span>
+              <input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={saving} required />
+            </label>
+            <label className="field">
+              <span>Отчество</span>
+              <input value={formData.additionalName} onChange={(event) => setFormData({ ...formData, additionalName: event.target.value })} disabled={saving} />
+            </label>
+            <label className="field">
+              <span>Email</span>
+              <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} disabled={saving} />
+            </label>
+            <label className="field">
+              <span>Телефон</span>
+              <input type="tel" value={formData.tel} onChange={(event) => setFormData({ ...formData, tel: event.target.value })} disabled={saving} />
+            </label>
+            <label className="field">
+              <span>ID роли</span>
+              <input type="number" min={1} value={formData.roleId} onChange={(event) => setFormData({ ...formData, roleId: event.target.value })} disabled={saving} required />
+            </label>
+            <label className="field">
+              <span>Группа</span>
+              <select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} disabled={saving} required>
+                {flatGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {"- ".repeat(group.level)}{group.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={closeCreateModal} disabled={saving}>
+                Закрыть
+              </button>
+              <button className="primary-button" type="submit" disabled={saving}>
+                {saving ? "Создаем..." : "Создать"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
   );
 };

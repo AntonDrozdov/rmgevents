@@ -22,7 +22,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return (
       <main className="page-shell">
         <section className="empty-state">
-          <h1>Доступ запрещен</h1>
+          <h1>Доступ запрещён</h1>
           <p>У вашей роли нет права для открытия этой страницы.</p>
         </section>
       </main>

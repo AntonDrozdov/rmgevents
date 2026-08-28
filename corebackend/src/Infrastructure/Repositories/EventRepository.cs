@@ -6,7 +6,7 @@ namespace Infrastructure.Repositories;
 
 public sealed class EventRepository(ApplicationDbContext db) : IEventRepository
 {
-    public async Task<Application.Entities.Event?> GetByIdAsync(Guid id)
+    public async Task<Application.Entities.Event?> GetByIdAsync(long id)
     {
         return await db.Events
             .Include(x => x.Roles)
@@ -15,14 +15,14 @@ public sealed class EventRepository(ApplicationDbContext db) : IEventRepository
             .FirstOrDefaultAsync(x => x.Id == id);
     }
     
-    public async Task<List<Application.Entities.Event>> GetByOwnerIdAsync(Guid ownerId)
+    public async Task<List<Application.Entities.Event>> GetByOwnerIdAsync(long ownerId)
     {
         return await db.Events
             .Where(x => x.OwnerId == ownerId)
             .ToListAsync();
     }
     
-    public async Task<List<Application.Entities.Event>> GetByUserAsync(Guid userId)
+    public async Task<List<Application.Entities.Event>> GetByUserAsync(long userId)
     {
         return await db.Events
             .Where(x => x.Users.Any(u => u.LoginId == userId))
@@ -40,7 +40,7 @@ public sealed class EventRepository(ApplicationDbContext db) : IEventRepository
         await Task.CompletedTask;
     }
     
-    public async Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(long id)
     {
         var @event = await db.Events.FindAsync(id);
         if (@event != null)

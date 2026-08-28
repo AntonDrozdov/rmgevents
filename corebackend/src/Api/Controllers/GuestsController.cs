@@ -14,7 +14,7 @@ public sealed class GuestsController(
     IPermissionService permissionService) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<List<GuestDto>>> GetGuests(Guid eventId)
+    public async Task<ActionResult<List<GuestDto>>> GetGuests(long eventId)
     {
         var guests = await guestService.GetGuestsByEventAsync(eventId);
         
@@ -36,10 +36,10 @@ public sealed class GuestsController(
     [Authorize(Policy = "CanCreateGuest")]
     [HttpPost]
     public async Task<ActionResult<GuestDto>> CreateGuest(
-        Guid eventId,
+        long eventId,
         CreateGuestRequest request)
     {
-        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         
         try
         {
@@ -77,11 +77,11 @@ public sealed class GuestsController(
     [Authorize(Policy = "CanApproveGuest")]
     [HttpPost("{guestId}/approve")]
     public async Task<ActionResult<GuestDto>> ApproveGuest(
-        Guid eventId,
-        Guid guestId,
+        long eventId,
+        long guestId,
         ApproveGuestRequest request)
     {
-        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         
         try
         {

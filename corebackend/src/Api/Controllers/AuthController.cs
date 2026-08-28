@@ -13,7 +13,7 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
     {
-        var loginResult = await authService.LoginAsync(request.Username, request.Password);
+        var loginResult = await authService.LoginAsync(request.Login, request.Password);
         if (loginResult == null)
             return Unauthorized();
         
@@ -21,21 +21,16 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         
         var events = login.Select(l => new EventOption(l.EventId, l.EventName, l.RoleName)).ToList();
         
-        return Ok(new LoginResponse(loginResult.Value.Token, events));
+        return Ok(new LoginResponse(loginResult.Value.Sid, events));
     }
     
     [AllowAnonymous]
     [HttpPost("register")]
-    public async Task<ActionResult<dynamic>> Register(
-        [FromBody] dynamic request)
+    public async Task<ActionResult<dynamic>> Register(RegisterRequest request)
     {
-        var username = request.Username;
-        var password = request.Password;
-        var displayName = request.DisplayName;
-        
-        var loginId = await authService.RegisterUserAsync(username, password, displayName);
+        var loginId = await authService.RegisterUserAsync(request.Login, request.Password);
         if (loginId == null)
-            return BadRequest("Username already exists");
+            return BadRequest("Login already exists");
         
         return Ok(new { loginId });
     }

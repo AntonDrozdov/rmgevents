@@ -2,11 +2,11 @@ namespace Application.Entities;
 
 public sealed class Event
 {
-    public Guid Id { get; set; }
+    public long Id { get; set; }
     public required string Name { get; set; }
     public string? Description { get; set; }
-    public Guid? LogoImageId { get; set; }
-    public Guid OwnerId { get; set; } // FK to User
+    public long? LogoImageId { get; set; }
+    public long OwnerId { get; set; } // FK to User
     public DateTimeOffset CreatedAt { get; set; }
     public bool IsArchived { get; set; } = false;
     

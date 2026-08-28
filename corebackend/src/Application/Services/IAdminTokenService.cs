@@ -2,5 +2,5 @@ namespace Application.Services;
 
 public interface IAdminTokenService
 {
-    string? CreateToken(string username, string password);
+    string? CreateToken(string login, string password);
 }

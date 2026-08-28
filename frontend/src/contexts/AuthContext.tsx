@@ -18,19 +18,22 @@ const readJson = <T,>(key: string): T | null => {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(null);
+  const [loginName, setLoginName] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfileDto | null>(null);
   const [currentEvent, setCurrentEvent] = useState<EventOption | null>(null);
   const [events, setEvents] = useState<EventOption[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchUserProfile = async (eventId: string) => {
+  const fetchUserProfile = async (eventId: string | number) => {
     const profile = await apiClient.getCurrentUserProfile(eventId);
     setCurrentUser(profile);
   };
 
   useEffect(() => {
     const restoreSession = async () => {
-      const savedToken = localStorage.getItem("token");
+      localStorage.removeItem("token");
+      const savedToken = localStorage.getItem("sid");
+      const savedLoginName = localStorage.getItem("login");
       const savedEvent = readJson<EventOption>("currentEvent");
       const savedEvents = readJson<EventOption[]>("events") ?? [];
 
@@ -41,6 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       apiClient.setToken(savedToken);
       setToken(savedToken);
+      setLoginName(savedLoginName);
       setEvents(savedEvents);
 
       if (savedEvent) {
@@ -49,9 +53,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await fetchUserProfile(savedEvent.id);
         } catch {
           apiClient.clearToken();
+          localStorage.removeItem("login");
           localStorage.removeItem("currentEvent");
           localStorage.removeItem("events");
           setToken(null);
+          setLoginName(null);
           setCurrentEvent(null);
           setEvents([]);
         }
@@ -63,10 +69,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     restoreSession();
   }, []);
 
-  const login = async (username: string, password: string) => {
-    const response = await apiClient.login({ username, password });
-    setToken(response.token);
+  const login = async (nextLoginName: string, password: string) => {
+    const response = await apiClient.login({ login: nextLoginName, password });
+    setToken(response.sid);
+    setLoginName(nextLoginName);
     setEvents(response.events);
+    localStorage.setItem("login", nextLoginName);
     localStorage.setItem("events", JSON.stringify(response.events));
 
     const defaultEvent = response.events[0] ?? null;
@@ -83,10 +91,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     setToken(null);
+    setLoginName(null);
     setCurrentUser(null);
     setCurrentEvent(null);
     setEvents([]);
     apiClient.clearToken();
+    localStorage.removeItem("login");
     localStorage.removeItem("currentEvent");
     localStorage.removeItem("events");
   };
@@ -95,6 +105,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentEvent(event);
     localStorage.setItem("currentEvent", JSON.stringify(event));
     await fetchUserProfile(event.id);
+  };
+
+  const addEvent = (event: EventOption) => {
+    setEvents((currentEvents) => {
+      const nextEvents = currentEvents.some((item) => item.id === event.id)
+        ? currentEvents
+        : [...currentEvents, event];
+      localStorage.setItem("events", JSON.stringify(nextEvents));
+      return nextEvents;
+    });
+
+    setCurrentEvent(event);
+    localStorage.setItem("currentEvent", JSON.stringify(event));
   };
 
   const refreshProfile = async () => {
@@ -111,12 +134,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         token,
+        loginName,
         currentUser,
         currentEvent,
         events,
         login,
         logout,
         selectEvent,
+        addEvent,
         refreshProfile,
       }}
     >

@@ -2,9 +2,9 @@ namespace Application.Entities;
 
 public sealed class Group
 {
-    public Guid Id { get; set; }
-    public Guid EventId { get; set; }
-    public Guid? ParentGroupId { get; set; } // Self-referencing for hierarchy
+    public long Id { get; set; }
+    public long EventId { get; set; }
+    public long? ParentGroupId { get; set; } // Self-referencing for hierarchy
     public required string Name { get; set; }
     public int Quota { get; set; } // Maximum capacity
     public DateTimeOffset CreatedAt { get; set; }

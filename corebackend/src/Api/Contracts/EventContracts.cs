@@ -1,31 +1,35 @@
 namespace Api.Contracts;
 
 public sealed record EventDto(
-    Guid Id,
+    long Id,
     string Name,
     string? Description,
-    Guid? LogoImageId,
-    Guid OwnerId,
+    long? LogoImageId,
+    long OwnerId,
     DateTimeOffset CreatedAt,
     bool IsArchived);
 
 public sealed record CreateEventRequest(
     string Name,
     string? Description,
-    Guid? LogoImageId);
+    long? LogoImageId);
 
 public sealed record EventDetailDto(
-    Guid Id,
+    long Id,
     string Name,
     string? Description,
-    Guid? LogoImageId,
-    Guid OwnerId,
+    long? LogoImageId,
+    long OwnerId,
     DateTimeOffset CreatedAt,
     UserProfileDto CurrentUserProfile);
 
 public sealed record UserProfileDto(
-    Guid UserId,
-    string DisplayName,
+    long UserId,
+    string Name,
+    string Surname,
+    string? AdditionalName,
+    string? Email,
+    string? Tel,
     string RoleName,
-    Guid GroupId,
+    long GroupId,
     List<string> Permissions);

@@ -14,7 +14,7 @@ public sealed class GroupsController(
     IPermissionService permissionService) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<List<GroupTreeDto>>> GetGroupTree(Guid eventId)
+    public async Task<ActionResult<List<GroupTreeDto>>> GetGroupTree(long eventId)
     {
         var groups = await groupService.GetGroupHierarchyAsync(eventId);
         return Ok(MapToTreeDtos(groups));
@@ -23,10 +23,10 @@ public sealed class GroupsController(
     [Authorize(Policy = "CanCreateGroup")]
     [HttpPost]
     public async Task<ActionResult<GroupDto>> CreateGroup(
-        Guid eventId,
+        long eventId,
         CreateGroupRequest request)
     {
-        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         
         try
         {

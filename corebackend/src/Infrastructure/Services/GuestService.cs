@@ -9,12 +9,12 @@ public sealed class GuestService(
     IPermissionService permissionService) : IGuestService
 {
     public async Task<Application.Entities.Guest> CreateGuestAsync(
-        Guid eventId,
-        Guid userId,
+        long eventId,
+        long userId,
         string name,
         string? email,
         string? phone,
-        Guid groupId)
+        long groupId)
     {
         // Проверяем разрешение
         if (!await permissionService.HasPermissionAsync(userId, eventId, "create_guest"))
@@ -36,7 +36,7 @@ public sealed class GuestService(
         
         var guest = new Application.Entities.Guest
         {
-            Id = Guid.NewGuid(),
+            Id = 0,
             EventId = eventId,
             GroupId = groupId,
             CreatedByUserId = userId,
@@ -53,27 +53,27 @@ public sealed class GuestService(
         return guest;
     }
     
-    public async Task<Application.Entities.Guest?> GetGuestAsync(Guid guestId)
+    public async Task<Application.Entities.Guest?> GetGuestAsync(long guestId)
     {
         return await guestRepository.GetByIdAsync(guestId);
     }
     
-    public async Task<List<Application.Entities.Guest>> GetGuestsByEventAsync(Guid eventId)
+    public async Task<List<Application.Entities.Guest>> GetGuestsByEventAsync(long eventId)
     {
         return await guestRepository.GetByEventIdAsync(eventId);
     }
     
-    public async Task<List<Application.Entities.Guest>> GetGuestsByGroupAsync(Guid groupId)
+    public async Task<List<Application.Entities.Guest>> GetGuestsByGroupAsync(long groupId)
     {
         return await guestRepository.GetByGroupIdAsync(groupId);
     }
     
-    public async Task<List<Application.Entities.Guest>> GetGuestsByStatusAsync(Guid eventId, string status)
+    public async Task<List<Application.Entities.Guest>> GetGuestsByStatusAsync(long eventId, string status)
     {
         return await guestRepository.GetByStatusAsync(eventId, status);
     }
     
-    public async Task ApproveGuestAsync(Guid guestId, Guid approverUserId)
+    public async Task ApproveGuestAsync(long guestId, long approverUserId)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
@@ -90,7 +90,7 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
     
-    public async Task RejectGuestAsync(Guid guestId)
+    public async Task RejectGuestAsync(long guestId)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
@@ -102,7 +102,7 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
     
-    public async Task UpdateGuestAsync(Guid guestId, string name, string? email, string? phone)
+    public async Task UpdateGuestAsync(long guestId, string name, string? email, string? phone)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
@@ -116,13 +116,13 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
     
-    public async Task DeleteGuestAsync(Guid guestId)
+    public async Task DeleteGuestAsync(long guestId)
     {
         await guestRepository.DeleteAsync(guestId);
         await guestRepository.SaveChangesAsync();
     }
     
-    private async Task<int> GetAvailableQuotaInGroupAsync(Guid groupId)
+    private async Task<int> GetAvailableQuotaInGroupAsync(long groupId)
     {
         var group = await groupRepository.GetByIdAsync(groupId);
         if (group == null)

@@ -11,7 +11,7 @@ public sealed class ImagesController(IImageService imageService) : ControllerBas
     [HttpGet("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetImage(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetImage(long id, CancellationToken cancellationToken)
     {
         var image = await imageService.GetImage(id, cancellationToken);
         if (image is null)

@@ -1,5 +1,6 @@
 namespace Api.Contracts;
 
-public sealed record LoginRequest(string Username, string Password);
-public sealed record LoginResponse(string Token, List<EventOption> Events);
-public sealed record EventOption(Guid Id, string Name, string RoleName);
+public sealed record LoginRequest(string Login, string Password);
+public sealed record RegisterRequest(string Login, string Password);
+public sealed record LoginResponse(string Sid, List<EventOption> Events);
+public sealed record EventOption(long Id, string Name, string RoleName);

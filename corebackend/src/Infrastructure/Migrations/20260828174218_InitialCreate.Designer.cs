@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260824184049_InitialCorebackendSchema")]
-    partial class InitialCorebackendSchema
+    [Migration("20260828174218_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -28,9 +28,12 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.Event", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
                         .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -47,8 +50,8 @@ namespace Infrastructure.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("is_archived");
 
-                    b.Property<Guid?>("LogoImageId")
-                        .HasColumnType("uuid")
+                    b.Property<long?>("LogoImageId")
+                        .HasColumnType("bigint")
                         .HasColumnName("logo_image_id");
 
                     b.Property<string>("Name")
@@ -57,8 +60,8 @@ namespace Infrastructure.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("name");
 
-                    b.Property<Guid>("OwnerId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("OwnerId")
+                        .HasColumnType("bigint")
                         .HasColumnName("owner_id");
 
                     b.HasKey("Id");
@@ -72,16 +75,19 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.Group", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
                         .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid>("EventId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint")
                         .HasColumnName("event_id");
 
                     b.Property<string>("Name")
@@ -90,8 +96,8 @@ namespace Infrastructure.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("name");
 
-                    b.Property<Guid?>("ParentGroupId")
-                        .HasColumnType("uuid")
+                    b.Property<long?>("ParentGroupId")
+                        .HasColumnType("bigint")
                         .HasColumnName("parent_group_id");
 
                     b.Property<int>("Quota")
@@ -110,9 +116,12 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.Guest", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
                         .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<DateTimeOffset?>("ApprovedAt")
                         .HasColumnType("timestamp with time zone")
@@ -122,8 +131,8 @@ namespace Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint")
                         .HasColumnName("created_by_user_id");
 
                     b.Property<string>("Email")
@@ -131,12 +140,12 @@ namespace Infrastructure.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("email");
 
-                    b.Property<Guid>("EventId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint")
                         .HasColumnName("event_id");
 
-                    b.Property<Guid>("GroupId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("GroupId")
+                        .HasColumnType("bigint")
                         .HasColumnName("group_id");
 
                     b.Property<string>("Meta")
@@ -175,8 +184,11 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.ImageEntity", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<string>("AltText")
                         .HasMaxLength(500)
@@ -208,28 +220,31 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.Login", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
                         .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<string>("LoginValue")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("login");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("password_hash");
 
-                    b.Property<string>("Username")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("username");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("Username")
+                    b.HasIndex("LoginValue")
                         .IsUnique();
 
                     b.ToTable("logins", "corebackend");
@@ -237,9 +252,12 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.Permission", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
                         .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -267,16 +285,19 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.Role", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
                         .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid>("EventId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint")
                         .HasColumnName("event_id");
 
                     b.Property<string>("Name")
@@ -295,12 +316,12 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.RolePermission", b =>
                 {
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("RoleId")
+                        .HasColumnType("bigint")
                         .HasColumnName("role_id");
 
-                    b.Property<Guid>("PermissionId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("PermissionId")
+                        .HasColumnType("bigint")
                         .HasColumnName("permission_id");
 
                     b.HasKey("RoleId", "PermissionId");
@@ -312,39 +333,63 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.User", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
                         .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AdditionalName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("additional_name");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
+                    b.Property<string>("Email")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
-                        .HasColumnName("display_name");
+                        .HasColumnName("email");
 
-                    b.Property<Guid>("EventId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint")
                         .HasColumnName("event_id");
 
-                    b.Property<Guid>("GroupId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("GroupId")
+                        .HasColumnType("bigint")
                         .HasColumnName("group_id");
 
-                    b.Property<Guid>("LoginId")
-                        .HasColumnType("uuid")
+                    b.Property<long>("LoginId")
+                        .HasColumnType("bigint")
                         .HasColumnName("login_id");
 
                     b.Property<string>("Meta")
                         .HasColumnType("jsonb")
                         .HasColumnName("meta");
 
-                    b.Property<Guid>("RoleId")
-                        .HasColumnType("uuid")
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<long>("RoleId")
+                        .HasColumnType("bigint")
                         .HasColumnName("role_id");
+
+                    b.Property<string>("Surname")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("surname");
+
+                    b.Property<string>("Tel")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("tel");
 
                     b.HasKey("Id");
 

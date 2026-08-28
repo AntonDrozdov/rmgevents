@@ -1,9 +1,9 @@
 namespace Api.Contracts;
 
 public sealed record GroupDto(
-    Guid Id,
-    Guid EventId,
-    Guid? ParentGroupId,
+    long Id,
+    long EventId,
+    long? ParentGroupId,
     string Name,
     int Quota,
     int UsedQuota,
@@ -14,14 +14,14 @@ public sealed record GroupDto(
 public sealed record CreateGroupRequest(
     string Name,
     int Quota,
-    Guid? ParentGroupId);
+    long? ParentGroupId);
 
 public sealed record UpdateGroupRequest(
     string Name,
     int Quota);
 
 public sealed record GroupTreeDto(
-    Guid Id,
+    long Id,
     string Name,
     int Quota,
     int UsedQuota,

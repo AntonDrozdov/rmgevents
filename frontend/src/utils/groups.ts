@@ -1,7 +1,7 @@
 import { GroupTreeDto } from "../types";
 
 export interface FlatGroup {
-  id: string;
+  id: number;
   name: string;
   quota: number;
   usedQuota: number;
@@ -22,14 +22,16 @@ export const flattenGroups = (groups: GroupTreeDto[], level = 0): FlatGroup[] =>
     ...flattenGroups(group.children ?? [], level + 1),
   ]);
 
-export const groupNameById = (groups: GroupTreeDto[], groupId?: string | null): string => {
-  if (!groupId) return "-";
+export const groupNameById = (groups: GroupTreeDto[], groupId?: number | string | null): string => {
+  if (groupId === undefined || groupId === null || groupId === "") return "-";
+
+  const normalizedGroupId = Number(groupId);
 
   for (const group of groups) {
-    if (group.id === groupId) return group.name;
-    const childName = groupNameById(group.children ?? [], groupId);
+    if (group.id === normalizedGroupId) return group.name;
+    const childName = groupNameById(group.children ?? [], normalizedGroupId);
     if (childName !== "-") return childName;
   }
 
-  return groupId;
+  return String(groupId);
 };

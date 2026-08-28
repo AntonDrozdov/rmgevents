@@ -4,5 +4,5 @@ namespace Application.Services;
 
 public interface IImageService
 {
-    Task<ImageEntity?> GetImage(Guid id, CancellationToken cancellationToken = default);
+    Task<ImageEntity?> GetImage(long id, CancellationToken cancellationToken = default);
 }

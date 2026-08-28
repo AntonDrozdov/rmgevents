@@ -23,6 +23,7 @@ public static class DependencyInjection
         
         services.AddScoped<IImageRepository, ImageRepository>();
         services.AddScoped<IImageService, ImageService>();
+        services.AddSingleton<ISidProtector, SidProtector>();
         services.AddSingleton<IAdminTokenService, AdminTokenService>();
         
         // New repositories

@@ -6,27 +6,27 @@ export type PermissionCode =
   | "create_user";
 
 export interface LoginRequest {
-  username: string;
+  login: string;
   password: string;
 }
 
 export interface LoginResponse {
-  token: string;
+  sid: string;
   events: EventOption[];
 }
 
 export interface EventOption {
-  id: string;
+  id: number;
   name: string;
   roleName: string;
 }
 
 export interface EventDto {
-  id: string;
+  id: number;
   name: string;
   description?: string | null;
-  logoImageId?: string | null;
-  ownerId: string;
+  logoImageId?: number | null;
+  ownerId: number;
   createdAt: string;
   isArchived: boolean;
 }
@@ -34,31 +34,35 @@ export interface EventDto {
 export interface CreateEventRequest {
   name: string;
   description?: string;
-  logoImageId?: string;
+  logoImageId?: number;
 }
 
 export interface EventDetailDto {
-  id: string;
+  id: number;
   name: string;
   description?: string | null;
-  logoImageId?: string | null;
-  ownerId: string;
+  logoImageId?: number | null;
+  ownerId: number;
   createdAt: string;
   currentUserProfile: UserProfileDto;
 }
 
 export interface UserProfileDto {
-  userId: string;
-  displayName: string;
+  userId: number;
+  name: string;
+  surname: string;
+  additionalName?: string | null;
+  email?: string | null;
+  tel?: string | null;
   roleName: string;
-  groupId: string;
+  groupId: number;
   permissions: PermissionCode[];
 }
 
 export interface GroupDto {
-  id: string;
-  eventId: string;
-  parentGroupId?: string | null;
+  id: number;
+  eventId: number;
+  parentGroupId?: number | null;
   name: string;
   quota: number;
   usedQuota: number;
@@ -70,7 +74,7 @@ export interface GroupDto {
 export interface CreateGroupRequest {
   name: string;
   quota: number;
-  parentGroupId?: string | null;
+  parentGroupId?: number | null;
 }
 
 export interface UpdateGroupRequest {
@@ -79,7 +83,7 @@ export interface UpdateGroupRequest {
 }
 
 export interface GroupTreeDto {
-  id: string;
+  id: number;
   name: string;
   quota: number;
   usedQuota: number;
@@ -88,26 +92,44 @@ export interface GroupTreeDto {
 }
 
 export interface UserDto {
-  id: string;
-  loginId: string;
-  eventId: string;
-  roleId: string;
-  groupId: string;
-  displayName: string;
+  id: number;
+  loginId: number;
+  eventId: number;
+  roleId: number;
+  groupId: number;
+  name: string;
+  surname: string;
+  additionalName?: string | null;
+  email?: string | null;
+  tel?: string | null;
   createdAt: string;
 }
 
 export interface CreateUserRequest {
-  username: string;
-  displayName: string;
-  roleId: string;
-  groupId: string;
+  loginId: number;
+  name: string;
+  surname: string;
+  additionalName?: string;
+  email?: string;
+  tel?: string;
+  roleId: number;
+  groupId: number;
+}
+
+export interface UpdateUserRequest {
+  name: string;
+  surname: string;
+  additionalName?: string;
+  email?: string;
+  tel?: string;
+  roleId: number;
+  groupId: number;
 }
 
 export interface GuestDto {
-  id: string;
-  eventId: string;
-  groupId: string;
+  id: number;
+  eventId: number;
+  groupId: number;
   name: string;
   email?: string | null;
   phone?: string | null;
@@ -120,21 +142,23 @@ export interface CreateGuestRequest {
   name: string;
   email?: string;
   phone?: string;
-  groupId: string;
+  groupId: number;
 }
 
 export interface ApproveGuestRequest {
-  guestId: string;
+  guestId: number;
   approve: boolean;
 }
 
 export interface AuthContextType {
   token: string | null;
+  loginName: string | null;
   currentUser: UserProfileDto | null;
   currentEvent: EventOption | null;
   events: EventOption[];
-  login: (username: string, password: string) => Promise<void>;
+  login: (loginName: string, password: string) => Promise<void>;
   logout: () => void;
   selectEvent: (event: EventOption) => Promise<void>;
+  addEvent: (event: EventOption) => void;
   refreshProfile: () => Promise<void>;
 }

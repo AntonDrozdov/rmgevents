@@ -1,13 +1,13 @@
 namespace Api.Contracts;
 
 public sealed record PermissionDto(
-    Guid Id,
+    long Id,
     string Code,
     string Description);
 
 public sealed record RoleDto(
-    Guid Id,
-    Guid EventId,
+    long Id,
+    long EventId,
     string Name,
     List<PermissionDto> Permissions,
     DateTimeOffset CreatedAt);

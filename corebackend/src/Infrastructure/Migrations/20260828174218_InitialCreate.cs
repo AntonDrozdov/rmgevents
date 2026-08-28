@@ -1,12 +1,13 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
 namespace Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCorebackendSchema : Migration
+    public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -19,7 +20,8 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     FileName = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     ContentType = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
                     Data = table.Column<byte[]>(type: "bytea", nullable: false),
@@ -36,8 +38,9 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false),
-                    username = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    login = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     password_hash = table.Column<string>(type: "text", nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
@@ -51,7 +54,8 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false),
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     code = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
                     description = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
@@ -66,11 +70,12 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false),
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     description = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
-                    logo_image_id = table.Column<Guid>(type: "uuid", nullable: true),
-                    owner_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    logo_image_id = table.Column<long>(type: "bigint", nullable: true),
+                    owner_id = table.Column<long>(type: "bigint", nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     is_archived = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false)
                 },
@@ -91,9 +96,10 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false),
-                    event_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    parent_group_id = table.Column<Guid>(type: "uuid", nullable: true),
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    event_id = table.Column<long>(type: "bigint", nullable: false),
+                    parent_group_id = table.Column<long>(type: "bigint", nullable: true),
                     name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     quota = table.Column<int>(type: "integer", nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
@@ -122,8 +128,9 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false),
-                    event_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    event_id = table.Column<long>(type: "bigint", nullable: false),
                     name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
@@ -144,8 +151,8 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 columns: table => new
                 {
-                    role_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    permission_id = table.Column<Guid>(type: "uuid", nullable: false)
+                    role_id = table.Column<long>(type: "bigint", nullable: false),
+                    permission_id = table.Column<long>(type: "bigint", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -171,12 +178,17 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false),
-                    login_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    event_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    role_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    group_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    display_name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    login_id = table.Column<long>(type: "bigint", nullable: false),
+                    event_id = table.Column<long>(type: "bigint", nullable: false),
+                    role_id = table.Column<long>(type: "bigint", nullable: false),
+                    group_id = table.Column<long>(type: "bigint", nullable: false),
+                    name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    surname = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    additional_name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
+                    email = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
+                    tel = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
                     meta = table.Column<string>(type: "jsonb", nullable: true),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
@@ -218,10 +230,11 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false),
-                    event_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    group_id = table.Column<Guid>(type: "uuid", nullable: false),
-                    created_by_user_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    event_id = table.Column<long>(type: "bigint", nullable: false),
+                    group_id = table.Column<long>(type: "bigint", nullable: false),
+                    created_by_user_id = table.Column<long>(type: "bigint", nullable: false),
                     name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     email = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
                     phone = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true),
@@ -300,10 +313,10 @@ namespace Infrastructure.Migrations
                 column: "group_id");
 
             migrationBuilder.CreateIndex(
-                name: "IX_logins_username",
+                name: "IX_logins_login",
                 schema: "corebackend",
                 table: "logins",
-                column: "username",
+                column: "login",
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -351,25 +364,15 @@ namespace Infrastructure.Migrations
                 table: "users",
                 column: "role_id");
 
-            var createdAt = new DateTimeOffset(2026, 8, 24, 0, 0, 0, TimeSpan.Zero);
-            var adminEventId = new Guid("22222222-2222-2222-2222-222222222222");
-            var adminGroupId = new Guid("33333333-3333-3333-3333-333333333333");
-            var administratorRoleId = new Guid("44444444-4444-4444-4444-444444444444");
-            var adminUserId = new Guid("55555555-5555-5555-5555-555555555555");
-            var adminLoginId = adminUserId;
-            var createEventPermissionId = new Guid("aaaaaaaa-0000-0000-0000-000000000001");
-            var createGuestPermissionId = new Guid("aaaaaaaa-0000-0000-0000-000000000002");
-            var createGroupPermissionId = new Guid("aaaaaaaa-0000-0000-0000-000000000003");
-            var approveGuestPermissionId = new Guid("aaaaaaaa-0000-0000-0000-000000000004");
-            var createUserPermissionId = new Guid("aaaaaaaa-0000-0000-0000-000000000005");
+            var createdAt = new DateTimeOffset(2026, 8, 28, 0, 0, 0, TimeSpan.Zero);
 
             migrationBuilder.InsertData(
                 schema: "corebackend",
                 table: "logins",
-                columns: new[] { "id", "username", "password_hash", "created_at" },
+                columns: new[] { "id", "login", "password_hash", "created_at" },
                 values: new object[,]
                 {
-                    { adminLoginId, "admin", "jGl25bVBBBW96Qi9Te4V37Fnqchz/Eu4qB9vKrRIqRg=", createdAt }
+                    { 1L, "admin", "jGl25bVBBBW96Qi9Te4V37Fnqchz/Eu4qB9vKrRIqRg=", createdAt }
                 });
 
             migrationBuilder.InsertData(
@@ -378,11 +381,11 @@ namespace Infrastructure.Migrations
                 columns: new[] { "id", "code", "description", "created_at" },
                 values: new object[,]
                 {
-                    { createEventPermissionId, "create_event", "Create events", createdAt },
-                    { createGuestPermissionId, "create_guest", "Create guests", createdAt },
-                    { createGroupPermissionId, "create_group", "Create groups", createdAt },
-                    { approveGuestPermissionId, "approve_guest", "Approve or reject guests", createdAt },
-                    { createUserPermissionId, "create_user", "Create event users", createdAt }
+                    { 1L, "create_event", "Create events", createdAt },
+                    { 2L, "create_guest", "Create guests", createdAt },
+                    { 3L, "create_group", "Create groups", createdAt },
+                    { 4L, "approve_guest", "Approve or reject guests", createdAt },
+                    { 5L, "create_user", "Create event users", createdAt }
                 });
 
             migrationBuilder.InsertData(
@@ -391,7 +394,7 @@ namespace Infrastructure.Migrations
                 columns: new[] { "id", "name", "description", "logo_image_id", "owner_id", "created_at", "is_archived" },
                 values: new object[,]
                 {
-                    { adminEventId, "Initial administration event", "Bootstrap event for the administrator account.", null, adminUserId, createdAt, false }
+                    { 1L, "Initial administration event", "Bootstrap event for the administrator account.", null, 1L, createdAt, false }
                 });
 
             migrationBuilder.InsertData(
@@ -400,7 +403,7 @@ namespace Infrastructure.Migrations
                 columns: new[] { "id", "event_id", "parent_group_id", "name", "quota", "created_at" },
                 values: new object[,]
                 {
-                    { adminGroupId, adminEventId, null, "Root", 1000, createdAt }
+                    { 1L, 1L, null, "Root", 1000, createdAt }
                 });
 
             migrationBuilder.InsertData(
@@ -409,7 +412,7 @@ namespace Infrastructure.Migrations
                 columns: new[] { "id", "event_id", "name", "created_at" },
                 values: new object[,]
                 {
-                    { administratorRoleId, adminEventId, "administrator", createdAt }
+                    { 1L, 1L, "administrator", createdAt }
                 });
 
             migrationBuilder.InsertData(
@@ -418,21 +421,30 @@ namespace Infrastructure.Migrations
                 columns: new[] { "role_id", "permission_id" },
                 values: new object[,]
                 {
-                    { administratorRoleId, createEventPermissionId },
-                    { administratorRoleId, createGuestPermissionId },
-                    { administratorRoleId, createGroupPermissionId },
-                    { administratorRoleId, approveGuestPermissionId },
-                    { administratorRoleId, createUserPermissionId }
+                    { 1L, 1L },
+                    { 1L, 2L },
+                    { 1L, 3L },
+                    { 1L, 4L },
+                    { 1L, 5L }
                 });
 
             migrationBuilder.InsertData(
                 schema: "corebackend",
                 table: "users",
-                columns: new[] { "id", "login_id", "event_id", "role_id", "group_id", "display_name", "meta", "created_at" },
+                columns: new[] { "id", "login_id", "event_id", "role_id", "group_id", "name", "surname", "additional_name", "email", "tel", "meta", "created_at" },
                 values: new object[,]
                 {
-                    { adminUserId, adminLoginId, adminEventId, administratorRoleId, adminGroupId, "Administrator", null, createdAt }
+                    { 1L, 1L, 1L, 1L, 1L, "Admin", "Administrator", null, "admin@example.com", null, null, createdAt }
                 });
+
+            migrationBuilder.Sql("""
+                SELECT setval(pg_get_serial_sequence('"corebackend"."logins"', 'id'), (SELECT MAX(id) FROM corebackend.logins));
+                SELECT setval(pg_get_serial_sequence('"corebackend"."permissions"', 'id'), (SELECT MAX(id) FROM corebackend.permissions));
+                SELECT setval(pg_get_serial_sequence('"corebackend"."events"', 'id'), (SELECT MAX(id) FROM corebackend.events));
+                SELECT setval(pg_get_serial_sequence('"corebackend"."groups"', 'id'), (SELECT MAX(id) FROM corebackend.groups));
+                SELECT setval(pg_get_serial_sequence('"corebackend"."roles"', 'id'), (SELECT MAX(id) FROM corebackend.roles));
+                SELECT setval(pg_get_serial_sequence('"corebackend"."users"', 'id'), (SELECT MAX(id) FROM corebackend.users));
+                """);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_events_users_owner_id",

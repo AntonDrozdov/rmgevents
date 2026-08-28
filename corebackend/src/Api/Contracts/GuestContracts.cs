@@ -1,9 +1,9 @@
 namespace Api.Contracts;
 
 public sealed record GuestDto(
-    Guid Id,
-    Guid EventId,
-    Guid GroupId,
+    long Id,
+    long EventId,
+    long GroupId,
     string Name,
     string? Email,
     string? Phone,
@@ -15,8 +15,8 @@ public sealed record CreateGuestRequest(
     string Name,
     string? Email,
     string? Phone,
-    Guid GroupId);
+    long GroupId);
 
 public sealed record ApproveGuestRequest(
-    Guid GuestId,
+    long GuestId,
     bool Approve);

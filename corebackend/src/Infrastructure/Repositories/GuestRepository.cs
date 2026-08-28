@@ -6,14 +6,14 @@ namespace Infrastructure.Repositories;
 
 public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
 {
-    public async Task<Application.Entities.Guest?> GetByIdAsync(Guid id)
+    public async Task<Application.Entities.Guest?> GetByIdAsync(long id)
     {
         return await db.Guests
             .Include(x => x.Group)
             .FirstOrDefaultAsync(x => x.Id == id);
     }
     
-    public async Task<List<Application.Entities.Guest>> GetByEventIdAsync(Guid eventId)
+    public async Task<List<Application.Entities.Guest>> GetByEventIdAsync(long eventId)
     {
         return await db.Guests
             .Where(x => x.EventId == eventId)
@@ -21,14 +21,14 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .ToListAsync();
     }
     
-    public async Task<List<Application.Entities.Guest>> GetByGroupIdAsync(Guid groupId)
+    public async Task<List<Application.Entities.Guest>> GetByGroupIdAsync(long groupId)
     {
         return await db.Guests
             .Where(x => x.GroupId == groupId)
             .ToListAsync();
     }
     
-    public async Task<List<Application.Entities.Guest>> GetByStatusAsync(Guid eventId, string status)
+    public async Task<List<Application.Entities.Guest>> GetByStatusAsync(long eventId, string status)
     {
         return await db.Guests
             .Where(x => x.EventId == eventId && x.Status == status)
@@ -36,7 +36,7 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .ToListAsync();
     }
     
-    public async Task<int> GetGuestCountByGroupAsync(Guid groupId)
+    public async Task<int> GetGuestCountByGroupAsync(long groupId)
     {
         return await db.Guests
             .Where(x => x.GroupId == groupId && x.Status != "rejected")
@@ -54,7 +54,7 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         await Task.CompletedTask;
     }
     
-    public async Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(long id)
     {
         var guest = await db.Guests.FindAsync(id);
         if (guest != null)

@@ -1,177 +1,169 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Modal } from "../components/Modal";
+import { RmgLogo } from "../components/RmgLogo";
+import { UserMenu } from "../components/UserMenu";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
-import { EventDetailDto, GroupTreeDto, GuestDto, UserDto } from "../types";
-import { flattenGroups } from "../utils/groups";
+import { EventOption } from "../types";
 
 export const DashboardPage: React.FC = () => {
-  const { currentUser, currentEvent, events, selectEvent, logout } = useAuth();
-  const [eventDetails, setEventDetails] = useState<EventDetailDto | null>(null);
-  const [groups, setGroups] = useState<GroupTreeDto[]>([]);
-  const [guests, setGuests] = useState<GuestDto[]>([]);
-  const [users, setUsers] = useState<UserDto[]>([]);
+  const { addEvent, currentUser, events, selectEvent } = useAuth();
+  const navigate = useNavigate();
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const navigate = useNavigate();
 
-  const permissions = currentUser?.permissions ?? [];
-  const groupCount = useMemo(() => flattenGroups(groups).length, [groups]);
-  const approvedGuests = guests.filter((guest) => guest.status === "approved").length;
-  const pendingGuests = guests.filter((guest) => guest.status === "pending").length;
+  const canCreateEvent = currentUser?.permissions.includes("create_event") ?? false;
 
   useEffect(() => {
-    const loadDashboard = async () => {
-      if (!currentEvent) return;
-
-      setLoading(true);
-      setError("");
-
-      try {
-        const [details, groupTree, guestList, userList] = await Promise.all([
-          apiClient.getEvent(currentEvent.id),
-          apiClient.getGroupTree(currentEvent.id),
-          apiClient.getGuests(currentEvent.id),
-          apiClient.getUsers(currentEvent.id),
-        ]);
-
-        setEventDetails(details);
-        setGroups(groupTree);
-        setGuests(guestList);
-        setUsers(userList);
-      } catch (err) {
-        setError("Не удалось загрузить данные мероприятия.");
-        console.error(err);
-      } finally {
-        setLoading(false);
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (!mobileMenuRef.current?.contains(event.target as Node)) {
+        setIsMobileMenuOpen(false);
       }
     };
 
-    loadDashboard();
-  }, [currentEvent]);
+    document.addEventListener("mousedown", handleDocumentClick);
+    return () => document.removeEventListener("mousedown", handleDocumentClick);
+  }, []);
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login", { replace: true });
+  const openEvent = async (event: EventOption) => {
+    await selectEvent(event);
+    navigate(`/events/${event.id}/guests`);
   };
 
-  if (!currentEvent) {
-    return (
-      <main className="page-shell">
-        <section className="empty-state">
-          <h1>Нет доступных мероприятий</h1>
-          <p>После входа система должна вернуть хотя бы одно мероприятие с ролью пользователя.</p>
-          <button className="secondary-button" onClick={handleLogout}>Выйти</button>
-        </section>
-      </main>
-    );
-  }
+  const closeCreateModal = () => {
+    if (loading) return;
+    setIsCreateModalOpen(false);
+    setError("");
+  };
+
+  const handleCreateEvent = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      const createdEvent = await apiClient.createEvent({
+        name: name.trim(),
+        description: description.trim() || undefined,
+      });
+
+      const eventOption = {
+        id: createdEvent.id,
+        name: createdEvent.name,
+        roleName: currentUser?.roleName ?? "administrator",
+      };
+
+      addEvent(eventOption);
+      setName("");
+      setDescription("");
+      setIsCreateModalOpen(false);
+      await selectEvent(eventOption);
+      navigate(`/events/${createdEvent.id}/guests`);
+    } catch (err) {
+      setError("Не удалось создать мероприятие.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <main className="app-layout">
-      <aside className="sidebar">
-        <div>
-          <p className="eyebrow">RMG Events</p>
-          <h1>Панель управления</h1>
+    <main className="dashboard-page">
+      <header className="dashboard-header dashboard-mobile-header">
+        <div className="dashboard-title-block">
+          <div className="dashboard-mobile-brand">
+            <RmgLogo />
+          </div>
         </div>
 
-        <div className="event-switcher">
-          <span className="sidebar-label">Мероприятия</span>
-          {events.map((event) => (
+        <div className="dashboard-header-actions">
+          <div className="dashboard-desktop-user">
+            <UserMenu />
+          </div>
+
+          <div className="dashboard-mobile-menu" ref={mobileMenuRef}>
             <button
-              className={event.id === currentEvent.id ? "event-button active" : "event-button"}
-              key={event.id}
-              onClick={() => selectEvent(event)}
+              className="mobile-menu-button"
               type="button"
+              onClick={() => setIsMobileMenuOpen((value) => !value)}
+              aria-expanded={isMobileMenuOpen}
+              aria-label="Открыть меню"
             >
-              <span>{event.name}</span>
-              <small>{event.roleName}</small>
+              <span />
+              <span />
+              <span />
+            </button>
+
+            {isMobileMenuOpen && (
+              <div className="mobile-menu-panel">
+                <UserMenu variant="inline" />
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {canCreateEvent && (
+        <div className="dashboard-create-row">
+          <button className="primary-button create-action-button dashboard-create-button" onClick={() => setIsCreateModalOpen(true)}>
+            Создать мероприятие
+          </button>
+        </div>
+      )}
+
+      {events.length === 0 ? (
+        <section className="empty-state">
+          <h2>Нет доступных мероприятий</h2>
+          <p>
+            После входа система должна вернуть список мероприятий, в которых у пользователя есть роль.
+          </p>
+        </section>
+      ) : (
+        <section className="events-grid" aria-label="Список мероприятий">
+          {events.map((event) => (
+            <button className="event-tile" key={event.id} onClick={() => openEvent(event)}>
+              <span className="event-tile-icon">🎟️</span>
+              <strong>{event.name}</strong>
+              <span>{event.roleName}</span>
             </button>
           ))}
-        </div>
+        </section>
+      )}
 
-        <button className="secondary-button full-width" onClick={handleLogout}>Выйти</button>
-      </aside>
+      {isCreateModalOpen && (
+        <Modal
+          title="Создать мероприятие"
+          description="Заполните название и описание. После создания откроется вкладка гостей."
+          onClose={closeCreateModal}
+        >
+          {error && <div className="alert alert-error">{error}</div>}
 
-      <section className="content">
-        <header className="page-header">
-          <div>
-            <p className="eyebrow">Текущее мероприятие</p>
-            <h2>{eventDetails?.name ?? currentEvent.name}</h2>
-            <p className="muted">{eventDetails?.description || "Описание мероприятия не заполнено."}</p>
-          </div>
-          <div className="profile-pill">
-            <span>{currentUser?.displayName ?? "Пользователь"}</span>
-            <small>{currentUser?.roleName ?? currentEvent.roleName}</small>
-          </div>
-        </header>
-
-        {error && <div className="alert alert-error">{error}</div>}
-        {loading && <div className="panel">Загрузка данных...</div>}
-
-        {!loading && (
-          <>
-            <section className="stats-grid">
-              <article className="metric">
-                <span>Группы</span>
-                <strong>{groupCount}</strong>
-              </article>
-              <article className="metric">
-                <span>Гости</span>
-                <strong>{guests.length}</strong>
-              </article>
-              <article className="metric">
-                <span>Ожидают решения</span>
-                <strong>{pendingGuests}</strong>
-              </article>
-              <article className="metric">
-                <span>Одобрены</span>
-                <strong>{approvedGuests}</strong>
-              </article>
-              <article className="metric">
-                <span>Сотрудники</span>
-                <strong>{users.length}</strong>
-              </article>
-            </section>
-
-            <section className="panel">
-              <div className="section-heading">
-                <div>
-                  <h3>Доступные действия</h3>
-                  <p className="muted">Интерфейс показывает операции по разрешениям текущей роли.</p>
-                </div>
-              </div>
-
-              <div className="action-grid">
-                {(permissions.includes("create_guest") || permissions.includes("approve_guest")) && (
-                  <button className="action-card" onClick={() => navigate(`/events/${currentEvent.id}/guests`)}>
-                    <strong>Гости</strong>
-                    <span>Создание, просмотр и согласование заявок</span>
-                  </button>
-                )}
-                {permissions.includes("create_group") && (
-                  <button className="action-card" onClick={() => navigate(`/events/${currentEvent.id}/groups`)}>
-                    <strong>Группы</strong>
-                    <span>Иерархия групп и квоты вместимости</span>
-                  </button>
-                )}
-                {permissions.includes("create_user") && (
-                  <button className="action-card" onClick={() => navigate(`/events/${currentEvent.id}/users`)}>
-                    <strong>Сотрудники</strong>
-                    <span>Назначение пользователей на роли и группы</span>
-                  </button>
-                )}
-                {permissions.includes("create_event") && (
-                  <button className="action-card" onClick={() => navigate("/events/create")}>
-                    <strong>Новое мероприятие</strong>
-                    <span>Создание мероприятия и стартовой группы</span>
-                  </button>
-                )}
-              </div>
-            </section>
-          </>
-        )}
-      </section>
+          <form className="form" onSubmit={handleCreateEvent}>
+            <label className="field">
+              <span>Название</span>
+              <input value={name} onChange={(event) => setName(event.target.value)} disabled={loading} required />
+            </label>
+            <label className="field">
+              <span>Описание</span>
+              <textarea value={description} onChange={(event) => setDescription(event.target.value)} disabled={loading} rows={5} />
+            </label>
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={closeCreateModal} disabled={loading}>
+                Закрыть
+              </button>
+              <button className="primary-button" type="submit" disabled={loading}>
+                {loading ? "Создаём..." : "Создать"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </main>
   );
 };

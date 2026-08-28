@@ -2,8 +2,8 @@ namespace Application.Entities;
 
 public sealed class RolePermission
 {
-    public Guid RoleId { get; set; }
-    public Guid PermissionId { get; set; }
+    public long RoleId { get; set; }
+    public long PermissionId { get; set; }
     
     // Navigation properties
     public Role? Role { get; set; }

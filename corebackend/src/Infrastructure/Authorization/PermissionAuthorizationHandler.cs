@@ -14,7 +14,7 @@ public class PermissionAuthorizationHandler(IPermissionService permissionService
     {
         // Получаем userId из Claims
         var userIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userIdClaim == null || !Guid.TryParse(userIdClaim, out var userId))
+        if (userIdClaim == null || !long.TryParse(userIdClaim, out var userId))
         {
             context.Fail();
             return;
@@ -32,7 +32,7 @@ public class PermissionAuthorizationHandler(IPermissionService permissionService
         var routeData = httpContext.GetRouteData();
         var routeEventId = routeData?.Values["eventId"]?.ToString();
         
-        if (string.IsNullOrEmpty(routeEventId) || !Guid.TryParse(routeEventId, out var eventId))
+        if (string.IsNullOrEmpty(routeEventId) || !long.TryParse(routeEventId, out var eventId))
         {
             if (!requirement.RequiresGroup &&
                 await permissionService.HasPermissionInAnyEventAsync(userId, requirement.Permission))

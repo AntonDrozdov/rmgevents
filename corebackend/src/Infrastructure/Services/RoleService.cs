@@ -8,13 +8,13 @@ public sealed class RoleService(
     IPermissionRepository permissionRepository) : IRoleService
 {
     public async Task<Application.Entities.Role> CreateRoleAsync(
-        Guid eventId,
+        long eventId,
         string name,
         List<string> permissionCodes)
     {
         var role = new Application.Entities.Role
         {
-            Id = Guid.NewGuid(),
+            Id = 0,
             EventId = eventId,
             Name = name,
             CreatedAt = DateTimeOffset.UtcNow
@@ -41,17 +41,17 @@ public sealed class RoleService(
         return role;
     }
     
-    public async Task<Application.Entities.Role?> GetRoleAsync(Guid roleId)
+    public async Task<Application.Entities.Role?> GetRoleAsync(long roleId)
     {
         return await roleRepository.GetByIdAsync(roleId);
     }
     
-    public async Task<List<Application.Entities.Role>> GetRolesByEventAsync(Guid eventId)
+    public async Task<List<Application.Entities.Role>> GetRolesByEventAsync(long eventId)
     {
         return await roleRepository.GetByEventIdAsync(eventId);
     }
     
-    public async Task UpdateRoleAsync(Guid roleId, string name, List<string> permissionCodes)
+    public async Task UpdateRoleAsync(long roleId, string name, List<string> permissionCodes)
     {
         var role = await roleRepository.GetByIdAsync(roleId);
         if (role == null)
@@ -77,13 +77,13 @@ public sealed class RoleService(
         await roleRepository.SaveChangesAsync();
     }
     
-    public async Task DeleteRoleAsync(Guid roleId)
+    public async Task DeleteRoleAsync(long roleId)
     {
         await roleRepository.DeleteAsync(roleId);
         await roleRepository.SaveChangesAsync();
     }
     
-    public async Task SeedDefaultRolesAsync(Guid eventId)
+    public async Task SeedDefaultRolesAsync(long eventId)
     {
         var permissions = await permissionRepository.GetAllAsync();
         

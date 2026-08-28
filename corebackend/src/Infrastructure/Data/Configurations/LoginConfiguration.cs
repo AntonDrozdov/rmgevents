@@ -14,10 +14,10 @@ public sealed class LoginConfiguration : IEntityTypeConfiguration<Login>
         
         builder.Property(x => x.Id)
             .HasColumnName("id")
-            .ValueGeneratedNever();
+            .ValueGeneratedOnAdd();
         
-        builder.Property(x => x.Username)
-            .HasColumnName("username")
+        builder.Property(x => x.LoginValue)
+            .HasColumnName("login")
             .IsRequired()
             .HasMaxLength(255);
         
@@ -28,7 +28,7 @@ public sealed class LoginConfiguration : IEntityTypeConfiguration<Login>
         builder.Property(x => x.CreatedAt)
             .HasColumnName("created_at");
         
-        builder.HasIndex(x => x.Username)
+        builder.HasIndex(x => x.LoginValue)
             .IsUnique();
         
         builder.HasMany(x => x.Users)

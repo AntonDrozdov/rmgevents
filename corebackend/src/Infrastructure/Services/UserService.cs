@@ -8,11 +8,15 @@ public sealed class UserService(
     ILoginRepository loginRepository) : IUserService
 {
     public async Task<Application.Entities.User> CreateUserAsync(
-        Guid eventId,
-        Guid loginId,
-        string displayName,
-        Guid roleId,
-        Guid groupId)
+        long eventId,
+        long loginId,
+        string name,
+        string surname,
+        string? additionalName,
+        string? email,
+        string? tel,
+        long roleId,
+        long groupId)
     {
         var login = await loginRepository.GetByIdAsync(loginId);
         if (login == null)
@@ -20,12 +24,16 @@ public sealed class UserService(
         
         var user = new Application.Entities.User
         {
-            Id = Guid.NewGuid(),
+            Id = 0,
             LoginId = loginId,
             EventId = eventId,
             RoleId = roleId,
             GroupId = groupId,
-            DisplayName = displayName,
+            Name = name,
+            Surname = surname,
+            AdditionalName = additionalName,
+            Email = email,
+            Tel = tel,
             CreatedAt = DateTimeOffset.UtcNow
         };
         
@@ -35,37 +43,52 @@ public sealed class UserService(
         return user;
     }
     
-    public async Task<Application.Entities.User?> GetUserAsync(Guid userId)
+    public async Task<Application.Entities.User?> GetUserAsync(long userId)
     {
         return await userRepository.GetByIdAsync(userId);
     }
     
-    public async Task<Application.Entities.User?> GetUserInEventAsync(Guid userId, Guid eventId)
+    public async Task<Application.Entities.User?> GetUserInEventAsync(long userId, long eventId)
     {
         var user = await userRepository.GetByIdAsync(userId);
         if (user?.EventId != eventId)
             return null;
         return user;
     }
+
+    public async Task<Application.Entities.User?> GetUserByLoginAndEventAsync(long loginId, long eventId)
+    {
+        return await userRepository.GetByLoginAndEventAsync(loginId, eventId);
+    }
     
-    public async Task<List<Application.Entities.User>> GetUsersByEventAsync(Guid eventId)
+    public async Task<List<Application.Entities.User>> GetUsersByEventAsync(long eventId)
     {
         return await userRepository.GetByEventIdAsync(eventId);
     }
     
-    public async Task UpdateUserAsync(Guid userId, string displayName)
+    public async Task UpdateUserAsync(
+        long userId,
+        string name,
+        string surname,
+        string? additionalName,
+        string? email,
+        string? tel)
     {
         var user = await userRepository.GetByIdAsync(userId);
         if (user == null)
             throw new InvalidOperationException($"User {userId} not found");
         
-        user.DisplayName = displayName;
+        user.Name = name;
+        user.Surname = surname;
+        user.AdditionalName = additionalName;
+        user.Email = email;
+        user.Tel = tel;
         
         await userRepository.UpdateAsync(user);
         await userRepository.SaveChangesAsync();
     }
     
-    public async Task AssignRoleAsync(Guid userId, Guid eventId, Guid roleId, Guid groupId)
+    public async Task AssignRoleAsync(long userId, long eventId, long roleId, long groupId)
     {
         var user = await userRepository.GetByIdAsync(userId);
         if (user == null)
@@ -81,7 +104,7 @@ public sealed class UserService(
         await userRepository.SaveChangesAsync();
     }
     
-    public async Task DeleteUserAsync(Guid userId)
+    public async Task DeleteUserAsync(long userId)
     {
         await userRepository.DeleteAsync(userId);
         await userRepository.SaveChangesAsync();

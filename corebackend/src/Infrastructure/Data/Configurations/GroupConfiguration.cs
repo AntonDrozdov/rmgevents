@@ -14,7 +14,7 @@ public sealed class GroupConfiguration : IEntityTypeConfiguration<Group>
         
         builder.Property(x => x.Id)
             .HasColumnName("id")
-            .ValueGeneratedNever();
+            .ValueGeneratedOnAdd();
         
         builder.Property(x => x.EventId)
             .HasColumnName("event_id")

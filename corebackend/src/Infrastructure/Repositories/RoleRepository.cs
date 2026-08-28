@@ -6,7 +6,7 @@ namespace Infrastructure.Repositories;
 
 public sealed class RoleRepository(ApplicationDbContext db) : IRoleRepository
 {
-    public async Task<Application.Entities.Role?> GetByIdAsync(Guid id)
+    public async Task<Application.Entities.Role?> GetByIdAsync(long id)
     {
         return await db.Roles
             .Include(x => x.RolePermissions)
@@ -14,7 +14,7 @@ public sealed class RoleRepository(ApplicationDbContext db) : IRoleRepository
             .FirstOrDefaultAsync(x => x.Id == id);
     }
     
-    public async Task<List<Application.Entities.Role>> GetByEventIdAsync(Guid eventId)
+    public async Task<List<Application.Entities.Role>> GetByEventIdAsync(long eventId)
     {
         return await db.Roles
             .Where(x => x.EventId == eventId)
@@ -23,7 +23,7 @@ public sealed class RoleRepository(ApplicationDbContext db) : IRoleRepository
             .ToListAsync();
     }
     
-    public async Task<Application.Entities.Role?> GetByEventAndNameAsync(Guid eventId, string name)
+    public async Task<Application.Entities.Role?> GetByEventAndNameAsync(long eventId, string name)
     {
         return await db.Roles
             .Where(x => x.EventId == eventId && x.Name == name)
@@ -43,7 +43,7 @@ public sealed class RoleRepository(ApplicationDbContext db) : IRoleRepository
         await Task.CompletedTask;
     }
     
-    public async Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(long id)
     {
         var role = await db.Roles.FindAsync(id);
         if (role != null)

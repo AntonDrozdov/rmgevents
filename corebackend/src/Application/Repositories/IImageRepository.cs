@@ -4,5 +4,5 @@ namespace Application.Repositories;
 
 public interface IImageRepository
 {
-    Task<ImageEntity?> GetImage(Guid id, CancellationToken cancellationToken = default);
+    Task<ImageEntity?> GetImage(long id, CancellationToken cancellationToken = default);
 }

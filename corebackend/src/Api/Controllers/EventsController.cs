@@ -11,12 +11,25 @@ namespace Api.Controllers;
 [Authorize]
 public sealed class EventsController(
     IEventService eventService,
+    IUserService userService,
     IPermissionService permissionService) : ControllerBase
 {
+    private static UserProfileDto MapProfile(Application.Entities.User user, List<string> permissions) =>
+        new(
+            user.Id,
+            user.Name,
+            user.Surname,
+            user.AdditionalName,
+            user.Email,
+            user.Tel,
+            user.Role?.Name ?? string.Empty,
+            user.GroupId,
+            permissions);
+
     [HttpGet]
     public async Task<ActionResult<List<EventDto>>> GetAvailableEvents()
     {
-        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         var events = await eventService.GetEventsByOwnerAsync(userId);
         
         var result = events.Select(e => new EventDto(
@@ -33,21 +46,20 @@ public sealed class EventsController(
     }
     
     [HttpGet("{eventId}")]
-    public async Task<ActionResult<EventDetailDto>> GetEvent(Guid eventId)
+    public async Task<ActionResult<EventDetailDto>> GetEvent(long eventId)
     {
         var @event = await eventService.GetEventAsync(eventId);
         if (@event == null)
             return NotFound();
         
-        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var permissions = await permissionService.GetUserPermissionsAsync(userId, eventId);
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var user = await userService.GetUserByLoginAndEventAsync(loginId, eventId);
+        if (user == null)
+            return Forbid();
+
+        var permissions = await permissionService.GetUserPermissionsAsync(user.Id, eventId);
         
-        var userProfile = new UserProfileDto(
-            userId,
-            "User",
-            "Role",
-            Guid.Empty,
-            permissions);
+        var userProfile = MapProfile(user, permissions);
         
         return Ok(new EventDetailDto(
             @event.Id,
@@ -60,17 +72,16 @@ public sealed class EventsController(
     }
     
     [HttpGet("{eventId}/me")]
-    public async Task<ActionResult<UserProfileDto>> GetCurrentUserProfile(Guid eventId)
+    public async Task<ActionResult<UserProfileDto>> GetCurrentUserProfile(long eventId)
     {
-        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var permissions = await permissionService.GetUserPermissionsAsync(userId, eventId);
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var user = await userService.GetUserByLoginAndEventAsync(loginId, eventId);
+        if (user == null)
+            return Forbid();
+
+        var permissions = await permissionService.GetUserPermissionsAsync(user.Id, eventId);
         
-        var userProfile = new UserProfileDto(
-            userId,
-            "User",
-            "Role",
-            Guid.Empty,
-            permissions);
+        var userProfile = MapProfile(user, permissions);
         
         return Ok(userProfile);
     }
@@ -79,7 +90,7 @@ public sealed class EventsController(
     [HttpPost]
     public async Task<ActionResult<EventDto>> CreateEvent(CreateEventRequest request)
     {
-        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         var @event = await eventService.CreateEventAsync(userId, request.Name, request.Description, request.LogoImageId);
         
         return Created(

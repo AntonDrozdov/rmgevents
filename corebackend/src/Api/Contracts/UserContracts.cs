@@ -1,21 +1,33 @@
 namespace Api.Contracts;
 
 public sealed record UserDto(
-    Guid Id,
-    Guid LoginId,
-    Guid EventId,
-    Guid RoleId,
-    Guid GroupId,
-    string DisplayName,
+    long Id,
+    long LoginId,
+    long EventId,
+    long RoleId,
+    long GroupId,
+    string Name,
+    string Surname,
+    string? AdditionalName,
+    string? Email,
+    string? Tel,
     DateTimeOffset CreatedAt);
 
 public sealed record CreateUserRequest(
-    string Username,
-    string DisplayName,
-    Guid RoleId,
-    Guid GroupId);
+    long LoginId,
+    string Name,
+    string Surname,
+    string? AdditionalName,
+    string? Email,
+    string? Tel,
+    long RoleId,
+    long GroupId);
 
 public sealed record UpdateUserRequest(
-    string DisplayName,
-    Guid RoleId,
-    Guid GroupId);
+    string Name,
+    string Surname,
+    string? AdditionalName,
+    string? Email,
+    string? Tel,
+    long RoleId,
+    long GroupId);

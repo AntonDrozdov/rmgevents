@@ -8,14 +8,14 @@ public sealed class EventService(
     IGroupRepository groupRepository) : IEventService
 {
     public async Task<Application.Entities.Event> CreateEventAsync(
-        Guid ownerId,
+        long ownerId,
         string name,
         string? description,
-        Guid? logoImageId = null)
+        long? logoImageId = null)
     {
         var @event = new Application.Entities.Event
         {
-            Id = Guid.NewGuid(),
+            Id = 0,
             Name = name,
             Description = description,
             LogoImageId = logoImageId,
@@ -33,22 +33,22 @@ public sealed class EventService(
         return @event;
     }
     
-    public async Task<Application.Entities.Event?> GetEventAsync(Guid eventId)
+    public async Task<Application.Entities.Event?> GetEventAsync(long eventId)
     {
         return await eventRepository.GetByIdAsync(eventId);
     }
     
-    public async Task<List<Application.Entities.Event>> GetEventsByUserAsync(Guid userId)
+    public async Task<List<Application.Entities.Event>> GetEventsByUserAsync(long userId)
     {
         return await eventRepository.GetByUserAsync(userId);
     }
     
-    public async Task<List<Application.Entities.Event>> GetEventsByOwnerAsync(Guid ownerId)
+    public async Task<List<Application.Entities.Event>> GetEventsByOwnerAsync(long ownerId)
     {
         return await eventRepository.GetByOwnerIdAsync(ownerId);
     }
     
-    public async Task UpdateEventAsync(Guid eventId, string name, string? description)
+    public async Task UpdateEventAsync(long eventId, string name, string? description)
     {
         var @event = await eventRepository.GetByIdAsync(eventId);
         if (@event == null)
@@ -61,17 +61,17 @@ public sealed class EventService(
         await eventRepository.SaveChangesAsync();
     }
     
-    public async Task DeleteEventAsync(Guid eventId)
+    public async Task DeleteEventAsync(long eventId)
     {
         await eventRepository.DeleteAsync(eventId);
         await eventRepository.SaveChangesAsync();
     }
     
-    public async Task<Application.Entities.Group> CreateRootGroupAsync(Guid eventId, string name, int quota)
+    public async Task<Application.Entities.Group> CreateRootGroupAsync(long eventId, string name, int quota)
     {
         var rootGroup = new Application.Entities.Group
         {
-            Id = Guid.NewGuid(),
+            Id = 0,
             EventId = eventId,
             ParentGroupId = null,
             Name = name,

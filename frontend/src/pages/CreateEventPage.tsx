@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
 
 export const CreateEventPage: React.FC = () => {
   const navigate = useNavigate();
+  const { addEvent, currentUser } = useAuth();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
@@ -15,11 +17,16 @@ export const CreateEventPage: React.FC = () => {
     setError("");
 
     try {
-      await apiClient.createEvent({
+      const createdEvent = await apiClient.createEvent({
         name: name.trim(),
         description: description.trim() || undefined,
       });
-      navigate("/dashboard");
+      addEvent({
+        id: createdEvent.id,
+        name: createdEvent.name,
+        roleName: currentUser?.roleName ?? "administrator",
+      });
+      navigate(`/events/${createdEvent.id}/guests`);
     } catch (err) {
       setError("Не удалось создать мероприятие.");
       console.error(err);
@@ -34,7 +41,9 @@ export const CreateEventPage: React.FC = () => {
         <div>
           <p className="eyebrow">Новое мероприятие</p>
           <h1>Создать мероприятие</h1>
-          <p className="muted">После создания бэкенд заведёт корневую группу по умолчанию.</p>
+          <p className="muted">
+            После создания откроется страница настройки мероприятия с вкладкой гостей.
+          </p>
         </div>
         <button className="secondary-button" onClick={() => navigate("/dashboard")}>Назад</button>
       </header>

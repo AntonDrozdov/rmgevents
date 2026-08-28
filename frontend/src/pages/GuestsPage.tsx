@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
 import { GroupTreeDto, GuestDto } from "../types";
@@ -8,18 +9,18 @@ import { flattenGroups, groupNameById } from "../utils/groups";
 const statusLabel: Record<string, string> = {
   pending: "Ожидает",
   approved: "Одобрен",
-  rejected: "Отклонен",
+  rejected: "Отклонён",
 };
 
 export const GuestsPage: React.FC = () => {
   const { eventId = "" } = useParams<{ eventId: string }>();
   const { currentUser } = useAuth();
-  const navigate = useNavigate();
   const [guests, setGuests] = useState<GuestDto[]>([]);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [showForm, setShowForm] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -42,14 +43,15 @@ export const GuestsPage: React.FC = () => {
         apiClient.getGuests(eventId),
         apiClient.getGroupTree(eventId),
       ]);
+
       setGuests(guestList);
       setGroups(groupTree);
 
       if (!formData.groupId && groupTree.length > 0) {
-        setFormData((value) => ({ ...value, groupId: flattenGroups(groupTree)[0]?.id ?? "" }));
+        setFormData((value) => ({ ...value, groupId: String(flattenGroups(groupTree)[0]?.id ?? "") }));
       }
     } catch (err) {
-      setError("Ошибка загрузки гостей.");
+      setError("Не удалось загрузить гостей.");
       console.error(err);
     } finally {
       setLoading(false);
@@ -66,28 +68,37 @@ export const GuestsPage: React.FC = () => {
     loadData();
   }, [eventId, canCreate, canApprove]);
 
+  const closeCreateModal = () => {
+    if (saving) return;
+    setIsCreateModalOpen(false);
+    setError("");
+  };
+
   const handleCreateGuest = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
+    setSaving(true);
 
     try {
       await apiClient.createGuest(eventId, {
         name: formData.name.trim(),
         email: formData.email.trim() || undefined,
         phone: formData.phone.trim() || undefined,
-        groupId: formData.groupId,
+        groupId: Number(formData.groupId),
       });
 
-      setFormData({ name: "", email: "", phone: "", groupId: flatGroups[0]?.id ?? "" });
-      setShowForm(false);
+      setFormData({ name: "", email: "", phone: "", groupId: String(flatGroups[0]?.id ?? "") });
+      setIsCreateModalOpen(false);
       await loadData();
     } catch (err) {
       setError("Не удалось создать гостя. Проверьте группу и доступную квоту.");
       console.error(err);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const updateGuestStatus = async (guestId: string, approve: boolean) => {
+  const updateGuestStatus = async (guestId: number, approve: boolean) => {
     setError("");
 
     try {
@@ -100,72 +111,30 @@ export const GuestsPage: React.FC = () => {
   };
 
   return (
-    <main className="page-shell">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Мероприятие</p>
-          <h1>Гости</h1>
-          <p className="muted">Список гостей, их группы и статус согласования.</p>
+    <div className="tab-content">
+      <div className="section-heading guests-heading">
+        <div className="section-title-row">
+          <h2>Гости</h2>
+          <span className="badge">Всего: {guests.length}</span>
         </div>
-        <button className="secondary-button" onClick={() => navigate("/dashboard")}>Назад</button>
-      </header>
-
-      {error && <div className="alert alert-error">{error}</div>}
-
-      {canCreate && (
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <h2>Добавление гостя</h2>
-              <p className="muted">Гость создаётся в выбранной группе с учетом квоты.</p>
-            </div>
-            <button className="primary-button" onClick={() => setShowForm((value) => !value)}>
-              {showForm ? "Скрыть форму" : "Добавить гостя"}
+        <div className="section-actions">
+          {canCreate && (
+            <button className="primary-button create-action-button guest-create-button" onClick={() => setIsCreateModalOpen(true)}>
+              Добавить гостя
             </button>
-          </div>
-
-          {showForm && (
-            <form className="form-grid" onSubmit={handleCreateGuest}>
-              <label className="field">
-                <span>Имя</span>
-                <input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} required />
-              </label>
-              <label className="field">
-                <span>Email</span>
-                <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} />
-              </label>
-              <label className="field">
-                <span>Телефон</span>
-                <input type="tel" value={formData.phone} onChange={(event) => setFormData({ ...formData, phone: event.target.value })} />
-              </label>
-              <label className="field">
-                <span>Группа</span>
-                <select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} required>
-                  {flatGroups.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button className="primary-button form-submit" type="submit">Создать гостя</button>
-            </form>
           )}
-        </section>
-      )}
-
-      <section className="panel">
-        <div className="section-heading">
-          <h2>Список гостей</h2>
-          <span className="badge">{guests.length}</span>
         </div>
+      </div>
 
+      {error && !isCreateModalOpen && <div className="alert alert-error">{error}</div>}
+
+      <section className="panel guests-table-panel">
         {loading ? (
           <div className="empty-state compact">Загрузка...</div>
         ) : guests.length === 0 ? (
           <div className="empty-state compact">Гостей пока нет.</div>
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap guests-table-wrap">
             <table>
               <thead>
                 <tr>
@@ -205,6 +174,49 @@ export const GuestsPage: React.FC = () => {
           </div>
         )}
       </section>
-    </main>
+
+      {isCreateModalOpen && (
+        <Modal
+          title="Добавить гостя"
+          description="Гость будет создан в выбранной группе с учётом доступной квоты."
+          onClose={closeCreateModal}
+        >
+          {error && <div className="alert alert-error">{error}</div>}
+
+          <form className="form" onSubmit={handleCreateGuest}>
+            <label className="field">
+              <span>Имя</span>
+              <input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={saving} required />
+            </label>
+            <label className="field">
+              <span>Email</span>
+              <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} disabled={saving} />
+            </label>
+            <label className="field">
+              <span>Телефон</span>
+              <input type="tel" value={formData.phone} onChange={(event) => setFormData({ ...formData, phone: event.target.value })} disabled={saving} />
+            </label>
+            <label className="field">
+              <span>Группа</span>
+              <select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} disabled={saving} required>
+                {flatGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={closeCreateModal} disabled={saving}>
+                Закрыть
+              </button>
+              <button className="primary-button" type="submit" disabled={saving}>
+                {saving ? "Создаём..." : "Создать"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
   );
 };

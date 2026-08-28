@@ -12,9 +12,10 @@ services:
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=rmgevents;Username=postgres;Password=admin
       ASPNETCORE_URLS: http://+:8080
       Jwt__Key: local-development-key-change-in-production-2026
-      Jwt__Issuer: ServerEquipment
-      Jwt__Audience: ServerEquipment.Admin
-      Admin__Username: admin
+      Jwt__Issuer: EA
+      Jwt__Audience: EA.Admin
+      Jwt__SidKey: local-development-sid-encryption-key-change-in-production-2026
+      Admin__Login: admin
       Admin__Password: admin
     ports:
       - "5000:8080"

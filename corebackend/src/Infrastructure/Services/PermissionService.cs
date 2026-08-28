@@ -7,7 +7,7 @@ public sealed class PermissionService(
     IUserRepository userRepository,
     IGroupRepository groupRepository) : IPermissionService
 {
-    public async Task<bool> HasPermissionAsync(Guid userId, Guid eventId, string permissionCode)
+    public async Task<bool> HasPermissionAsync(long userId, long eventId, string permissionCode)
     {
         var user = await userRepository.GetByIdAsync(userId)
             ?? await userRepository.GetByLoginAndEventAsync(userId, eventId);
@@ -21,7 +21,7 @@ public sealed class PermissionService(
         return user.Role.RolePermissions.Any(rp => rp.Permission?.Code == permissionCode);
     }
 
-    public async Task<bool> HasPermissionInAnyEventAsync(Guid loginOrUserId, string permissionCode)
+    public async Task<bool> HasPermissionInAnyEventAsync(long loginOrUserId, string permissionCode)
     {
         var users = await userRepository.GetByLoginIdAsync(loginOrUserId);
         var directUser = await userRepository.GetByIdAsync(loginOrUserId);
@@ -35,7 +35,7 @@ public sealed class PermissionService(
             user.Role?.RolePermissions.Any(rp => rp.Permission?.Code == permissionCode) == true);
     }
     
-    public async Task<List<string>> GetUserPermissionsAsync(Guid userId, Guid eventId)
+    public async Task<List<string>> GetUserPermissionsAsync(long userId, long eventId)
     {
         var user = await userRepository.GetByIdAsync(userId)
             ?? await userRepository.GetByLoginAndEventAsync(userId, eventId);
@@ -48,7 +48,7 @@ public sealed class PermissionService(
             .ToList();
     }
     
-    public async Task<Guid?> GetUserGroupInEventAsync(Guid userId, Guid eventId)
+    public async Task<long?> GetUserGroupInEventAsync(long userId, long eventId)
     {
         var user = await userRepository.GetByIdAsync(userId)
             ?? await userRepository.GetByLoginAndEventAsync(userId, eventId);
@@ -59,7 +59,7 @@ public sealed class PermissionService(
         return user.GroupId;
     }
     
-    public async Task<bool> CanCreateGuestInGroupAsync(Guid userId, Guid eventId, Guid targetGroupId, Guid userGroupId)
+    public async Task<bool> CanCreateGuestInGroupAsync(long userId, long eventId, long targetGroupId, long userGroupId)
     {
         // Пользователь может создавать гостей в своей группе и дочерних группах
         var targetGroup = await groupRepository.GetByIdAsync(targetGroupId);
@@ -74,7 +74,7 @@ public sealed class PermissionService(
         return await IsDescendantOfAsync(targetGroupId, userGroupId);
     }
     
-    public async Task<bool> CanCreateGroupInParentAsync(Guid userId, Guid eventId, Guid parentGroupId, Guid userGroupId)
+    public async Task<bool> CanCreateGroupInParentAsync(long userId, long eventId, long parentGroupId, long userGroupId)
     {
         // Пользователь может создавать подгруппы только в своей группе и дочерних группах
         var parentGroup = await groupRepository.GetByIdAsync(parentGroupId);
@@ -89,7 +89,7 @@ public sealed class PermissionService(
         return await IsDescendantOfAsync(parentGroupId, userGroupId);
     }
     
-    private async Task<bool> IsDescendantOfAsync(Guid childId, Guid parentId)
+    private async Task<bool> IsDescendantOfAsync(long childId, long parentId)
     {
         var current = await groupRepository.GetByIdAsync(childId);
         while (current?.ParentGroupId != null)

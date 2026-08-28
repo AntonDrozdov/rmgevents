@@ -6,7 +6,7 @@ namespace Infrastructure.Repositories;
 
 public sealed class PermissionRepository(ApplicationDbContext db) : IPermissionRepository
 {
-    public async Task<Application.Entities.Permission?> GetByIdAsync(Guid id)
+    public async Task<Application.Entities.Permission?> GetByIdAsync(long id)
     {
         return await db.Permissions.FindAsync(id);
     }
@@ -22,7 +22,7 @@ public sealed class PermissionRepository(ApplicationDbContext db) : IPermissionR
         return await db.Permissions.ToListAsync();
     }
     
-    public async Task<List<Application.Entities.Permission>> GetByRoleIdAsync(Guid roleId)
+    public async Task<List<Application.Entities.Permission>> GetByRoleIdAsync(long roleId)
     {
         return await db.RolePermissions
             .Where(x => x.RoleId == roleId)

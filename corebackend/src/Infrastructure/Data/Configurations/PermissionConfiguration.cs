@@ -14,7 +14,7 @@ public sealed class PermissionConfiguration : IEntityTypeConfiguration<Permissio
         
         builder.Property(x => x.Id)
             .HasColumnName("id")
-            .ValueGeneratedNever();
+            .ValueGeneratedOnAdd();
         
         builder.Property(x => x.Code)
             .HasColumnName("code")

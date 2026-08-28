@@ -14,7 +14,7 @@ public sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
         
         builder.Property(x => x.Id)
             .HasColumnName("id")
-            .ValueGeneratedNever();
+            .ValueGeneratedOnAdd();
         
         builder.Property(x => x.EventId)
             .HasColumnName("event_id")

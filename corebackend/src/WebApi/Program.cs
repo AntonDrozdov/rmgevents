@@ -21,6 +21,27 @@ var jwtKey = builder.Configuration["Jwt:Key"]
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                const string bearerPrefix = "Bearer ";
+                var authorization = context.Request.Headers.Authorization.ToString();
+                if (!authorization.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase))
+                    return Task.CompletedTask;
+
+                var sid = authorization[bearerPrefix.Length..].Trim();
+                var protector = context.HttpContext.RequestServices.GetRequiredService<Application.Services.ISidProtector>();
+                if (string.IsNullOrWhiteSpace(sid) || !protector.TryUnprotect(sid, out var jwt))
+                {
+                    context.Fail("Invalid SID.");
+                    return Task.CompletedTask;
+                }
+
+                context.Token = jwt;
+                return Task.CompletedTask;
+            }
+        };
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
@@ -69,7 +90,7 @@ builder.Services.AddSwaggerGen(options =>
         Name = "Authorization",
         Type = SecuritySchemeType.Http,
         Scheme = "bearer",
-        BearerFormat = "JWT",
+        BearerFormat = "SID",
         In = ParameterLocation.Header
     });
     options.AddSecurityRequirement(new OpenApiSecurityRequirement

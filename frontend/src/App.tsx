@@ -1,8 +1,8 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AuthProvider } from "./contexts/AuthContext";
-import { CreateEventPage } from "./pages/CreateEventPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { EventSettingsPage } from "./pages/EventSettingsPage";
 import { GroupsPage } from "./pages/GroupsPage";
 import { GuestsPage } from "./pages/GuestsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -25,16 +25,22 @@ function App() {
           <Route
             path="/events/create"
             element={
-              <ProtectedRoute requiredPermission="create_event">
-                <CreateEventPage />
+              <ProtectedRoute>
+                <Navigate to="/dashboard" replace />
               </ProtectedRoute>
             }
+          />
+          <Route
+            path="/events/:eventId"
+            element={<Navigate to="guests" replace />}
           />
           <Route
             path="/events/:eventId/guests"
             element={
               <ProtectedRoute>
-                <GuestsPage />
+                <EventSettingsPage>
+                  <GuestsPage />
+                </EventSettingsPage>
               </ProtectedRoute>
             }
           />
@@ -42,7 +48,9 @@ function App() {
             path="/events/:eventId/groups"
             element={
               <ProtectedRoute requiredPermission="create_group">
-                <GroupsPage />
+                <EventSettingsPage>
+                  <GroupsPage />
+                </EventSettingsPage>
               </ProtectedRoute>
             }
           />
@@ -50,7 +58,9 @@ function App() {
             path="/events/:eventId/users"
             element={
               <ProtectedRoute requiredPermission="create_user">
-                <UsersPage />
+                <EventSettingsPage>
+                  <UsersPage />
+                </EventSettingsPage>
               </ProtectedRoute>
             }
           />

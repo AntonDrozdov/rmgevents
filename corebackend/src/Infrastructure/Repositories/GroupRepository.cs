@@ -6,14 +6,14 @@ namespace Infrastructure.Repositories;
 
 public sealed class GroupRepository(ApplicationDbContext db) : IGroupRepository
 {
-    public async Task<Application.Entities.Group?> GetByIdAsync(Guid id)
+    public async Task<Application.Entities.Group?> GetByIdAsync(long id)
     {
         return await db.Groups
             .Include(x => x.ChildGroups)
             .FirstOrDefaultAsync(x => x.Id == id);
     }
     
-    public async Task<List<Application.Entities.Group>> GetByEventIdAsync(Guid eventId)
+    public async Task<List<Application.Entities.Group>> GetByEventIdAsync(long eventId)
     {
         return await db.Groups
             .Where(x => x.EventId == eventId)
@@ -21,7 +21,7 @@ public sealed class GroupRepository(ApplicationDbContext db) : IGroupRepository
             .ToListAsync();
     }
     
-    public async Task<List<Application.Entities.Group>> GetRootGroupsByEventAsync(Guid eventId)
+    public async Task<List<Application.Entities.Group>> GetRootGroupsByEventAsync(long eventId)
     {
         return await db.Groups
             .Where(x => x.EventId == eventId && x.ParentGroupId == null)
@@ -29,17 +29,17 @@ public sealed class GroupRepository(ApplicationDbContext db) : IGroupRepository
             .ToListAsync();
     }
     
-    public async Task<List<Application.Entities.Group>> GetChildrenAsync(Guid groupId)
+    public async Task<List<Application.Entities.Group>> GetChildrenAsync(long groupId)
     {
         return await db.Groups
             .Where(x => x.ParentGroupId == groupId)
             .ToListAsync();
     }
     
-    public async Task<List<Application.Entities.Group>> GetAllDescendantsAsync(Guid groupId)
+    public async Task<List<Application.Entities.Group>> GetAllDescendantsAsync(long groupId)
     {
         var descendants = new List<Application.Entities.Group>();
-        var queue = new Queue<Guid>();
+        var queue = new Queue<long>();
         queue.Enqueue(groupId);
         
         while (queue.Count > 0)
@@ -68,7 +68,7 @@ public sealed class GroupRepository(ApplicationDbContext db) : IGroupRepository
         await Task.CompletedTask;
     }
     
-    public async Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(long id)
     {
         var group = await db.Groups.FindAsync(id);
         if (group != null)

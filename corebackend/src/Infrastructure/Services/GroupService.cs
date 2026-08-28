@@ -8,11 +8,11 @@ public sealed class GroupService(
     IPermissionService permissionService) : IGroupService
 {
     public async Task<Application.Entities.Group> CreateGroupAsync(
-        Guid eventId,
-        Guid userId,
+        long eventId,
+        long userId,
         string name,
         int quota,
-        Guid? parentGroupId)
+        long? parentGroupId)
     {
         // Проверяем разрешение
         if (!await permissionService.HasPermissionAsync(userId, eventId, "create_group"))
@@ -24,7 +24,7 @@ public sealed class GroupService(
             throw new InvalidOperationException("User not assigned to a group");
         
         // Проверяем что пользователь может создавать в этой родительской группе
-        Guid actualParentId = parentGroupId ?? userGroupId.Value;
+        long actualParentId = parentGroupId ?? userGroupId.Value;
         
         if (!await permissionService.CanCreateGroupInParentAsync(userId, eventId, actualParentId, userGroupId.Value))
             throw new UnauthorizedAccessException("Cannot create group in this parent group");
@@ -34,7 +34,7 @@ public sealed class GroupService(
         
         var group = new Application.Entities.Group
         {
-            Id = Guid.NewGuid(),
+            Id = 0,
             EventId = eventId,
             ParentGroupId = actualParentId,
             Name = name,
@@ -48,22 +48,22 @@ public sealed class GroupService(
         return group;
     }
     
-    public async Task<Application.Entities.Group?> GetGroupAsync(Guid groupId)
+    public async Task<Application.Entities.Group?> GetGroupAsync(long groupId)
     {
         return await groupRepository.GetByIdAsync(groupId);
     }
     
-    public async Task<List<Application.Entities.Group>> GetGroupsByEventAsync(Guid eventId)
+    public async Task<List<Application.Entities.Group>> GetGroupsByEventAsync(long eventId)
     {
         return await groupRepository.GetByEventIdAsync(eventId);
     }
     
-    public async Task<List<Application.Entities.Group>> GetGroupHierarchyAsync(Guid eventId)
+    public async Task<List<Application.Entities.Group>> GetGroupHierarchyAsync(long eventId)
     {
         return await groupRepository.GetRootGroupsByEventAsync(eventId);
     }
     
-    public async Task<int> GetAvailableQuotaAsync(Guid groupId)
+    public async Task<int> GetAvailableQuotaAsync(long groupId)
     {
         var group = await groupRepository.GetByIdAsync(groupId);
         if (group == null)
@@ -76,7 +76,7 @@ public sealed class GroupService(
         return group.Quota - childrenQuotaSum;
     }
     
-    public async Task ValidateQuotaHierarchyAsync(Guid groupId, int newQuota)
+    public async Task ValidateQuotaHierarchyAsync(long groupId, int newQuota)
     {
         var group = await groupRepository.GetByIdAsync(groupId);
         if (group == null)
@@ -106,7 +106,7 @@ public sealed class GroupService(
         }
     }
     
-    public async Task UpdateGroupAsync(Guid groupId, string name, int quota)
+    public async Task UpdateGroupAsync(long groupId, string name, int quota)
     {
         var group = await groupRepository.GetByIdAsync(groupId);
         if (group == null)
@@ -121,7 +121,7 @@ public sealed class GroupService(
         await groupRepository.SaveChangesAsync();
     }
     
-    public async Task DeleteGroupAsync(Guid groupId)
+    public async Task DeleteGroupAsync(long groupId)
     {
         var group = await groupRepository.GetByIdAsync(groupId);
         if (group == null)

@@ -14,7 +14,7 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         
         builder.Property(x => x.Id)
             .HasColumnName("id")
-            .ValueGeneratedNever();
+            .ValueGeneratedOnAdd();
         
         builder.Property(x => x.LoginId)
             .HasColumnName("login_id")
@@ -32,10 +32,27 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("group_id")
             .IsRequired();
         
-        builder.Property(x => x.DisplayName)
-            .HasColumnName("display_name")
+        builder.Property(x => x.Name)
+            .HasColumnName("name")
             .IsRequired()
             .HasMaxLength(255);
+
+        builder.Property(x => x.Surname)
+            .HasColumnName("surname")
+            .IsRequired()
+            .HasMaxLength(255);
+
+        builder.Property(x => x.AdditionalName)
+            .HasColumnName("additional_name")
+            .HasMaxLength(255);
+
+        builder.Property(x => x.Email)
+            .HasColumnName("email")
+            .HasMaxLength(255);
+
+        builder.Property(x => x.Tel)
+            .HasColumnName("tel")
+            .HasMaxLength(50);
         
         builder.Property(x => x.Meta)
             .HasColumnName("meta")
