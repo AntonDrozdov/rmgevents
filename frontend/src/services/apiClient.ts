@@ -11,6 +11,7 @@ import {
   GuestDto,
   LoginRequest,
   LoginResponse,
+  RoleDto,
   UpdateUserRequest,
   UserDto,
   UserProfileDto,
@@ -58,6 +59,15 @@ class ApiClient {
     return response.data;
   }
 
+  async changePassword(currentPassword: string, newPassword: string): Promise<string> {
+    const response = await this.client.post<{ sid: string }>("/auth/change-password", {
+      currentPassword,
+      newPassword,
+    });
+    this.setToken(response.data.sid);
+    return response.data.sid;
+  }
+
   async register(login: string, password: string): Promise<number> {
     const response = await this.client.post<{ loginId: number }>("/auth/register", {
       login,
@@ -88,6 +98,11 @@ class ApiClient {
 
   async getGroupTree(eventId: string | number): Promise<GroupTreeDto[]> {
     const response = await this.client.get<GroupTreeDto[]>(`/events/${eventId}/groups`);
+    return response.data;
+  }
+
+  async getRoles(eventId: string | number): Promise<RoleDto[]> {
+    const response = await this.client.get<RoleDto[]>(`/events/${eventId}/roles`);
     return response.data;
   }
 
@@ -130,6 +145,13 @@ class ApiClient {
 
   async deleteUser(eventId: string | number, userId: number): Promise<void> {
     await this.client.delete(`/events/${eventId}/users/${userId}`);
+  }
+
+  async resetUserPassword(eventId: string | number, userId: number): Promise<string> {
+    const response = await this.client.post<{ temporaryPassword: string }>(
+      `/events/${eventId}/users/${userId}/reset-password`
+    );
+    return response.data.temporaryPassword;
   }
 }
 

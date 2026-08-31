@@ -9,13 +9,13 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { login, token } = useAuth();
+  const { login, token, mustChangePassword } = useAuth();
 
   useEffect(() => {
     if (token) {
-      navigate("/dashboard", { replace: true });
+      navigate(mustChangePassword ? "/change-password" : "/dashboard", { replace: true });
     }
-  }, [token, navigate]);
+  }, [token, mustChangePassword, navigate]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -23,8 +23,8 @@ export const LoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      await login(loginName.trim(), password);
-      navigate("/dashboard", { replace: true });
+      const passwordChangeRequired = await login(loginName.trim(), password);
+      navigate(passwordChangeRequired ? "/change-password" : "/dashboard", { replace: true });
     } catch (err) {
       setError("Не удалось войти. Проверьте логин и пароль.");
       console.error(err);

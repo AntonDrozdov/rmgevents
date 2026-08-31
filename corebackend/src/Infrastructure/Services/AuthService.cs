@@ -14,13 +14,16 @@ public sealed class AuthService(
     IConfiguration configuration,
     ISidProtector sidProtector) : IAuthService
 {
-    public async Task<(long LoginId, string Sid)?> LoginAsync(string loginValue, string password)
+    public async Task<(long LoginId, string Sid, bool MustChangePassword)?> LoginAsync(string loginValue, string password)
     {
         var login = await loginRepository.GetByLoginAsync(loginValue);
         if (login == null || !VerifyPassword(password, login.PasswordHash))
             return null;
         
-        return (login.Id, sidProtector.Protect(CreateToken(login.Id, login.LoginValue)));
+        return (
+            login.Id,
+            sidProtector.Protect(CreateToken(login.Id, login.LoginValue, login.MustChangePassword)),
+            login.MustChangePassword);
     }
     
     public async Task<List<(long EventId, string EventName, string RoleName)>> GetAvailableEventsAsync(long loginId)
@@ -51,6 +54,7 @@ public sealed class AuthService(
             Id = 0,
             LoginValue = loginValue,
             PasswordHash = passwordHash,
+            MustChangePassword = false,
             CreatedAt = DateTimeOffset.UtcNow
         };
         
@@ -59,8 +63,50 @@ public sealed class AuthService(
         
         return login.Id;
     }
+
+    public async Task<Application.Entities.Login> CreateTemporaryLoginAsync(string loginValue)
+    {
+        var login = new Application.Entities.Login
+        {
+            Id = 0,
+            LoginValue = loginValue,
+            PasswordHash = HashPassword(loginValue),
+            MustChangePassword = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        await loginRepository.AddAsync(login);
+        await loginRepository.SaveChangesAsync();
+        return login;
+    }
+
+    public async Task ResetPasswordAsync(long loginId)
+    {
+        var login = await loginRepository.GetByIdAsync(loginId)
+            ?? throw new InvalidOperationException($"Login {loginId} not found");
+
+        login.PasswordHash = HashPassword(login.LoginValue);
+        login.MustChangePassword = true;
+        await loginRepository.SaveChangesAsync();
+    }
+
+    public async Task<string?> ChangePasswordAsync(
+        long loginId,
+        string currentPassword,
+        string newPassword)
+    {
+        var login = await loginRepository.GetByIdAsync(loginId);
+        if (login == null || !VerifyPassword(currentPassword, login.PasswordHash))
+            return null;
+
+        login.PasswordHash = HashPassword(newPassword);
+        login.MustChangePassword = false;
+        await loginRepository.SaveChangesAsync();
+
+        return sidProtector.Protect(CreateToken(login.Id, login.LoginValue, false));
+    }
     
-    private string CreateToken(long loginId, string login)
+    private string CreateToken(long loginId, string login, bool mustChangePassword)
     {
         var jwtKey = configuration["Jwt:Key"]!;
         var jwtIssuer = configuration["Jwt:Issuer"]!;
@@ -72,7 +118,8 @@ public sealed class AuthService(
         var claims = new List<System.Security.Claims.Claim>
         {
             new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, loginId.ToString()),
-            new System.Security.Claims.Claim("login", login)
+            new System.Security.Claims.Claim("login", login),
+            new System.Security.Claims.Claim("must_change_password", mustChangePassword.ToString().ToLowerInvariant())
         };
         
         var token = new JwtSecurityToken(

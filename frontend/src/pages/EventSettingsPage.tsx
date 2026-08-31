@@ -25,7 +25,7 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
 
   const eventName = selectedEvent?.name ?? currentEvent?.name ?? "Мероприятие";
   const canOpenGroups = currentUser?.permissions.includes("create_group") ?? true;
-  const canOpenUsers = currentUser?.permissions.includes("create_user") ?? true;
+  const canOpenUsers = currentUser?.permissions.includes("create_user") ?? false;
 
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {

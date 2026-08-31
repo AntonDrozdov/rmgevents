@@ -17,6 +17,7 @@ public sealed class EventsController(
     private static UserProfileDto MapProfile(Application.Entities.User user, List<string> permissions) =>
         new(
             user.Id,
+            user.Login?.LoginValue ?? string.Empty,
             user.Name,
             user.Surname,
             user.AdditionalName,

@@ -5,9 +5,10 @@ interface ModalProps {
   description?: string;
   children: React.ReactNode;
   onClose: () => void;
+  className?: string;
 }
 
-export const Modal: React.FC<ModalProps> = ({ title, description, children, onClose }) => {
+export const Modal: React.FC<ModalProps> = ({ title, description, children, onClose, className = "" }) => {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -27,7 +28,7 @@ export const Modal: React.FC<ModalProps> = ({ title, description, children, onCl
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="modal-card"
+        className={["modal-card", className].filter(Boolean).join(" ")}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"

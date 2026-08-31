@@ -12,10 +12,14 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requiredPermission,
 }) => {
-  const { token, currentUser } = useAuth();
+  const { token, currentUser, mustChangePassword } = useAuth();
 
   if (!token) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (mustChangePassword) {
+    return <Navigate to="/change-password" replace />;
   }
 
   if (requiredPermission && currentUser && !currentUser.permissions.includes(requiredPermission)) {

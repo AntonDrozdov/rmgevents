@@ -1,96 +1,121 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
-import { GroupTreeDto } from "../types";
-import { flattenGroups } from "../utils/groups";
+import type { GroupTreeDto } from "../types";
 
-const GroupNode: React.FC<{ group: GroupTreeDto; level?: number }> = ({ group, level = 0 }) => (
-  <li className="tree-row" style={{ marginLeft: level * 18 }}>
-    <div>
-      <strong>{group.name}</strong>
-      <small>ID: {group.id}</small>
-    </div>
-    <div className="quota-row">
-      <span>Квота: {group.quota}</span>
-      <span>Свободно: {group.availableQuota}</span>
-    </div>
-    {group.children.length > 0 && (
-      <ul className="tree-list">
+type GroupNodeProps = {
+  group: GroupTreeDto;
+  canCreate: boolean;
+  onCreateChild: (group: GroupTreeDto) => void;
+};
+
+const countGroups = (groups: GroupTreeDto[]): number =>
+  groups.reduce((total, group) => total + 1 + countGroups(group.children ?? []), 0);
+
+const GroupNode = ({ group, canCreate, onCreateChild }: GroupNodeProps) => (
+  <li className="group-tree-item">
+    <article className="group-tree-node">
+      <div className="group-tree-node-content">
+        <strong>{group.name}</strong>
+        <span>Квота: {group.quota}</span>
+      </div>
+      {canCreate && (
+        <button
+          className="group-tree-add"
+          type="button"
+          aria-label={`Создать дочернюю группу для ${group.name}`}
+          title="Создать дочернюю группу"
+          onClick={() => onCreateChild(group)}
+        >
+          +
+        </button>
+      )}
+    </article>
+
+    {group.children?.length > 0 && (
+      <ul className="group-tree-children">
         {group.children.map((child) => (
-          <GroupNode key={child.id} group={child} level={level + 1} />
+          <GroupNode
+            key={child.id}
+            group={child}
+            canCreate={canCreate}
+            onCreateChild={onCreateChild}
+          />
         ))}
       </ul>
     )}
   </li>
 );
 
-export const GroupsPage: React.FC = () => {
+export const GroupsPage = () => {
   const { eventId = "" } = useParams<{ eventId: string }>();
   const { currentUser } = useAuth();
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [formData, setFormData] = useState({ name: "", quota: 1, parentGroupId: "" });
+  const [error, setError] = useState<string | null>(null);
+  const [parentGroup, setParentGroup] = useState<GroupTreeDto | null>(null);
+  const [form, setForm] = useState({ name: "", quota: 1 });
 
   const canCreate = currentUser?.permissions.includes("create_group") ?? false;
-  const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
+  const groupsCount = useMemo(() => countGroups(groups), [groups]);
 
   const loadGroups = async () => {
-    setLoading(true);
-    setError("");
+    if (!eventId || !canCreate) {
+      setGroups([]);
+      setLoading(false);
+      return;
+    }
 
+    setLoading(true);
+    setError(null);
     try {
-      const tree = await apiClient.getGroupTree(eventId);
-      setGroups(tree);
-      setFormData((value) => ({
-        ...value,
-        parentGroupId: value.parentGroupId || String(flattenGroups(tree)[0]?.id ?? ""),
-      }));
-    } catch (err) {
+      setGroups(await apiClient.getGroupTree(eventId));
+    } catch (loadError) {
+      console.error(loadError);
       setError("Не удалось загрузить дерево групп.");
-      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (!canCreate) {
-      setError("У вас нет прав для управления группами.");
-      setLoading(false);
-      return;
-    }
-
-    loadGroups();
+    void loadGroups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, canCreate]);
+
+  const openCreateModal = (group: GroupTreeDto) => {
+    setParentGroup(group);
+    setForm({ name: "", quota: 1 });
+    setError(null);
+  };
 
   const closeCreateModal = () => {
     if (saving) return;
-    setIsCreateModalOpen(false);
-    setError("");
+    setParentGroup(null);
+    setForm({ name: "", quota: 1 });
+    setError(null);
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setError("");
-    setSaving(true);
+  const createGroup = async () => {
+    if (!eventId || !parentGroup || !form.name.trim() || form.quota < 0) return;
 
+    setSaving(true);
+    setError(null);
     try {
       await apiClient.createGroup(eventId, {
-        name: formData.name.trim(),
-        quota: Number(formData.quota),
-        parentGroupId: formData.parentGroupId ? Number(formData.parentGroupId) : null,
+        name: form.name.trim(),
+        quota: form.quota,
+        parentGroupId: parentGroup.id,
       });
-      setFormData({ name: "", quota: 1, parentGroupId: formData.parentGroupId });
-      setIsCreateModalOpen(false);
+      setParentGroup(null);
+      setForm({ name: "", quota: 1 });
       await loadGroups();
-    } catch (err) {
-      setError("Не удалось создать группу. Проверьте квоту родительской группы.");
-      console.error(err);
+    } catch (createError) {
+      console.error(createError);
+      setError("Не удалось создать группу. Проверьте название и доступную квоту родительской группы.");
     } finally {
       setSaving(false);
     }
@@ -98,68 +123,96 @@ export const GroupsPage: React.FC = () => {
 
   return (
     <div className="tab-content">
-      <div className="section-heading">
-        <div className="section-title-row">
-          <h2>Группы</h2>
-          <span className="badge">Всего: {flatGroups.length}</span>
-        </div>
-        <div className="section-actions">
-          {canCreate && (
-            <button className="primary-button create-action-button" onClick={() => setIsCreateModalOpen(true)}>
-              Создать группу
-            </button>
-          )}
+      <div className="section-heading groups-heading">
+        <div>
+          <div className="section-title-row">
+            <h2>Группы</h2>
+            <span className="badge">Всего: {groupsCount}</span>
+          </div>
+          <p>Дочерние группы расположены справа от родительских. Нажмите «+» на группе, чтобы добавить в неё новую.</p>
         </div>
       </div>
 
-      {error && !isCreateModalOpen && <div className="alert alert-error">{error}</div>}
+      {!canCreate && (
+        <section className="panel empty-state">
+          У вас нет права на просмотр и создание групп.
+        </section>
+      )}
 
-      <section className="panel">
-        {loading ? (
-          <div className="empty-state compact">Загрузка...</div>
-        ) : groups.length === 0 ? (
-          <div className="empty-state compact">Группы пока не найдены.</div>
-        ) : (
-          <ul className="tree-list root">
-            {groups.map((group) => (
-              <GroupNode key={group.id} group={group} />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {isCreateModalOpen && (
-        <Modal
-          title="Создать группу"
-          description="Выберите родительскую группу и задайте квоту для нового подразделения."
-          onClose={closeCreateModal}
-        >
-          {error && <div className="alert alert-error">{error}</div>}
-
-          <form className="form" onSubmit={handleSubmit}>
-            <label className="field">
-              <span>Название</span>
-              <input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={saving} required />
-            </label>
-            <label className="field">
-              <span>Квота</span>
-              <input min={0} type="number" value={formData.quota} onChange={(event) => setFormData({ ...formData, quota: Number(event.target.value) })} disabled={saving} required />
-            </label>
-            <label className="field">
-              <span>Родительская группа</span>
-              <select value={formData.parentGroupId} onChange={(event) => setFormData({ ...formData, parentGroupId: event.target.value })} disabled={saving} required>
-                {flatGroups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}
-                  </option>
+      {canCreate && (
+        <section className="panel groups-tree-panel">
+          {loading ? (
+            <div className="empty-state">Загружаем дерево групп...</div>
+          ) : groups.length === 0 ? (
+            <div className="empty-state">Группы пока не созданы.</div>
+          ) : (
+            <div className="groups-tree-scroll">
+              <ul className="groups-tree">
+                {groups.map((group) => (
+                  <GroupNode
+                    key={group.id}
+                    group={group}
+                    canCreate={canCreate}
+                    onCreateChild={openCreateModal}
+                  />
                 ))}
-              </select>
+              </ul>
+            </div>
+          )}
+          {error && !parentGroup && <div className="alert alert-error">{error}</div>}
+        </section>
+      )}
+
+      {parentGroup && (
+        <Modal
+          title="Создание группы"
+          onClose={closeCreateModal}
+          className="employee-form-modal"
+        >
+          <form
+            className="form employee-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void createGroup();
+            }}
+          >
+            <p className="group-create-context">
+              Родительская группа: <strong>{parentGroup.name}</strong>
+            </p>
+
+            <label className="field">
+              <span>Название *</span>
+              <input
+                autoFocus
+                disabled={saving}
+                required
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                placeholder="Название группы"
+              />
             </label>
+
+            <label className="field">
+              <span>Квота *</span>
+              <input
+                disabled={saving}
+                required
+                min={0}
+                type="number"
+                value={form.quota}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, quota: Number(event.target.value) }))
+                }
+              />
+            </label>
+
+            {error && <div className="alert alert-error employee-form-message">{error}</div>}
+
             <div className="modal-actions">
-              <button className="secondary-button" type="button" onClick={closeCreateModal} disabled={saving}>
+              <button className="secondary-button" type="button" disabled={saving} onClick={closeCreateModal}>
                 Закрыть
               </button>
-              <button className="primary-button" type="submit" disabled={saving}>
+              <button className="primary-button" type="submit" disabled={saving || !form.name.trim()}>
                 {saving ? "Создаём..." : "Создать"}
               </button>
             </div>

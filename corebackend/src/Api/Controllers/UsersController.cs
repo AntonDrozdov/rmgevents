@@ -15,7 +15,10 @@ public sealed class UsersController(
         new(
             user.Id,
             user.EventId,
+            user.Login?.LoginValue ?? string.Empty,
+            user.RoleId,
             user.Role?.Name,
+            user.GroupId,
             user.Group?.Name,
             user.Name,
             user.Surname,
@@ -44,7 +47,7 @@ public sealed class UsersController(
         {
             var user = await userService.CreateUserAsync(
                 eventId,
-                request.LoginId,
+                request.Login.Trim(),
                 request.Name,
                 request.Surname,
                 request.AdditionalName,
@@ -94,14 +97,36 @@ public sealed class UsersController(
     }
 
     [Authorize(Policy = "CanCreateUser")]
+    [HttpPost("{userId:long}/reset-password")]
+    public async Task<ActionResult<ResetPasswordResponse>> ResetPassword(long eventId, long userId)
+    {
+        try
+        {
+            var temporaryPassword = await userService.ResetUserPasswordAsync(userId, eventId);
+            return Ok(new ResetPasswordResponse(temporaryPassword));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateUser")]
     [HttpDelete("{userId:long}")]
     public async Task<IActionResult> DeleteUser(long eventId, long userId)
     {
-        var user = await userService.GetUserInEventAsync(userId, eventId);
-        if (user == null)
-            return NotFound();
+        try
+        {
+            var user = await userService.GetUserInEventAsync(userId, eventId);
+            if (user == null)
+                return NotFound();
 
-        await userService.DeleteUserAsync(userId);
-        return NoContent();
+            await userService.DeleteUserAsync(userId);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 }

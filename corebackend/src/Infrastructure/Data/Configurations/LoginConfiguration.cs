@@ -24,6 +24,11 @@ public sealed class LoginConfiguration : IEntityTypeConfiguration<Login>
         builder.Property(x => x.PasswordHash)
             .HasColumnName("password_hash")
             .IsRequired();
+
+        builder.Property(x => x.MustChangePassword)
+            .HasColumnName("must_change_password")
+            .HasDefaultValue(false)
+            .IsRequired();
         
         builder.Property(x => x.CreatedAt)
             .HasColumnName("created_at");

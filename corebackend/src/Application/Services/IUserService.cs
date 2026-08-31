@@ -4,7 +4,7 @@ public interface IUserService
 {
     Task<Entities.User> CreateUserAsync(
         long eventId,
-        long loginId,
+        string loginValue,
         string name,
         string surname,
         string? additionalName,
@@ -24,5 +24,6 @@ public interface IUserService
         string? email,
         string? tel);
     Task AssignRoleAsync(long userId, long eventId, long roleId, long groupId);
+    Task<string> ResetUserPasswordAsync(long userId, long eventId);
     Task DeleteUserAsync(long userId);
 }

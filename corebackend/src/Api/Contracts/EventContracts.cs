@@ -25,6 +25,7 @@ public sealed record EventDetailDto(
 
 public sealed record UserProfileDto(
     long UserId,
+    string Login,
     string Name,
     string Surname,
     string? AdditionalName,

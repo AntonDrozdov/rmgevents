@@ -3,7 +3,10 @@ namespace Api.Contracts;
 public sealed record UserDto(
     long Id,
     long EventId,
+    string Login,
+    long RoleId,
     string? RoleName,
+    long GroupId,
     string? GroupName,
     string Name,
     string Surname,
@@ -13,7 +16,7 @@ public sealed record UserDto(
     DateTimeOffset CreatedAt);
 
 public sealed record CreateUserRequest(
-    long LoginId,
+    string Login,
     string Name,
     string Surname,
     string? AdditionalName,
@@ -30,3 +33,5 @@ public sealed record UpdateUserRequest(
     string? Tel,
     long RoleId,
     long GroupId);
+
+public sealed record ResetPasswordResponse(string TemporaryPassword);

@@ -19,6 +19,7 @@ const readJson = <T,>(key: string): T | null => {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(null);
   const [loginName, setLoginName] = useState<string | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfileDto | null>(null);
   const [currentEvent, setCurrentEvent] = useState<EventOption | null>(null);
   const [events, setEvents] = useState<EventOption[]>([]);
@@ -36,6 +37,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const savedLoginName = localStorage.getItem("login");
       const savedEvent = readJson<EventOption>("currentEvent");
       const savedEvents = readJson<EventOption[]>("events") ?? [];
+      const savedMustChangePassword = localStorage.getItem("mustChangePassword") === "true";
 
       if (!savedToken) {
         setLoading(false);
@@ -46,9 +48,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(savedToken);
       setLoginName(savedLoginName);
       setEvents(savedEvents);
+      setMustChangePassword(savedMustChangePassword);
 
       if (savedEvent) {
         setCurrentEvent(savedEvent);
+        if (!savedMustChangePassword) {
+          try {
+            await fetchUserProfile(savedEvent.id);
+          } catch (error) {
+            console.error("Не удалось восстановить профиль пользователя.", error);
+            setToken(null);
+            setLoginName(null);
+            setCurrentEvent(null);
+            setEvents([]);
+            setCurrentUser(null);
+            setMustChangePassword(false);
+            apiClient.clearToken();
+            localStorage.removeItem("login");
+            localStorage.removeItem("currentEvent");
+            localStorage.removeItem("events");
+            localStorage.removeItem("mustChangePassword");
+          }
+        }
       }
 
       setLoading(false);
@@ -64,16 +85,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setEvents(response.events);
     localStorage.setItem("login", nextLoginName);
     localStorage.setItem("events", JSON.stringify(response.events));
+    setMustChangePassword(response.mustChangePassword);
+    localStorage.setItem("mustChangePassword", String(response.mustChangePassword));
 
     const defaultEvent = response.events[0] ?? null;
     setCurrentEvent(defaultEvent);
 
     if (defaultEvent) {
       localStorage.setItem("currentEvent", JSON.stringify(defaultEvent));
-      await fetchUserProfile(defaultEvent.id);
+      if (!response.mustChangePassword) {
+        await fetchUserProfile(defaultEvent.id);
+      } else {
+        setCurrentUser(null);
+      }
     } else {
       localStorage.removeItem("currentEvent");
       setCurrentUser(null);
+    }
+
+    return response.mustChangePassword;
+  };
+
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    const nextToken = await apiClient.changePassword(currentPassword, newPassword);
+    setToken(nextToken);
+    setMustChangePassword(false);
+    localStorage.setItem("mustChangePassword", "false");
+
+    if (currentEvent) {
+      await fetchUserProfile(currentEvent.id);
     }
   };
 
@@ -83,13 +123,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentUser(null);
     setCurrentEvent(null);
     setEvents([]);
+    setMustChangePassword(false);
     apiClient.clearToken();
     localStorage.removeItem("login");
     localStorage.removeItem("currentEvent");
     localStorage.removeItem("events");
+    localStorage.removeItem("mustChangePassword");
   };
 
   const selectEvent = async (event: EventOption) => {
+    await fetchUserProfile(event.id);
     setCurrentEvent(event);
     localStorage.setItem("currentEvent", JSON.stringify(event));
   };
@@ -123,10 +166,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         token,
         loginName,
+        mustChangePassword,
         currentUser,
         currentEvent,
         events,
         login,
+        changePassword,
         logout,
         selectEvent,
         addEvent,

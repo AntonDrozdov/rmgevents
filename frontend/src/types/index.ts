@@ -13,6 +13,7 @@ export interface LoginRequest {
 export interface LoginResponse {
   sid: string;
   events: EventOption[];
+  mustChangePassword: boolean;
 }
 
 export interface EventOption {
@@ -49,6 +50,7 @@ export interface EventDetailDto {
 
 export interface UserProfileDto {
   userId: number;
+  login: string;
   name: string;
   surname: string;
   additionalName?: string | null;
@@ -91,10 +93,19 @@ export interface GroupTreeDto {
   children: GroupTreeDto[];
 }
 
+export interface RoleDto {
+  id: number;
+  eventId: number;
+  name: string;
+}
+
 export interface UserDto {
   id: number;
   eventId: number;
+  login: string;
+  roleId: number;
   roleName?: string | null;
+  groupId: number;
   groupName?: string | null;
   name: string;
   surname: string;
@@ -105,11 +116,11 @@ export interface UserDto {
 }
 
 export interface CreateUserRequest {
-  loginId: number;
+  login: string;
   name: string;
   surname: string;
   additionalName?: string;
-  email?: string;
+  email: string;
   tel?: string;
   roleId: number;
   groupId: number;
@@ -153,10 +164,12 @@ export interface ApproveGuestRequest {
 export interface AuthContextType {
   token: string | null;
   loginName: string | null;
+  mustChangePassword: boolean;
   currentUser: UserProfileDto | null;
   currentEvent: EventOption | null;
   events: EventOption[];
-  login: (loginName: string, password: string) => Promise<void>;
+  login: (loginName: string, password: string) => Promise<boolean>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   logout: () => void;
   selectEvent: (event: EventOption) => Promise<void>;
   addEvent: (event: EventOption) => void;

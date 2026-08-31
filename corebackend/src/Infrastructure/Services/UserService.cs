@@ -5,11 +5,14 @@ namespace Infrastructure.Services;
 
 public sealed class UserService(
     IUserRepository userRepository,
-    ILoginRepository loginRepository) : IUserService
+    ILoginRepository loginRepository,
+    IAuthService authService,
+    IRoleRepository roleRepository,
+    IGroupRepository groupRepository) : IUserService
 {
     public async Task<Application.Entities.User> CreateUserAsync(
         long eventId,
-        long loginId,
+        string loginValue,
         string name,
         string surname,
         string? additionalName,
@@ -18,14 +21,18 @@ public sealed class UserService(
         long roleId,
         long groupId)
     {
-        var login = await loginRepository.GetByIdAsync(loginId);
-        if (login == null)
-            throw new InvalidOperationException($"Login {loginId} not found");
+        if (string.IsNullOrWhiteSpace(loginValue))
+            throw new InvalidOperationException("Login is required");
+
+        await ValidateRoleAndGroupAsync(eventId, roleId, groupId);
+
+        var login = await loginRepository.GetByLoginAsync(loginValue)
+            ?? await authService.CreateTemporaryLoginAsync(loginValue);
         
         var user = new Application.Entities.User
         {
             Id = 0,
-            LoginId = loginId,
+            LoginId = login.Id,
             EventId = eventId,
             RoleId = roleId,
             GroupId = groupId,
@@ -40,7 +47,7 @@ public sealed class UserService(
         await userRepository.AddAsync(user);
         await userRepository.SaveChangesAsync();
         
-        return user;
+        return await userRepository.GetByIdAsync(user.Id) ?? user;
     }
     
     public async Task<Application.Entities.User?> GetUserAsync(long userId)
@@ -96,6 +103,8 @@ public sealed class UserService(
         
         if (user.EventId != eventId)
             throw new InvalidOperationException("User is not part of this event");
+
+        await ValidateRoleAndGroupAsync(eventId, roleId, groupId);
         
         user.RoleId = roleId;
         user.GroupId = groupId;
@@ -106,7 +115,55 @@ public sealed class UserService(
     
     public async Task DeleteUserAsync(long userId)
     {
+        var user = await userRepository.GetByIdAsync(userId);
+        if (user == null)
+            return;
+
+        if (string.Equals(user.Role?.Name, "Administrator", StringComparison.OrdinalIgnoreCase))
+        {
+            var eventUsers = await userRepository.GetByEventIdAsync(user.EventId);
+            var administratorCount = eventUsers.Count(item =>
+                string.Equals(item.Role?.Name, "Administrator", StringComparison.OrdinalIgnoreCase));
+
+            if (administratorCount <= 1)
+                throw new InvalidOperationException(
+                    "Нельзя удалить единственного сотрудника с ролью Administrator.");
+        }
+
         await userRepository.DeleteAsync(userId);
         await userRepository.SaveChangesAsync();
+    }
+
+    public async Task<string> ResetUserPasswordAsync(long userId, long eventId)
+    {
+        var user = await userRepository.GetByIdAsync(userId);
+        if (user == null || user.EventId != eventId)
+            throw new InvalidOperationException($"User {userId} not found");
+
+        await authService.ResetPasswordAsync(user.LoginId);
+        return user.Login?.LoginValue
+            ?? throw new InvalidOperationException($"Login {user.LoginId} not found");
+    }
+
+    private async Task ValidateRoleAndGroupAsync(long eventId, long roleId, long groupId)
+    {
+        var role = await roleRepository.GetByIdAsync(roleId);
+        if (role == null || role.EventId != eventId)
+            throw new InvalidOperationException("Выбранная роль не принадлежит мероприятию.");
+
+        var group = await groupRepository.GetByIdAsync(groupId);
+        if (group == null || group.EventId != eventId)
+            throw new InvalidOperationException("Выбранная группа не принадлежит мероприятию.");
+
+        if (!string.Equals(role.Name, "Administrator", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var rootGroups = await groupRepository.GetRootGroupsByEventAsync(eventId);
+        if (rootGroups.Count != 1)
+            throw new InvalidOperationException("У мероприятия должна быть одна корневая группа.");
+
+        if (group.Id != rootGroups[0].Id)
+            throw new InvalidOperationException(
+                "Сотрудник с ролью Administrator должен состоять в корневой группе.");
     }
 }

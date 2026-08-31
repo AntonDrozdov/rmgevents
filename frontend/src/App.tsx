@@ -7,6 +7,7 @@ import { GroupsPage } from "./pages/GroupsPage";
 import { GuestsPage } from "./pages/GuestsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { UsersPage } from "./pages/UsersPage";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/change-password" element={<ChangePasswordPage />} />
           <Route
             path="/dashboard"
             element={

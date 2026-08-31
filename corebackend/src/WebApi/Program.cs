@@ -117,6 +117,27 @@ app.UseSwaggerUI(options =>
 });
 
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    var mustChangePassword = context.User.FindFirst("must_change_password")?.Value;
+    var isChangePasswordRequest = context.Request.Path.Equals(
+        "/api/auth/change-password",
+        StringComparison.OrdinalIgnoreCase);
+
+    if (context.User.Identity?.IsAuthenticated == true
+        && string.Equals(mustChangePassword, "true", StringComparison.OrdinalIgnoreCase)
+        && !isChangePasswordRequest)
+    {
+        context.Response.StatusCode = StatusCodes.Status428PreconditionRequired;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            message = "Необходимо изменить временный пароль."
+        });
+        return;
+    }
+
+    await next();
+});
 app.UseAuthorization();
 app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
