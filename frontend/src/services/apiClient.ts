@@ -12,6 +12,7 @@ import {
   LoginRequest,
   LoginResponse,
   RoleDto,
+  UpdateGroupRequest,
   UpdateUserRequest,
   UserDto,
   UserProfileDto,
@@ -109,6 +110,14 @@ class ApiClient {
   async createGroup(eventId: string | number, request: CreateGroupRequest): Promise<GroupTreeDto> {
     const response = await this.client.post<GroupTreeDto>(`/events/${eventId}/groups`, request);
     return response.data;
+  }
+
+  async updateGroup(eventId: string | number, groupId: number, request: UpdateGroupRequest): Promise<void> {
+    await this.client.put(`/events/${eventId}/groups/${groupId}`, request);
+  }
+
+  async deleteGroup(eventId: string | number, groupId: number): Promise<void> {
+    await this.client.delete(`/events/${eventId}/groups/${groupId}`);
   }
 
   async getGuests(eventId: string | number): Promise<GuestDto[]> {

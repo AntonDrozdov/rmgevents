@@ -10,8 +10,7 @@ namespace Api.Controllers;
 [Route("api/events/{eventId}/groups")]
 [Authorize]
 public sealed class GroupsController(
-    IGroupService groupService,
-    IPermissionService permissionService) : ControllerBase
+    IGroupService groupService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<GroupTreeDto>>> GetGroupTree(long eventId)
@@ -40,6 +39,51 @@ public sealed class GroupsController(
             return Created(
                 $"/groups/{group.Id}",
                 MapToDto(group));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateGroup")]
+    [HttpPut("{groupId}")]
+    public async Task<IActionResult> UpdateGroup(
+        long eventId,
+        long groupId,
+        UpdateGroupRequest request)
+    {
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            await groupService.UpdateGroupAsync(eventId, userId, groupId, request.Name, request.Quota);
+            return NoContent();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateGroup")]
+    [HttpDelete("{groupId}")]
+    public async Task<IActionResult> DeleteGroup(long eventId, long groupId)
+    {
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            await groupService.DeleteGroupAsync(eventId, userId, groupId);
+            return NoContent();
         }
         catch (UnauthorizedAccessException ex)
         {

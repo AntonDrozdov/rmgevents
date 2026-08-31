@@ -8,6 +8,6 @@ public interface IGroupService
     Task<List<Entities.Group>> GetGroupHierarchyAsync(long eventId);
     Task<int> GetAvailableQuotaAsync(long groupId);
     Task ValidateQuotaHierarchyAsync(long groupId, int newQuota);
-    Task UpdateGroupAsync(long groupId, string name, int quota);
-    Task DeleteGroupAsync(long groupId);
+    Task UpdateGroupAsync(long eventId, long userId, long groupId, string name, int quota);
+    Task DeleteGroupAsync(long eventId, long userId, long groupId);
 }

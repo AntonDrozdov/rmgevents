@@ -5,6 +5,8 @@ namespace Infrastructure.Services;
 
 public sealed class GroupService(
     IGroupRepository groupRepository,
+    IUserRepository userRepository,
+    IGuestRepository guestRepository,
     IPermissionService permissionService) : IGroupService
 {
     public async Task<Application.Entities.Group> CreateGroupAsync(
@@ -30,7 +32,7 @@ public sealed class GroupService(
             throw new UnauthorizedAccessException("Cannot create group in this parent group");
         
         // Валидируем квоты
-        await ValidateQuotaHierarchyAsync(actualParentId, quota);
+        await ValidateNewChildQuotaAsync(actualParentId, quota);
         
         var group = new Application.Entities.Group
         {
@@ -60,7 +62,8 @@ public sealed class GroupService(
     
     public async Task<List<Application.Entities.Group>> GetGroupHierarchyAsync(long eventId)
     {
-        return await groupRepository.GetRootGroupsByEventAsync(eventId);
+        var groups = await groupRepository.GetByEventIdAsync(eventId);
+        return groups.Where(group => group.ParentGroupId == null).ToList();
     }
     
     public async Task<int> GetAvailableQuotaAsync(long groupId)
@@ -78,12 +81,15 @@ public sealed class GroupService(
     
     public async Task ValidateQuotaHierarchyAsync(long groupId, int newQuota)
     {
+        if (newQuota < 0)
+            throw new InvalidOperationException("Group quota cannot be negative");
+
         var group = await groupRepository.GetByIdAsync(groupId);
         if (group == null)
             throw new InvalidOperationException($"Group {groupId} not found");
         
         var children = await groupRepository.GetChildrenAsync(groupId);
-        var childrenQuotaSum = children.Sum(g => g.Quota);
+        var childrenQuotaSum = children.Sum(g => (long)g.Quota);
         
         if (childrenQuotaSum > newQuota)
             throw new InvalidOperationException(
@@ -96,7 +102,7 @@ public sealed class GroupService(
             if (parent != null)
             {
                 var siblings = await groupRepository.GetChildrenAsync(parent.Id);
-                var siblingsQuotaSum = siblings.Where(s => s.Id != groupId).Sum(s => s.Quota);
+                var siblingsQuotaSum = siblings.Where(s => s.Id != groupId).Sum(s => (long)s.Quota);
                 var newParentUsed = siblingsQuotaSum + newQuota;
                 
                 if (newParentUsed > parent.Quota)
@@ -105,12 +111,35 @@ public sealed class GroupService(
             }
         }
     }
+
+    private async Task ValidateNewChildQuotaAsync(long parentGroupId, int childQuota)
+    {
+        if (childQuota < 0)
+            throw new InvalidOperationException("Group quota cannot be negative");
+
+        var parent = await groupRepository.GetByIdAsync(parentGroupId);
+        if (parent == null)
+            throw new InvalidOperationException($"Parent group {parentGroupId} not found");
+
+        var children = await groupRepository.GetChildrenAsync(parentGroupId);
+        var allocatedQuota = children.Sum(group => (long)group.Quota);
+        var quotaAfterCreation = allocatedQuota + childQuota;
+
+        if (quotaAfterCreation > parent.Quota)
+        {
+            var availableQuota = Math.Max(0L, parent.Quota - allocatedQuota);
+            throw new InvalidOperationException(
+                $"Child groups quotas sum would exceed parent quota. Available quota: {availableQuota}");
+        }
+    }
     
-    public async Task UpdateGroupAsync(long groupId, string name, int quota)
+    public async Task UpdateGroupAsync(long eventId, long userId, long groupId, string name, int quota)
     {
         var group = await groupRepository.GetByIdAsync(groupId);
-        if (group == null)
+        if (group == null || group.EventId != eventId)
             throw new InvalidOperationException($"Group {groupId} not found");
+
+        await EnsureCanManageGroupAsync(eventId, userId, groupId);
         
         await ValidateQuotaHierarchyAsync(groupId, quota);
         
@@ -121,17 +150,46 @@ public sealed class GroupService(
         await groupRepository.SaveChangesAsync();
     }
     
-    public async Task DeleteGroupAsync(long groupId)
+    public async Task DeleteGroupAsync(long eventId, long userId, long groupId)
     {
         var group = await groupRepository.GetByIdAsync(groupId);
-        if (group == null)
+        if (group == null || group.EventId != eventId)
             throw new InvalidOperationException($"Group {groupId} not found");
-        
-        var children = await groupRepository.GetChildrenAsync(groupId);
-        if (children.Any())
-            throw new InvalidOperationException("Cannot delete group with child groups");
-        
+
+        if (!group.ParentGroupId.HasValue)
+            throw new InvalidOperationException("The root group cannot be deleted");
+
+        await EnsureCanManageGroupAsync(eventId, userId, groupId);
+
+        var descendants = await groupRepository.GetAllDescendantsAsync(groupId);
+        var branch = descendants.Append(group).ToList();
+
+        foreach (var branchGroup in branch)
+        {
+            if ((await userRepository.GetByGroupIdAsync(branchGroup.Id)).Any())
+                throw new InvalidOperationException("Cannot delete a group branch that contains employees");
+
+            if ((await guestRepository.GetByGroupIdAsync(branchGroup.Id)).Any())
+                throw new InvalidOperationException("Cannot delete a group branch that contains guests");
+        }
+
+        foreach (var descendant in descendants.AsEnumerable().Reverse())
+            await groupRepository.DeleteAsync(descendant.Id);
+
         await groupRepository.DeleteAsync(groupId);
         await groupRepository.SaveChangesAsync();
+    }
+
+    private async Task EnsureCanManageGroupAsync(long eventId, long userId, long groupId)
+    {
+        if (!await permissionService.HasPermissionAsync(userId, eventId, "create_group"))
+            throw new UnauthorizedAccessException("No permission to manage groups");
+
+        var userGroupId = await permissionService.GetUserGroupInEventAsync(userId, eventId);
+        if (!userGroupId.HasValue ||
+            !await permissionService.CanCreateGroupInParentAsync(userId, eventId, groupId, userGroupId.Value))
+        {
+            throw new UnauthorizedAccessException("Cannot manage this group");
+        }
     }
 }
