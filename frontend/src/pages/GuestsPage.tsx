@@ -4,12 +4,12 @@ import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
 import { GroupTreeDto, GuestDto } from "../types";
-import { flattenGroups, groupNameById } from "../utils/groups";
+import { flattenGroups } from "../utils/groups";
 
 const statusLabel: Record<string, string> = {
   pending: "Ожидает",
   approved: "Одобрен",
-  rejected: "Отклонён",
+  rejected: "Отклонен",
 };
 
 export const GuestsPage: React.FC = () => {
@@ -18,6 +18,7 @@ export const GuestsPage: React.FC = () => {
   const [guests, setGuests] = useState<GuestDto[]>([]);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [groupsLoading, setGroupsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -32,24 +33,15 @@ export const GuestsPage: React.FC = () => {
   const canApprove = currentUser?.permissions.includes("approve_guest") ?? false;
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
 
-  const loadData = async () => {
+  const loadGuests = async () => {
     if (!eventId) return;
 
     setLoading(true);
     setError("");
 
     try {
-      const [guestList, groupTree] = await Promise.all([
-        apiClient.getGuests(eventId),
-        apiClient.getGroupTree(eventId),
-      ]);
-
+      const guestList = await apiClient.getGuests(eventId);
       setGuests(guestList);
-      setGroups(groupTree);
-
-      if (!formData.groupId && groupTree.length > 0) {
-        setFormData((value) => ({ ...value, groupId: String(flattenGroups(groupTree)[0]?.id ?? "") }));
-      }
     } catch (err) {
       setError("Не удалось загрузить гостей.");
       console.error(err);
@@ -58,15 +50,35 @@ export const GuestsPage: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (!canCreate && !canApprove) {
-      setError("У вас нет прав для управления гостями.");
-      setLoading(false);
-      return;
-    }
+  const loadGroupsForCreate = async () => {
+    if (!eventId || groups.length > 0) return;
 
-    loadData();
-  }, [eventId, canCreate, canApprove]);
+    setGroupsLoading(true);
+    setError("");
+
+    try {
+      const groupTree = await apiClient.getGroupTree(eventId);
+      setGroups(groupTree);
+      setFormData((value) => ({
+        ...value,
+        groupId: value.groupId || String(flattenGroups(groupTree)[0]?.id ?? ""),
+      }));
+    } catch (err) {
+      setError("Не удалось загрузить группы для создания гостя.");
+      console.error(err);
+    } finally {
+      setGroupsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadGuests();
+  }, [eventId]);
+
+  const openCreateModal = async () => {
+    setIsCreateModalOpen(true);
+    await loadGroupsForCreate();
+  };
 
   const closeCreateModal = () => {
     if (saving) return;
@@ -89,7 +101,7 @@ export const GuestsPage: React.FC = () => {
 
       setFormData({ name: "", email: "", phone: "", groupId: String(flatGroups[0]?.id ?? "") });
       setIsCreateModalOpen(false);
-      await loadData();
+      await loadGuests();
     } catch (err) {
       setError("Не удалось создать гостя. Проверьте группу и доступную квоту.");
       console.error(err);
@@ -103,7 +115,7 @@ export const GuestsPage: React.FC = () => {
 
     try {
       await apiClient.approveGuest(eventId, { guestId, approve });
-      await loadData();
+      await loadGuests();
     } catch (err) {
       setError("Не удалось обновить статус гостя.");
       console.error(err);
@@ -119,7 +131,7 @@ export const GuestsPage: React.FC = () => {
         </div>
         <div className="section-actions">
           {canCreate && (
-            <button className="primary-button create-action-button guest-create-button" onClick={() => setIsCreateModalOpen(true)}>
+            <button className="primary-button create-action-button guest-create-button" onClick={openCreateModal}>
               Добавить гостя
             </button>
           )}
@@ -154,7 +166,7 @@ export const GuestsPage: React.FC = () => {
                       <div>{guest.email || "-"}</div>
                       <small>{guest.phone || ""}</small>
                     </td>
-                    <td>{groupNameById(groups, guest.groupId)}</td>
+                    <td>{guest.groupName || guest.groupId}</td>
                     <td><span className={`status ${guest.status}`}>{statusLabel[guest.status] ?? guest.status}</span></td>
                     <td>{new Date(guest.createdAt).toLocaleDateString("ru-RU")}</td>
                     <td>
@@ -178,7 +190,7 @@ export const GuestsPage: React.FC = () => {
       {isCreateModalOpen && (
         <Modal
           title="Добавить гостя"
-          description="Гость будет создан в выбранной группе с учётом доступной квоты."
+          description="Гость будет создан в выбранной группе с учетом доступной квоты."
           onClose={closeCreateModal}
         >
           {error && <div className="alert alert-error">{error}</div>}
@@ -198,20 +210,24 @@ export const GuestsPage: React.FC = () => {
             </label>
             <label className="field">
               <span>Группа</span>
-              <select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} disabled={saving} required>
-                {flatGroups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}
-                  </option>
-                ))}
+              <select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} disabled={saving || groupsLoading} required>
+                {groupsLoading ? (
+                  <option value="">Загрузка групп...</option>
+                ) : (
+                  flatGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}
+                    </option>
+                  ))
+                )}
               </select>
             </label>
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={closeCreateModal} disabled={saving}>
                 Закрыть
               </button>
-              <button className="primary-button" type="submit" disabled={saving}>
-                {saving ? "Создаём..." : "Создать"}
+              <button className="primary-button" type="submit" disabled={saving || groupsLoading}>
+                {saving ? "Создаем..." : "Создать"}
               </button>
             </div>
           </form>

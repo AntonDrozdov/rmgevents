@@ -93,10 +93,9 @@ export interface GroupTreeDto {
 
 export interface UserDto {
   id: number;
-  loginId: number;
   eventId: number;
-  roleId: number;
-  groupId: number;
+  roleName?: string | null;
+  groupName?: string | null;
   name: string;
   surname: string;
   additionalName?: string | null;
@@ -130,6 +129,7 @@ export interface GuestDto {
   id: number;
   eventId: number;
   groupId: number;
+  groupName?: string | null;
   name: string;
   email?: string | null;
   phone?: string | null;

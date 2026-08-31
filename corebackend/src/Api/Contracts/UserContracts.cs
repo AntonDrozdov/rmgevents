@@ -2,10 +2,9 @@ namespace Api.Contracts;
 
 public sealed record UserDto(
     long Id,
-    long LoginId,
     long EventId,
-    long RoleId,
-    long GroupId,
+    string? RoleName,
+    string? GroupName,
     string Name,
     string Surname,
     string? AdditionalName,

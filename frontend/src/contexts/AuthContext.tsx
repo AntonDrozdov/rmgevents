@@ -49,18 +49,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (savedEvent) {
         setCurrentEvent(savedEvent);
-        try {
-          await fetchUserProfile(savedEvent.id);
-        } catch {
-          apiClient.clearToken();
-          localStorage.removeItem("login");
-          localStorage.removeItem("currentEvent");
-          localStorage.removeItem("events");
-          setToken(null);
-          setLoginName(null);
-          setCurrentEvent(null);
-          setEvents([]);
-        }
       }
 
       setLoading(false);
@@ -104,7 +92,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const selectEvent = async (event: EventOption) => {
     setCurrentEvent(event);
     localStorage.setItem("currentEvent", JSON.stringify(event));
-    await fetchUserProfile(event.id);
   };
 
   const addEvent = (event: EventOption) => {
@@ -120,9 +107,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem("currentEvent", JSON.stringify(event));
   };
 
-  const refreshProfile = async () => {
-    if (currentEvent) {
-      await fetchUserProfile(currentEvent.id);
+  const refreshProfile = async (eventId?: string | number) => {
+    const profileEventId = eventId ?? currentEvent?.id;
+    if (profileEventId) {
+      await fetchUserProfile(profileEventId);
     }
   };
 

@@ -4,6 +4,7 @@ public sealed record GuestDto(
     long Id,
     long EventId,
     long GroupId,
+    string? GroupName,
     string Name,
     string? Email,
     string? Phone,

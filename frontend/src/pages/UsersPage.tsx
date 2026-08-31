@@ -4,7 +4,7 @@ import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
 import { GroupTreeDto, UserDto } from "../types";
-import { flattenGroups, groupNameById } from "../utils/groups";
+import { flattenGroups } from "../utils/groups";
 
 const formatUserName = (user: Pick<UserDto, "surname" | "name" | "additionalName">) =>
   [user.surname, user.name, user.additionalName].filter(Boolean).join(" ");
@@ -26,6 +26,7 @@ export const UsersPage: React.FC = () => {
   const [users, setUsers] = useState<UserDto[]>([]);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [groupsLoading, setGroupsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -34,26 +35,41 @@ export const UsersPage: React.FC = () => {
   const canCreate = currentUser?.permissions.includes("create_user") ?? false;
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
 
-  const loadData = async () => {
+  const loadUsers = async () => {
+    if (!eventId) return;
+
     setLoading(true);
     setError("");
 
     try {
-      const [userList, groupTree] = await Promise.all([
-        apiClient.getUsers(eventId),
-        apiClient.getGroupTree(eventId),
-      ]);
+      const userList = await apiClient.getUsers(eventId);
       setUsers(userList);
+    } catch (err) {
+      setError("Не удалось загрузить сотрудников.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadGroupsForCreate = async () => {
+    if (!eventId || groups.length > 0) return;
+
+    setGroupsLoading(true);
+    setError("");
+
+    try {
+      const groupTree = await apiClient.getGroupTree(eventId);
       setGroups(groupTree);
       setFormData((value) => ({
         ...value,
         groupId: value.groupId || String(flattenGroups(groupTree)[0]?.id ?? ""),
       }));
     } catch (err) {
-      setError("Не удалось загрузить сотрудников.");
+      setError("Не удалось загрузить группы для создания сотрудника.");
       console.error(err);
     } finally {
-      setLoading(false);
+      setGroupsLoading(false);
     }
   };
 
@@ -64,8 +80,13 @@ export const UsersPage: React.FC = () => {
       return;
     }
 
-    loadData();
+    loadUsers();
   }, [eventId, canCreate]);
+
+  const openCreateModal = async () => {
+    setIsCreateModalOpen(true);
+    await loadGroupsForCreate();
+  };
 
   const closeCreateModal = () => {
     if (saving) return;
@@ -91,7 +112,7 @@ export const UsersPage: React.FC = () => {
       });
       setFormData(emptyForm(String(flatGroups[0]?.id ?? "")));
       setIsCreateModalOpen(false);
-      await loadData();
+      await loadUsers();
     } catch (err) {
       setError("Не удалось создать сотрудника. Проверьте ID логина, ID роли и группу.");
       console.error(err);
@@ -109,7 +130,7 @@ export const UsersPage: React.FC = () => {
         </div>
         <div className="section-actions">
           {canCreate && (
-            <button className="primary-button create-action-button" onClick={() => setIsCreateModalOpen(true)}>
+            <button className="primary-button create-action-button" onClick={openCreateModal}>
               Создать сотрудника
             </button>
           )}
@@ -131,9 +152,8 @@ export const UsersPage: React.FC = () => {
                   <th>ФИО</th>
                   <th>Email</th>
                   <th>Телефон</th>
+                  <th>Роль</th>
                   <th>Группа</th>
-                  <th>ID роли</th>
-                  <th>ID логина</th>
                   <th>Создан</th>
                 </tr>
               </thead>
@@ -143,9 +163,8 @@ export const UsersPage: React.FC = () => {
                     <td>{formatUserName(user)}</td>
                     <td>{user.email || "-"}</td>
                     <td>{user.tel || "-"}</td>
-                    <td>{groupNameById(groups, user.groupId)}</td>
-                    <td><code>{user.roleId}</code></td>
-                    <td><code>{user.loginId}</code></td>
+                    <td>{user.roleName || "-"}</td>
+                    <td>{user.groupName || "-"}</td>
                     <td>{new Date(user.createdAt).toLocaleDateString("ru-RU")}</td>
                   </tr>
                 ))}
@@ -194,19 +213,23 @@ export const UsersPage: React.FC = () => {
             </label>
             <label className="field">
               <span>Группа</span>
-              <select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} disabled={saving} required>
-                {flatGroups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {"- ".repeat(group.level)}{group.name}
-                  </option>
-                ))}
+              <select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} disabled={saving || groupsLoading} required>
+                {groupsLoading ? (
+                  <option value="">Загрузка групп...</option>
+                ) : (
+                  flatGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {"- ".repeat(group.level)}{group.name}
+                    </option>
+                  ))
+                )}
               </select>
             </label>
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={closeCreateModal} disabled={saving}>
                 Закрыть
               </button>
-              <button className="primary-button" type="submit" disabled={saving}>
+              <button className="primary-button" type="submit" disabled={saving || groupsLoading}>
                 {saving ? "Создаем..." : "Создать"}
               </button>
             </div>

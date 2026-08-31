@@ -3,8 +3,6 @@ import { NavLink, Navigate, useNavigate, useParams } from "react-router-dom";
 import { RmgLogo } from "../components/RmgLogo";
 import { UserMenu } from "../components/UserMenu";
 import { useAuth } from "../contexts/AuthContext";
-import { apiClient } from "../services/apiClient";
-import { EventDetailDto } from "../types";
 
 interface EventSettingsPageProps {
   children: React.ReactNode;
@@ -15,12 +13,9 @@ const tabClassName = ({ isActive }: { isActive: boolean }) =>
 
 export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }) => {
   const { eventId = "" } = useParams<{ eventId: string }>();
-  const { currentUser, currentEvent, events, selectEvent, refreshProfile } = useAuth();
+  const { currentEvent, currentUser, events } = useAuth();
   const navigate = useNavigate();
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
-  const [eventDetails, setEventDetails] = useState<EventDetailDto | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const selectedEvent = useMemo(
@@ -28,9 +23,9 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
     [events, eventId]
   );
 
-  const eventName = eventDetails?.name ?? selectedEvent?.name ?? "Мероприятие";
-  const canOpenGroups = currentUser?.permissions.includes("create_group") ?? false;
-  const canOpenUsers = currentUser?.permissions.includes("create_user") ?? false;
+  const eventName = selectedEvent?.name ?? currentEvent?.name ?? "Мероприятие";
+  const canOpenGroups = currentUser?.permissions.includes("create_group") ?? true;
+  const canOpenUsers = currentUser?.permissions.includes("create_user") ?? true;
 
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
@@ -42,33 +37,6 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
     document.addEventListener("mousedown", handleDocumentClick);
     return () => document.removeEventListener("mousedown", handleDocumentClick);
   }, []);
-
-  useEffect(() => {
-    const loadEvent = async () => {
-      if (!eventId) return;
-
-      setLoading(true);
-      setError("");
-
-      try {
-        if (selectedEvent && currentEvent?.id !== selectedEvent.id) {
-          await selectEvent(selectedEvent);
-        } else if (String(currentEvent?.id) === eventId) {
-          await refreshProfile();
-        }
-
-        const details = await apiClient.getEvent(eventId);
-        setEventDetails(details);
-      } catch (err) {
-        setError("Не удалось загрузить настройки мероприятия.");
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadEvent();
-  }, [eventId, selectedEvent?.id]);
 
   if (!eventId) {
     return <Navigate to="/dashboard" replace />;
@@ -101,7 +69,6 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
     <main className="settings-page">
       <aside className="settings-sidebar">
         <RmgLogo />
-
         {renderTabs()}
       </aside>
 
@@ -146,8 +113,7 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
           </div>
         </header>
 
-        {error && <div className="alert alert-error">{error}</div>}
-        {loading ? <div className="panel">Загрузка мероприятия...</div> : children}
+        {children}
       </section>
     </main>
   );

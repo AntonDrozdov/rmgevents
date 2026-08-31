@@ -14,10 +14,9 @@ public sealed class UsersController(
     private static UserDto MapUser(Application.Entities.User user) =>
         new(
             user.Id,
-            user.LoginId,
             user.EventId,
-            user.RoleId,
-            user.GroupId,
+            user.Role?.Name,
+            user.Group?.Name,
             user.Name,
             user.Surname,
             user.AdditionalName,

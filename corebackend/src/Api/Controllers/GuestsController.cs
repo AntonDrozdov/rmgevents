@@ -13,22 +13,25 @@ public sealed class GuestsController(
     IGuestService guestService,
     IPermissionService permissionService) : ControllerBase
 {
+    private static GuestDto MapGuest(Application.Entities.Guest guest) =>
+        new(
+            guest.Id,
+            guest.EventId,
+            guest.GroupId,
+            guest.Group?.Name,
+            guest.Name,
+            guest.Email,
+            guest.Phone,
+            guest.Status,
+            guest.CreatedAt,
+            guest.ApprovedAt);
+
     [HttpGet]
     public async Task<ActionResult<List<GuestDto>>> GetGuests(long eventId)
     {
         var guests = await guestService.GetGuestsByEventAsync(eventId);
         
-        var result = guests.Select(g => new GuestDto(
-            g.Id,
-            g.EventId,
-            g.GroupId,
-            g.Name,
-            g.Email,
-            g.Phone,
-            g.Status,
-            g.CreatedAt,
-            g.ApprovedAt))
-            .ToList();
+        var result = guests.Select(MapGuest).ToList();
         
         return Ok(result);
     }
@@ -53,16 +56,7 @@ public sealed class GuestsController(
             
             return Created(
                 $"/guests/{guest.Id}",
-                new GuestDto(
-                    guest.Id,
-                    guest.EventId,
-                    guest.GroupId,
-                    guest.Name,
-                    guest.Email,
-                    guest.Phone,
-                    guest.Status,
-                    guest.CreatedAt,
-                    guest.ApprovedAt));
+                MapGuest(guest));
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -98,16 +92,7 @@ public sealed class GuestsController(
             if (guest == null)
                 return NotFound();
             
-            return Ok(new GuestDto(
-                guest.Id,
-                guest.EventId,
-                guest.GroupId,
-                guest.Name,
-                guest.Email,
-                guest.Phone,
-                guest.Status,
-                guest.CreatedAt,
-                guest.ApprovedAt));
+            return Ok(MapGuest(guest));
         }
         catch (UnauthorizedAccessException ex)
         {
