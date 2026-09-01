@@ -22,7 +22,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/change-password" replace />;
   }
 
-  if (requiredPermission && currentUser && !currentUser.permissions.includes(requiredPermission)) {
+  if (requiredPermission && (!currentUser || !currentUser.permissions.includes(requiredPermission))) {
     return (
       <main className="page-shell">
         <section className="empty-state">

@@ -11,4 +11,11 @@ public sealed class ImageRepository(ApplicationDbContext dbContext) : IImageRepo
         => dbContext.Images
             .AsNoTracking()
             .SingleOrDefaultAsync(image => image.Id == id, cancellationToken);
+
+    public async Task<ImageEntity> AddImage(ImageEntity image, CancellationToken cancellationToken = default)
+    {
+        await dbContext.Images.AddAsync(image, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return image;
+    }
 }

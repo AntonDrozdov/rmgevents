@@ -26,6 +26,7 @@ public sealed record CreateUserRequest(
     long GroupId);
 
 public sealed record UpdateUserRequest(
+    string Login,
     string Name,
     string Surname,
     string? AdditionalName,

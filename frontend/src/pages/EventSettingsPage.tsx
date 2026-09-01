@@ -24,8 +24,9 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
   );
 
   const eventName = selectedEvent?.name ?? currentEvent?.name ?? "Мероприятие";
-  const canOpenGroups = currentUser?.permissions.includes("create_group") ?? true;
+  const canOpenGroups = currentUser?.permissions.includes("create_group") ?? false;
   const canOpenUsers = currentUser?.permissions.includes("create_user") ?? false;
+  const canOpenSettings = currentUser?.permissions.includes("create_event") ?? false;
 
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
@@ -60,6 +61,11 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
       {canOpenUsers && (
         <NavLink className={tabClassName} to={`/events/${eventId}/users`} onClick={() => setIsMobileMenuOpen(false)}>
           Сотрудники
+        </NavLink>
+      )}
+      {canOpenSettings && (
+        <NavLink className={tabClassName} to={`/events/${eventId}/settings`} onClick={() => setIsMobileMenuOpen(false)}>
+          Настройки
         </NavLink>
       )}
     </nav>

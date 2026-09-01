@@ -8,6 +8,7 @@ import { GuestsPage } from "./pages/GuestsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { UsersPage } from "./pages/UsersPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
+import { EventInformationPage } from "./pages/EventInformationPage";
 
 function App() {
   return (
@@ -62,6 +63,16 @@ function App() {
               <ProtectedRoute requiredPermission="create_user">
                 <EventSettingsPage>
                   <UsersPage />
+                </EventSettingsPage>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/events/:eventId/settings"
+            element={
+              <ProtectedRoute requiredPermission="create_event">
+                <EventSettingsPage>
+                  <EventInformationPage />
                 </EventSettingsPage>
               </ProtectedRoute>
             }

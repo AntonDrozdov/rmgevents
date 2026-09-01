@@ -2,6 +2,7 @@ using Api.Contracts;
 using Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Api.Controllers;
 
@@ -9,7 +10,8 @@ namespace Api.Controllers;
 [Route("api/events/{eventId}/users")]
 [Authorize]
 public sealed class UsersController(
-    IUserService userService) : ControllerBase
+    IUserService userService,
+    ILogger<UsersController> logger) : ControllerBase
 {
     private static UserDto MapUser(Application.Entities.User user) =>
         new(
@@ -62,7 +64,12 @@ public sealed class UsersController(
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "User creation failed for event {EventId}", eventId);
+            return BadRequest(new { message = "Не удалось создать сотрудника. Проверьте введённые данные." });
         }
     }
 
@@ -81,13 +88,15 @@ public sealed class UsersController(
 
             await userService.UpdateUserAsync(
                 userId,
+                eventId,
+                request.Login,
                 request.Name,
                 request.Surname,
                 request.AdditionalName,
                 request.Email,
-                request.Tel);
-
-            await userService.AssignRoleAsync(userId, eventId, request.RoleId, request.GroupId);
+                request.Tel,
+                request.RoleId,
+                request.GroupId);
             return NoContent();
         }
         catch (InvalidOperationException ex)

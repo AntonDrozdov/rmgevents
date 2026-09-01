@@ -71,6 +71,8 @@ export const UsersPage: React.FC = () => {
     () => users.filter((user) => user.roleName?.toLowerCase() === "administrator").length,
     [users]
   );
+  const isEditingOnlyAdministrator =
+    editingUser?.roleName?.toLowerCase() === "administrator" && administratorCount <= 1;
 
   const loadUsers = async () => {
     if (!eventId) return;
@@ -90,7 +92,7 @@ export const UsersPage: React.FC = () => {
   };
 
   const loadReferencesForCreate = async () => {
-    if (!eventId || (groups.length > 0 && roles.length > 0)) return;
+    if (!eventId) return;
 
     setReferencesLoading(true);
     setError("");
@@ -168,7 +170,14 @@ export const UsersPage: React.FC = () => {
       setIsCreateModalOpen(false);
       await loadUsers();
     } catch (err) {
-      setError("Не удалось создать сотрудника. Проверьте логин, роль и группу.");
+      const responseData = axios.isAxiosError(err) ? err.response?.data : null;
+      const serverMessage =
+        typeof responseData === "string"
+          ? responseData
+          : responseData && typeof responseData.message === "string"
+            ? responseData.message
+            : null;
+      setError(serverMessage ?? "Не удалось создать сотрудника. Проверьте логин, роль и группу.");
       console.error(err);
     } finally {
       setSaving(false);
@@ -207,6 +216,7 @@ export const UsersPage: React.FC = () => {
 
     try {
       await apiClient.updateUser(eventId, editingUser.id, {
+        login: editFormData.login.trim(),
         surname: editFormData.surname.trim(),
         name: editFormData.name.trim(),
         additionalName: editFormData.additionalName.trim() || undefined,
@@ -219,7 +229,14 @@ export const UsersPage: React.FC = () => {
       setEditFormData(emptyForm());
       await loadUsers();
     } catch (err) {
-      setError("Не удалось сохранить изменения сотрудника.");
+      const responseData = axios.isAxiosError(err) ? err.response?.data : null;
+      const serverMessage =
+        typeof responseData === "string"
+          ? responseData
+          : responseData && typeof responseData.message === "string"
+            ? responseData.message
+            : null;
+      setError(serverMessage ?? "Не удалось сохранить изменения сотрудника.");
       console.error(err);
     } finally {
       setSaving(false);
@@ -501,7 +518,7 @@ export const UsersPage: React.FC = () => {
         <Modal
           className="employee-form-modal"
           title="Редактировать сотрудника"
-          description="Логин нельзя изменить после создания сотрудника."
+          description="Можно изменить данные сотрудника, его логин, роль и группу."
           onClose={closeEditModal}
         >
           {error && <div className="alert alert-error">{error}</div>}
@@ -524,8 +541,13 @@ export const UsersPage: React.FC = () => {
               <input type="email" value={editFormData.email} onChange={(event) => setEditFormData({ ...editFormData, email: event.target.value })} disabled={saving} required />
             </label>
             <label className="field">
-              <span>Логин</span>
-              <input value={editFormData.login} disabled aria-readonly="true" />
+              <span>Логин *</span>
+              <input
+                value={editFormData.login}
+                onChange={(event) => setEditFormData({ ...editFormData, login: event.target.value })}
+                disabled={saving}
+                required
+              />
             </label>
             <label className="field">
               <span>Телефон</span>
@@ -547,9 +569,18 @@ export const UsersPage: React.FC = () => {
                 required
               >
                 {roles.map((role) => (
-                  <option key={role.id} value={role.id}>{role.name}</option>
+                  <option
+                    key={role.id}
+                    value={role.id}
+                    disabled={isEditingOnlyAdministrator && role.name.toLowerCase() !== "administrator"}
+                  >
+                    {role.name}
+                  </option>
                 ))}
               </select>
+              {isEditingOnlyAdministrator && (
+                <small>Сначала назначьте роль Administrator другому сотруднику.</small>
+              )}
             </label>
             <label className="field">
               <span>Группа *</span>

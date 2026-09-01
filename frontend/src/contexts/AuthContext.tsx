@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { apiClient } from "../services/apiClient";
-import { AuthContextType, EventOption, UserProfileDto } from "../types";
+import { AuthContextType, EventDto, EventOption, UserProfileDto } from "../types";
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -47,11 +47,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       apiClient.setToken(savedToken);
       setToken(savedToken);
       setLoginName(savedLoginName);
-      setEvents(savedEvents);
       setMustChangePassword(savedMustChangePassword);
 
+      let restoredEvents = savedEvents;
+      if (!savedMustChangePassword && savedEvents.length > 0) {
+        try {
+          const eventDetails = await apiClient.getEvents();
+          restoredEvents = savedEvents.map((event) => {
+            const details = eventDetails.find((item) => item.id === event.id);
+            return details
+              ? {
+                  ...event,
+                  eventDate: details.eventDate,
+                  createdAt: details.createdAt,
+                  createdByName: details.createdByName,
+                  logoImageId: details.logoImageId,
+                }
+              : event;
+          });
+          localStorage.setItem("events", JSON.stringify(restoredEvents));
+        } catch (error) {
+          console.error("Не удалось обновить данные мероприятий.", error);
+        }
+      }
+      setEvents(restoredEvents);
+
       if (savedEvent) {
-        setCurrentEvent(savedEvent);
+        const restoredCurrentEvent =
+          restoredEvents.find((event) => event.id === savedEvent.id) ?? savedEvent;
+        setCurrentEvent(restoredCurrentEvent);
+        localStorage.setItem("currentEvent", JSON.stringify(restoredCurrentEvent));
         if (!savedMustChangePassword) {
           try {
             await fetchUserProfile(savedEvent.id);
@@ -150,6 +175,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem("currentEvent", JSON.stringify(event));
   };
 
+  const updateEvent = (event: EventDto) => {
+    setEvents((currentEvents) => {
+      const nextEvents = currentEvents.map((item) =>
+        item.id === event.id
+          ? {
+              ...item,
+              name: event.name,
+              eventDate: event.eventDate,
+              createdAt: event.createdAt,
+              createdByName: event.createdByName,
+              logoImageId: event.logoImageId,
+            }
+          : item
+      );
+      localStorage.setItem("events", JSON.stringify(nextEvents));
+      return nextEvents;
+    });
+
+    setCurrentEvent((selectedEvent) => {
+      if (!selectedEvent || selectedEvent.id !== event.id) return selectedEvent;
+      const nextEvent = {
+        ...selectedEvent,
+        name: event.name,
+        eventDate: event.eventDate,
+        createdAt: event.createdAt,
+        createdByName: event.createdByName,
+        logoImageId: event.logoImageId,
+      };
+      localStorage.setItem("currentEvent", JSON.stringify(nextEvent));
+      return nextEvent;
+    });
+  };
+
   const refreshProfile = async (eventId?: string | number) => {
     const profileEventId = eventId ?? currentEvent?.id;
     if (profileEventId) {
@@ -175,6 +233,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         selectEvent,
         addEvent,
+        updateEvent,
         refreshProfile,
       }}
     >

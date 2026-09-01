@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { RmgLogo } from "../components/RmgLogo";
@@ -7,6 +8,22 @@ import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
 import { EventOption } from "../types";
 
+const getTodayInputValue = () => {
+  const today = new Date();
+  const offset = today.getTimezoneOffset();
+  return new Date(today.getTime() - offset * 60_000).toISOString().slice(0, 10);
+};
+
+const formatEventDate = (value?: string) => {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("ru-RU").format(new Date(`${value.slice(0, 10)}T00:00:00`));
+};
+
+const formatCreatedAt = (value?: string) => {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium" }).format(new Date(value));
+};
+
 export const DashboardPage: React.FC = () => {
   const { addEvent, currentUser, events, selectEvent } = useAuth();
   const navigate = useNavigate();
@@ -14,7 +31,7 @@ export const DashboardPage: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [eventDate, setEventDate] = useState(getTodayInputValue);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -50,23 +67,34 @@ export const DashboardPage: React.FC = () => {
     try {
       const createdEvent = await apiClient.createEvent({
         name: name.trim(),
-        description: description.trim() || undefined,
+        eventDate,
       });
 
       const eventOption = {
         id: createdEvent.id,
         name: createdEvent.name,
-        roleName: currentUser?.roleName ?? "administrator",
+        roleName: "Administrator",
+        eventDate: createdEvent.eventDate,
+        createdAt: createdEvent.createdAt,
+        createdByName: createdEvent.createdByName,
+        logoImageId: createdEvent.logoImageId,
       };
 
       addEvent(eventOption);
       setName("");
-      setDescription("");
+      setEventDate(getTodayInputValue());
       setIsCreateModalOpen(false);
       await selectEvent(eventOption);
       navigate(`/events/${createdEvent.id}/guests`);
     } catch (err) {
-      setError("Не удалось создать мероприятие.");
+      const responseData = axios.isAxiosError(err) ? err.response?.data : null;
+      const serverMessage =
+        typeof responseData === "string"
+          ? responseData
+          : responseData && typeof responseData.message === "string"
+            ? responseData.message
+            : null;
+      setError(serverMessage ?? "Не удалось создать мероприятие.");
       console.error(err);
     } finally {
       setLoading(false);
@@ -84,7 +112,7 @@ export const DashboardPage: React.FC = () => {
 
         <div className="dashboard-header-actions">
           <div className="dashboard-desktop-user">
-            <UserMenu />
+            <UserMenu showRole={false} />
           </div>
 
           <div className="dashboard-mobile-menu" ref={mobileMenuRef}>
@@ -102,7 +130,7 @@ export const DashboardPage: React.FC = () => {
 
             {isMobileMenuOpen && (
               <div className="mobile-menu-panel">
-                <UserMenu variant="inline" />
+                <UserMenu variant="inline" showRole={false} />
               </div>
             )}
           </div>
@@ -128,9 +156,31 @@ export const DashboardPage: React.FC = () => {
         <section className="events-grid" aria-label="Список мероприятий">
           {events.map((event) => (
             <button className="event-tile" key={event.id} onClick={() => openEvent(event)}>
-              <span className="event-tile-icon">🎟️</span>
+              {event.logoImageId ? (
+                <img
+                  className="event-tile-cover"
+                  src={apiClient.getImageUrl(event.logoImageId)}
+                  alt=""
+                />
+              ) : (
+                <span className="event-tile-icon">🎟️</span>
+              )}
               <strong>{event.name}</strong>
-              <span>{event.roleName}</span>
+              <span className="event-tile-role">{event.roleName}</span>
+              <div className="event-tile-details">
+                <span>
+                  <small>Дата мероприятия</small>
+                  <b>{formatEventDate(event.eventDate)}</b>
+                </span>
+                <span>
+                  <small>Создано</small>
+                  <b>{formatCreatedAt(event.createdAt)}</b>
+                </span>
+                <span>
+                  <small>Создатель</small>
+                  <b>{event.createdByName || "—"}</b>
+                </span>
+              </div>
             </button>
           ))}
         </section>
@@ -139,25 +189,32 @@ export const DashboardPage: React.FC = () => {
       {isCreateModalOpen && (
         <Modal
           title="Создать мероприятие"
-          description="Заполните название и описание. После создания откроется вкладка гостей."
+          description="Укажите название и дату. После создания откроется вкладка гостей."
           onClose={closeCreateModal}
+          className="employee-form-modal"
         >
           {error && <div className="alert alert-error">{error}</div>}
 
-          <form className="form" onSubmit={handleCreateEvent}>
+          <form className="form employee-form" onSubmit={handleCreateEvent}>
             <label className="field">
-              <span>Название</span>
+              <span>Название *</span>
               <input value={name} onChange={(event) => setName(event.target.value)} disabled={loading} required />
             </label>
             <label className="field">
-              <span>Описание</span>
-              <textarea value={description} onChange={(event) => setDescription(event.target.value)} disabled={loading} rows={5} />
+              <span>Дата мероприятия *</span>
+              <input
+                type="date"
+                value={eventDate}
+                onChange={(event) => setEventDate(event.target.value)}
+                disabled={loading}
+                required
+              />
             </label>
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={closeCreateModal} disabled={loading}>
                 Закрыть
               </button>
-              <button className="primary-button" type="submit" disabled={loading}>
+              <button className="primary-button" type="submit" disabled={loading || !name.trim() || !eventDate}>
                 {loading ? "Создаём..." : "Создать"}
               </button>
             </div>

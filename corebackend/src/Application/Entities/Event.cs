@@ -5,6 +5,7 @@ public sealed class Event
     public long Id { get; set; }
     public required string Name { get; set; }
     public string? Description { get; set; }
+    public DateOnly EventDate { get; set; }
     public long? LogoImageId { get; set; }
     public long OwnerId { get; set; } // FK to User
     public DateTimeOffset CreatedAt { get; set; }

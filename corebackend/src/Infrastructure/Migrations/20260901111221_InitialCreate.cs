@@ -42,6 +42,7 @@ namespace Infrastructure.Migrations
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     login = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     password_hash = table.Column<string>(type: "text", nullable: false),
+                    must_change_password = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
@@ -74,6 +75,7 @@ namespace Infrastructure.Migrations
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     description = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
+                    event_date = table.Column<DateOnly>(type: "date", nullable: false),
                     logo_image_id = table.Column<long>(type: "bigint", nullable: true),
                     owner_id = table.Column<long>(type: "bigint", nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
@@ -364,15 +366,15 @@ namespace Infrastructure.Migrations
                 table: "users",
                 column: "role_id");
 
-            var createdAt = new DateTimeOffset(2026, 8, 28, 0, 0, 0, TimeSpan.Zero);
+            var createdAt = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
 
             migrationBuilder.InsertData(
                 schema: "corebackend",
                 table: "logins",
-                columns: new[] { "id", "login", "password_hash", "created_at" },
-                values: new object[,]
+                columns: new[] { "id", "login", "password_hash", "must_change_password", "created_at" },
+                values: new object[]
                 {
-                    { 1L, "admin", "jGl25bVBBBW96Qi9Te4V37Fnqchz/Eu4qB9vKrRIqRg=", createdAt }
+                    1L, "admin", "jGl25bVBBBW96Qi9Te4V37Fnqchz/Eu4qB9vKrRIqRg=", false, createdAt
                 });
 
             migrationBuilder.InsertData(
@@ -391,20 +393,27 @@ namespace Infrastructure.Migrations
             migrationBuilder.InsertData(
                 schema: "corebackend",
                 table: "events",
-                columns: new[] { "id", "name", "description", "logo_image_id", "owner_id", "created_at", "is_archived" },
-                values: new object[,]
+                columns: new[]
                 {
-                    { 1L, "Initial administration event", "Bootstrap event for the administrator account.", null, 1L, createdAt, false }
+                    "id", "name", "description", "event_date", "logo_image_id", "owner_id", "created_at", "is_archived"
+                },
+                values: new object[]
+                {
+                    1L,
+                    "Initial administration event",
+                    "Bootstrap event for the administrator account.",
+                    new DateOnly(2026, 9, 1),
+                    null,
+                    1L,
+                    createdAt,
+                    false
                 });
 
             migrationBuilder.InsertData(
                 schema: "corebackend",
                 table: "groups",
                 columns: new[] { "id", "event_id", "parent_group_id", "name", "quota", "created_at" },
-                values: new object[,]
-                {
-                    { 1L, 1L, null, "Root", 1000, createdAt }
-                });
+                values: new object[] { 1L, 1L, null, "РМГ", 500, createdAt });
 
             migrationBuilder.InsertData(
                 schema: "corebackend",
@@ -412,7 +421,9 @@ namespace Infrastructure.Migrations
                 columns: new[] { "id", "event_id", "name", "created_at" },
                 values: new object[,]
                 {
-                    { 1L, 1L, "administrator", createdAt }
+                    { 1L, 1L, "Administrator", createdAt },
+                    { 2L, 1L, "Manager", createdAt },
+                    { 3L, 1L, "Approver", createdAt }
                 });
 
             migrationBuilder.InsertData(
@@ -425,19 +436,28 @@ namespace Infrastructure.Migrations
                     { 1L, 2L },
                     { 1L, 3L },
                     { 1L, 4L },
-                    { 1L, 5L }
+                    { 1L, 5L },
+                    { 2L, 2L },
+                    { 2L, 3L },
+                    { 3L, 4L }
                 });
 
             migrationBuilder.InsertData(
                 schema: "corebackend",
                 table: "users",
-                columns: new[] { "id", "login_id", "event_id", "role_id", "group_id", "name", "surname", "additional_name", "email", "tel", "meta", "created_at" },
-                values: new object[,]
+                columns: new[]
                 {
-                    { 1L, 1L, 1L, 1L, 1L, "Admin", "Administrator", null, "admin@example.com", null, null, createdAt }
+                    "id", "login_id", "event_id", "role_id", "group_id", "name", "surname",
+                    "additional_name", "email", "tel", "meta", "created_at"
+                },
+                values: new object[]
+                {
+                    1L, 1L, 1L, 1L, 1L, "Admin", "Administrator", null,
+                    "admin@example.com", null, null, createdAt
                 });
 
-            migrationBuilder.Sql("""
+            migrationBuilder.Sql(
+                """
                 SELECT setval(pg_get_serial_sequence('"corebackend"."logins"', 'id'), (SELECT MAX(id) FROM corebackend.logins));
                 SELECT setval(pg_get_serial_sequence('"corebackend"."permissions"', 'id'), (SELECT MAX(id) FROM corebackend.permissions));
                 SELECT setval(pg_get_serial_sequence('"corebackend"."events"', 'id'), (SELECT MAX(id) FROM corebackend.events));

@@ -9,6 +9,7 @@ public sealed class EventRepository(ApplicationDbContext db) : IEventRepository
     public async Task<Application.Entities.Event?> GetByIdAsync(long id)
     {
         return await db.Events
+            .Include(x => x.Owner)
             .Include(x => x.Roles)
             .Include(x => x.Groups)
             .Include(x => x.Users)
@@ -19,6 +20,7 @@ public sealed class EventRepository(ApplicationDbContext db) : IEventRepository
     {
         return await db.Events
             .Where(x => x.OwnerId == ownerId)
+            .Include(x => x.Owner)
             .ToListAsync();
     }
     
@@ -26,6 +28,7 @@ public sealed class EventRepository(ApplicationDbContext db) : IEventRepository
     {
         return await db.Events
             .Where(x => x.Users.Any(u => u.LoginId == userId))
+            .Include(x => x.Owner)
             .ToListAsync();
     }
     

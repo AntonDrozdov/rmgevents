@@ -13,6 +13,7 @@ import {
   LoginResponse,
   RoleDto,
   UpdateGroupRequest,
+  UpdateEventRequest,
   UpdateUserRequest,
   UserDto,
   UserProfileDto,
@@ -95,6 +96,26 @@ class ApiClient {
   async createEvent(request: CreateEventRequest): Promise<EventDto> {
     const response = await this.client.post<EventDto>("/events", request);
     return response.data;
+  }
+
+  async updateEvent(eventId: string | number, request: UpdateEventRequest): Promise<EventDto> {
+    const response = await this.client.put<EventDto>(`/events/${eventId}`, request);
+    return response.data;
+  }
+
+  async uploadEventCover(eventId: string | number, file: File): Promise<number> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await this.client.post<{ id: number }>(
+      `/images/events/${eventId}/cover`,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return response.data.id;
+  }
+
+  getImageUrl(imageId: number): string {
+    return `/api/images/${imageId}`;
   }
 
   async getGroupTree(eventId: string | number): Promise<GroupTreeDto[]> {

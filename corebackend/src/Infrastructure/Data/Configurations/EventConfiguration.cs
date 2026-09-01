@@ -25,6 +25,11 @@ public sealed class EventConfiguration : IEntityTypeConfiguration<Event>
             .HasColumnName("description")
             .HasMaxLength(2000);
 
+        builder.Property(x => x.EventDate)
+            .HasColumnName("event_date")
+            .HasColumnType("date")
+            .IsRequired();
+
         builder.Property(x => x.LogoImageId)
             .HasColumnName("logo_image_id");
         

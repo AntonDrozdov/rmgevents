@@ -20,12 +20,18 @@ export interface EventOption {
   id: number;
   name: string;
   roleName: string;
+  eventDate?: string;
+  createdAt?: string;
+  createdByName?: string;
+  logoImageId?: number | null;
 }
 
 export interface EventDto {
   id: number;
   name: string;
   description?: string | null;
+  eventDate: string;
+  createdByName: string;
   logoImageId?: number | null;
   ownerId: number;
   createdAt: string;
@@ -34,14 +40,23 @@ export interface EventDto {
 
 export interface CreateEventRequest {
   name: string;
-  description?: string;
+  eventDate: string;
   logoImageId?: number;
+}
+
+export interface UpdateEventRequest {
+  name: string;
+  description?: string | null;
+  eventDate: string;
+  logoImageId?: number | null;
 }
 
 export interface EventDetailDto {
   id: number;
   name: string;
   description?: string | null;
+  eventDate: string;
+  createdByName: string;
   logoImageId?: number | null;
   ownerId: number;
   createdAt: string;
@@ -127,6 +142,7 @@ export interface CreateUserRequest {
 }
 
 export interface UpdateUserRequest {
+  login: string;
   name: string;
   surname: string;
   additionalName?: string;
@@ -173,5 +189,6 @@ export interface AuthContextType {
   logout: () => void;
   selectEvent: (event: EventOption) => Promise<void>;
   addEvent: (event: EventOption) => void;
+  updateEvent: (event: EventDto) => void;
   refreshProfile: () => Promise<void>;
 }

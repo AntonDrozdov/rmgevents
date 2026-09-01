@@ -20,7 +20,14 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
         
         var login = await authService.GetAvailableEventsAsync(loginResult.Value.LoginId);
         
-        var events = login.Select(l => new EventOption(l.EventId, l.EventName, l.RoleName)).ToList();
+        var events = login.Select(item => new EventOption(
+            item.EventId,
+            item.EventName,
+            item.RoleName,
+            item.EventDate,
+            item.CreatedAt,
+            item.CreatedByName,
+            item.LogoImageId)).ToList();
         
         return Ok(new LoginResponse(
             loginResult.Value.Sid,

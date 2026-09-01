@@ -1,5 +1,9 @@
 using Application.Repositories;
 using Application.Services;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Infrastructure.Services;
 
@@ -26,28 +30,42 @@ public sealed class UserService(
 
         await ValidateRoleAndGroupAsync(eventId, roleId, groupId);
 
-        var login = await loginRepository.GetByLoginAsync(loginValue)
-            ?? await authService.CreateTemporaryLoginAsync(loginValue);
-        
-        var user = new Application.Entities.User
+        try
         {
-            Id = 0,
-            LoginId = login.Id,
-            EventId = eventId,
-            RoleId = roleId,
-            GroupId = groupId,
-            Name = name,
-            Surname = surname,
-            AdditionalName = additionalName,
-            Email = email,
-            Tel = tel,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-        
-        await userRepository.AddAsync(user);
-        await userRepository.SaveChangesAsync();
-        
-        return await userRepository.GetByIdAsync(user.Id) ?? user;
+            var login = await loginRepository.GetByLoginAsync(loginValue);
+            if (login != null && await userRepository.GetByLoginAndEventAsync(login.Id, eventId) != null)
+                throw new InvalidOperationException(
+                    "Сотрудник с таким логином уже существует в этом мероприятии.");
+
+            login ??= await authService.CreateTemporaryLoginAsync(loginValue);
+
+            var user = new Application.Entities.User
+            {
+                Id = 0,
+                LoginId = login.Id,
+                EventId = eventId,
+                RoleId = roleId,
+                GroupId = groupId,
+                Name = name,
+                Surname = surname,
+                AdditionalName = additionalName,
+                Email = email,
+                Tel = tel,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            await userRepository.AddAsync(user);
+            await userRepository.SaveChangesAsync();
+
+            return await userRepository.GetByIdAsync(user.Id) ?? user;
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            throw new InvalidOperationException(
+                "Сотрудник с таким логином уже существует в этом мероприятии.",
+                ex);
+        }
     }
     
     public async Task<Application.Entities.User?> GetUserAsync(long userId)
@@ -75,24 +93,82 @@ public sealed class UserService(
     
     public async Task UpdateUserAsync(
         long userId,
+        long eventId,
+        string loginValue,
         string name,
         string surname,
         string? additionalName,
         string? email,
-        string? tel)
+        string? tel,
+        long roleId,
+        long groupId)
     {
+        if (string.IsNullOrWhiteSpace(loginValue))
+            throw new InvalidOperationException("Логин обязателен.");
+
+        var normalizedLogin = loginValue.Trim();
+        if (normalizedLogin.Length > 255)
+            throw new InvalidOperationException("Логин не должен превышать 255 символов.");
+
         var user = await userRepository.GetByIdAsync(userId);
         if (user == null)
-            throw new InvalidOperationException($"User {userId} not found");
-        
+            throw new InvalidOperationException("Сотрудник не найден.");
+
+        if (user.EventId != eventId)
+            throw new InvalidOperationException("Сотрудник не принадлежит этому мероприятию.");
+
+        await ValidateRoleAndGroupAsync(eventId, roleId, groupId);
+
+        var targetRole = await roleRepository.GetByIdAsync(roleId)
+            ?? throw new InvalidOperationException("Выбранная роль не найдена.");
+        var removesAdministratorRole =
+            string.Equals(user.Role?.Name, "Administrator", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(targetRole.Name, "Administrator", StringComparison.OrdinalIgnoreCase);
+
+        if (removesAdministratorRole)
+        {
+            var eventUsers = await userRepository.GetByEventIdAsync(eventId);
+            var administratorCount = eventUsers.Count(item =>
+                string.Equals(item.Role?.Name, "Administrator", StringComparison.OrdinalIgnoreCase));
+
+            if (administratorCount <= 1)
+                throw new InvalidOperationException(
+                    "Нельзя изменить роль единственного сотрудника с ролью Administrator.");
+        }
+
+        var login = user.Login
+            ?? await loginRepository.GetByIdAsync(user.LoginId)
+            ?? throw new InvalidOperationException("Учётная запись сотрудника не найдена.");
+
+        if (!string.Equals(login.LoginValue, normalizedLogin, StringComparison.Ordinal))
+        {
+            var existingLogin = await loginRepository.GetByLoginAsync(normalizedLogin);
+            if (existingLogin != null && existingLogin.Id != login.Id)
+                throw new InvalidOperationException("Указанный логин уже используется.");
+
+            login.LoginValue = normalizedLogin;
+            if (login.MustChangePassword)
+                login.PasswordHash = HashPassword(normalizedLogin);
+        }
+
         user.Name = name;
         user.Surname = surname;
         user.AdditionalName = additionalName;
         user.Email = email;
         user.Tel = tel;
-        
-        await userRepository.UpdateAsync(user);
-        await userRepository.SaveChangesAsync();
+        user.RoleId = roleId;
+        user.GroupId = groupId;
+
+        try
+        {
+            await userRepository.UpdateAsync(user);
+            await userRepository.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            throw new InvalidOperationException("Указанный логин уже используется.", ex);
+        }
     }
     
     public async Task AssignRoleAsync(long userId, long eventId, long roleId, long groupId)
@@ -165,5 +241,11 @@ public sealed class UserService(
         if (group.Id != rootGroups[0].Id)
             throw new InvalidOperationException(
                 "Сотрудник с ролью Administrator должен состоять в корневой группе.");
+    }
+
+    private static string HashPassword(string password)
+    {
+        var hashedBytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+        return Convert.ToBase64String(hashedBytes);
     }
 }

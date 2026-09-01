@@ -4,6 +4,8 @@ public sealed record EventDto(
     long Id,
     string Name,
     string? Description,
+    DateOnly EventDate,
+    string CreatedByName,
     long? LogoImageId,
     long OwnerId,
     DateTimeOffset CreatedAt,
@@ -11,13 +13,23 @@ public sealed record EventDto(
 
 public sealed record CreateEventRequest(
     string Name,
-    string? Description,
+    DateOnly EventDate,
     long? LogoImageId);
+
+public sealed record UpdateEventRequest(
+    string Name,
+    string? Description,
+    DateOnly EventDate,
+    long? LogoImageId);
+
+public sealed record ImageUploadResponse(long Id);
 
 public sealed record EventDetailDto(
     long Id,
     string Name,
     string? Description,
+    DateOnly EventDate,
+    string CreatedByName,
     long? LogoImageId,
     long OwnerId,
     DateTimeOffset CreatedAt,

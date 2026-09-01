@@ -3,11 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
 
+const getTodayInputValue = () => {
+  const today = new Date();
+  const offset = today.getTimezoneOffset();
+  return new Date(today.getTime() - offset * 60_000).toISOString().slice(0, 10);
+};
+
 export const CreateEventPage: React.FC = () => {
   const navigate = useNavigate();
-  const { addEvent, currentUser } = useAuth();
+  const { addEvent } = useAuth();
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [eventDate, setEventDate] = useState(getTodayInputValue);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -19,12 +25,15 @@ export const CreateEventPage: React.FC = () => {
     try {
       const createdEvent = await apiClient.createEvent({
         name: name.trim(),
-        description: description.trim() || undefined,
+        eventDate,
       });
       addEvent({
         id: createdEvent.id,
         name: createdEvent.name,
-        roleName: currentUser?.roleName ?? "administrator",
+        roleName: "Administrator",
+        eventDate: createdEvent.eventDate,
+        createdAt: createdEvent.createdAt,
+        createdByName: createdEvent.createdByName,
       });
       navigate(`/events/${createdEvent.id}/guests`);
     } catch (err) {
@@ -51,16 +60,16 @@ export const CreateEventPage: React.FC = () => {
       {error && <div className="alert alert-error">{error}</div>}
 
       <section className="panel">
-        <form className="form" onSubmit={handleSubmit}>
+        <form className="form employee-form" onSubmit={handleSubmit}>
           <label className="field">
-            <span>Название</span>
+            <span>Название *</span>
             <input value={name} onChange={(event) => setName(event.target.value)} required />
           </label>
           <label className="field">
-            <span>Описание</span>
-            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} />
+            <span>Дата мероприятия *</span>
+            <input type="date" value={eventDate} onChange={(event) => setEventDate(event.target.value)} required />
           </label>
-          <button className="primary-button" type="submit" disabled={loading}>
+          <button className="primary-button" type="submit" disabled={loading || !name.trim() || !eventDate}>
             {loading ? "Создаём..." : "Создать мероприятие"}
           </button>
         </form>

@@ -4,9 +4,10 @@ import { useAuth } from "../contexts/AuthContext";
 
 interface UserMenuProps {
   variant?: "dropdown" | "inline";
+  showRole?: boolean;
 }
 
-export const UserMenu: React.FC<UserMenuProps> = ({ variant = "dropdown" }) => {
+export const UserMenu: React.FC<UserMenuProps> = ({ variant = "dropdown", showRole = true }) => {
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
@@ -37,7 +38,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({ variant = "dropdown" }) => {
   const profile = (
     <div className="profile-pill">
       <span>{fullName}</span>
-      <small>{currentUser?.roleName ?? "Роль не выбрана"}</small>
+      {showRole && <small>{currentUser?.roleName ?? "Роль не выбрана"}</small>}
     </div>
   );
 
@@ -62,7 +63,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({ variant = "dropdown" }) => {
         aria-haspopup="menu"
       >
         <span>{fullName}</span>
-        <small>{currentUser?.roleName ?? "Роль не выбрана"}</small>
+        {showRole && <small>{currentUser?.roleName ?? "Роль не выбрана"}</small>}
       </button>
 
       {isOpen && (

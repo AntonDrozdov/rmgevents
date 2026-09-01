@@ -7,12 +7,11 @@ public sealed class PermissionService(
     IUserRepository userRepository,
     IGroupRepository groupRepository) : IPermissionService
 {
-    public async Task<bool> HasPermissionAsync(long userId, long eventId, string permissionCode)
+    public async Task<bool> HasPermissionAsync(long loginId, long eventId, string permissionCode)
     {
-        var user = await userRepository.GetByIdAsync(userId)
-            ?? await userRepository.GetByLoginAndEventAsync(userId, eventId);
+        var user = await userRepository.GetByLoginAndEventAsync(loginId, eventId);
 
-        if (user == null || user.EventId != eventId)
+        if (user == null)
             return false;
         
         if (user.Role == null)
@@ -21,15 +20,9 @@ public sealed class PermissionService(
         return user.Role.RolePermissions.Any(rp => rp.Permission?.Code == permissionCode);
     }
 
-    public async Task<bool> HasPermissionInAnyEventAsync(long loginOrUserId, string permissionCode)
+    public async Task<bool> HasPermissionInAnyEventAsync(long loginId, string permissionCode)
     {
-        var users = await userRepository.GetByLoginIdAsync(loginOrUserId);
-        var directUser = await userRepository.GetByIdAsync(loginOrUserId);
-
-        if (directUser != null && users.All(user => user.Id != directUser.Id))
-        {
-            users.Add(directUser);
-        }
+        var users = await userRepository.GetByLoginIdAsync(loginId);
 
         return users.Any(user =>
             user.Role?.RolePermissions.Any(rp => rp.Permission?.Code == permissionCode) == true);
@@ -37,8 +30,7 @@ public sealed class PermissionService(
     
     public async Task<List<string>> GetUserPermissionsAsync(long userId, long eventId)
     {
-        var user = await userRepository.GetByIdAsync(userId)
-            ?? await userRepository.GetByLoginAndEventAsync(userId, eventId);
+        var user = await userRepository.GetByIdAsync(userId);
 
         if (user == null || user.EventId != eventId || user.Role == null)
             return [];
@@ -48,12 +40,11 @@ public sealed class PermissionService(
             .ToList();
     }
     
-    public async Task<long?> GetUserGroupInEventAsync(long userId, long eventId)
+    public async Task<long?> GetUserGroupInEventAsync(long loginId, long eventId)
     {
-        var user = await userRepository.GetByIdAsync(userId)
-            ?? await userRepository.GetByLoginAndEventAsync(userId, eventId);
+        var user = await userRepository.GetByLoginAndEventAsync(loginId, eventId);
 
-        if (user == null || user.EventId != eventId)
+        if (user == null)
             return null;
         
         return user.GroupId;

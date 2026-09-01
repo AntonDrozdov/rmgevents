@@ -26,16 +26,36 @@ public sealed class AuthService(
             login.MustChangePassword);
     }
     
-    public async Task<List<(long EventId, string EventName, string RoleName)>> GetAvailableEventsAsync(long loginId)
+    public async Task<List<(
+        long EventId,
+        string EventName,
+        string RoleName,
+        DateOnly EventDate,
+        DateTimeOffset CreatedAt,
+        string CreatedByName,
+        long? LogoImageId)>> GetAvailableEventsAsync(long loginId)
     {
         var users = await userRepository.GetByLoginIdAsync(loginId);
-        var result = new List<(long, string, string)>();
+        var result = new List<(long, string, string, DateOnly, DateTimeOffset, string, long?)>();
         
         foreach (var user in users)
         {
             if (user.Event != null && user.Role != null)
             {
-                result.Add((user.EventId, user.Event.Name, user.Role.Name));
+                var owner = user.Event.Owner;
+                var createdByName = owner == null
+                    ? "—"
+                    : string.Join(" ", new[] { owner.Surname, owner.Name, owner.AdditionalName }
+                        .Where(part => !string.IsNullOrWhiteSpace(part)));
+
+                result.Add((
+                    user.EventId,
+                    user.Event.Name,
+                    user.Role.Name,
+                    user.Event.EventDate,
+                    user.Event.CreatedAt,
+                    createdByName,
+                    user.Event.LogoImageId));
             }
         }
         

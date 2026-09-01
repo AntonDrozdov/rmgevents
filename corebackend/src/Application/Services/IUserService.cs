@@ -18,11 +18,15 @@ public interface IUserService
     Task<List<Entities.User>> GetUsersByEventAsync(long eventId);
     Task UpdateUserAsync(
         long userId,
+        long eventId,
+        string login,
         string name,
         string surname,
         string? additionalName,
         string? email,
-        string? tel);
+        string? tel,
+        long roleId,
+        long groupId);
     Task AssignRoleAsync(long userId, long eventId, long roleId, long groupId);
     Task<string> ResetUserPasswordAsync(long userId, long eventId);
     Task DeleteUserAsync(long userId);

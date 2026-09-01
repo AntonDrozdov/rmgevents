@@ -2,6 +2,7 @@ using Api.Contracts;
 using Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 
 namespace Api.Controllers;
@@ -12,8 +13,15 @@ namespace Api.Controllers;
 public sealed class EventsController(
     IEventService eventService,
     IUserService userService,
-    IPermissionService permissionService) : ControllerBase
+    IPermissionService permissionService,
+    ILogger<EventsController> logger) : ControllerBase
 {
+    private static string FormatUserName(Application.Entities.User? user) =>
+        user == null
+            ? "—"
+            : string.Join(" ", new[] { user.Surname, user.Name, user.AdditionalName }
+                .Where(part => !string.IsNullOrWhiteSpace(part)));
+
     private static UserProfileDto MapProfile(Application.Entities.User user, List<string> permissions) =>
         new(
             user.Id,
@@ -31,12 +39,14 @@ public sealed class EventsController(
     public async Task<ActionResult<List<EventDto>>> GetAvailableEvents()
     {
         var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var events = await eventService.GetEventsByOwnerAsync(userId);
+        var events = await eventService.GetEventsByUserAsync(userId);
         
         var result = events.Select(e => new EventDto(
             e.Id,
             e.Name,
             e.Description,
+            e.EventDate,
+            FormatUserName(e.Owner),
             e.LogoImageId,
             e.OwnerId,
             e.CreatedAt,
@@ -66,6 +76,8 @@ public sealed class EventsController(
             @event.Id,
             @event.Name,
             @event.Description,
+            @event.EventDate,
+            FormatUserName(@event.Owner),
             @event.LogoImageId,
             @event.OwnerId,
             @event.CreatedAt,
@@ -91,18 +103,77 @@ public sealed class EventsController(
     [HttpPost]
     public async Task<ActionResult<EventDto>> CreateEvent(CreateEventRequest request)
     {
-        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-        var @event = await eventService.CreateEventAsync(userId, request.Name, request.Description, request.LogoImageId);
-        
-        return Created(
-            $"/events/{@event.Id}",
-            new EventDto(
+        if (request.EventDate == default)
+            return BadRequest(new { message = "Дата мероприятия обязательна." });
+
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            var @event = await eventService.CreateEventAsync(
+                loginId,
+                request.Name,
+                request.EventDate,
+                request.LogoImageId);
+
+            return Created(
+                $"/events/{@event.Id}",
+                new EventDto(
+                    @event.Id,
+                    @event.Name,
+                    @event.Description,
+                    @event.EventDate,
+                    FormatUserName(@event.Owner),
+                    @event.LogoImageId,
+                    @event.OwnerId,
+                    @event.CreatedAt,
+                    @event.IsArchived));
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(ex, "Event creation was rejected for login {LoginId}", loginId);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Event creation failed for login {LoginId}", loginId);
+            return BadRequest(new { message = "Не удалось создать мероприятие. Проверьте введённые данные." });
+        }
+    }
+
+    [Authorize(Policy = "CanCreateEvent")]
+    [HttpPut("{eventId:long}")]
+    public async Task<ActionResult<EventDto>> UpdateEvent(long eventId, UpdateEventRequest request)
+    {
+        try
+        {
+            var @event = await eventService.UpdateEventAsync(
+                eventId,
+                request.Name,
+                request.Description,
+                request.EventDate,
+                request.LogoImageId);
+
+            return Ok(new EventDto(
                 @event.Id,
                 @event.Name,
                 @event.Description,
+                @event.EventDate,
+                FormatUserName(@event.Owner),
                 @event.LogoImageId,
                 @event.OwnerId,
                 @event.CreatedAt,
                 @event.IsArchived));
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(ex, "Event update was rejected for event {EventId}", eventId);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Event update failed for event {EventId}", eventId);
+            return BadRequest(new { message = "Не удалось сохранить настройки мероприятия." });
+        }
     }
 }
