@@ -9,9 +9,7 @@ namespace Api.Controllers;
 [ApiController]
 [Route("api/events/{eventId}/guests")]
 [Authorize]
-public sealed class GuestsController(
-    IGuestService guestService,
-    IPermissionService permissionService) : ControllerBase
+public sealed class GuestsController(IGuestService guestService) : ControllerBase
 {
     private static GuestDto MapGuest(Application.Entities.Guest guest) =>
         new(
@@ -85,7 +83,7 @@ public sealed class GuestsController(
             }
             else
             {
-                await guestService.RejectGuestAsync(guestId);
+                await guestService.RejectGuestAsync(guestId, userId);
             }
             
             var guest = await guestService.GetGuestAsync(guestId);

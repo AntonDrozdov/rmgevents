@@ -6,6 +6,7 @@ public interface IPermissionService
     Task<bool> HasPermissionInAnyEventAsync(long loginId, string permissionCode);
     Task<List<string>> GetUserPermissionsAsync(long userId, long eventId);
     Task<long?> GetUserGroupInEventAsync(long loginId, long eventId);
+    Task<bool> IsGroupInUserScopeAsync(long eventId, long targetGroupId, long userGroupId);
     Task<bool> CanCreateGuestInGroupAsync(long userId, long eventId, long targetGroupId, long userGroupId);
     Task<bool> CanCreateGroupInParentAsync(long userId, long eventId, long parentGroupId, long userGroupId);
 }

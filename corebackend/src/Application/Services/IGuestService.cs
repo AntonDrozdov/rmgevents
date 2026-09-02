@@ -8,7 +8,7 @@ public interface IGuestService
     Task<List<Entities.Guest>> GetGuestsByGroupAsync(long groupId);
     Task<List<Entities.Guest>> GetGuestsByStatusAsync(long eventId, string status);
     Task ApproveGuestAsync(long guestId, long approverUserId);
-    Task RejectGuestAsync(long guestId);
+    Task RejectGuestAsync(long guestId, long approverUserId);
     Task UpdateGuestAsync(long guestId, string name, string? email, string? phone);
     Task DeleteGuestAsync(long guestId);
 }

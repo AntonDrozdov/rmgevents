@@ -93,17 +93,17 @@ public sealed class RoleService(
             "Administrator",
             permissions.Select(p => p.Code).ToList());
         
-        // Manager - create_guest, create_group
-        var managerPermissions = new[] { "create_guest", "create_group" };
+        // Manager - create_guest, create_group, approve_guest
+        var managerPermissions = new[] { "create_guest", "create_group", "approve_guest" };
         await CreateRoleAsync(
             eventId,
             "Manager",
             permissions.Where(p => managerPermissions.Contains(p.Code)).Select(p => p.Code).ToList());
         
-        // Approver - approve_guest
+        // Creator - create_guest
         await CreateRoleAsync(
             eventId,
-            "Approver",
-            new List<string> { "approve_guest" });
+            "Creator",
+            new List<string> { "create_guest" });
     }
 }

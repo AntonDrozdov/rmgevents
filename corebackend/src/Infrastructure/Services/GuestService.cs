@@ -82,6 +82,8 @@ public sealed class GuestService(
         // Проверяем разрешение
         if (!await permissionService.HasPermissionAsync(approverUserId, guest.EventId, "approve_guest"))
             throw new UnauthorizedAccessException("No permission to approve guests");
+
+        await EnsureGuestIsInApproverScopeAsync(guest, approverUserId);
         
         guest.Status = "approved";
         guest.ApprovedAt = DateTimeOffset.UtcNow;
@@ -90,16 +92,37 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
     
-    public async Task RejectGuestAsync(long guestId)
+    public async Task RejectGuestAsync(long guestId, long approverUserId)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
+
+        if (!await permissionService.HasPermissionAsync(approverUserId, guest.EventId, "approve_guest"))
+            throw new UnauthorizedAccessException("No permission to reject guests");
+
+        await EnsureGuestIsInApproverScopeAsync(guest, approverUserId);
         
         guest.Status = "rejected";
         
         await guestRepository.UpdateAsync(guest);
         await guestRepository.SaveChangesAsync();
+    }
+
+    private async Task EnsureGuestIsInApproverScopeAsync(Application.Entities.Guest guest, long approverUserId)
+    {
+        var approverGroupId = await permissionService.GetUserGroupInEventAsync(approverUserId, guest.EventId);
+        if (!approverGroupId.HasValue)
+            throw new InvalidOperationException("User not assigned to a group");
+
+        if (!await permissionService.IsGroupInUserScopeAsync(
+                guest.EventId,
+                guest.GroupId,
+                approverGroupId.Value))
+        {
+            throw new UnauthorizedAccessException(
+                "Cannot approve or reject guests outside your group hierarchy");
+        }
     }
     
     public async Task UpdateGuestAsync(long guestId, string name, string? email, string? phone)

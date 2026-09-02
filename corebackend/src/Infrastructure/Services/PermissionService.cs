@@ -50,6 +50,15 @@ public sealed class PermissionService(
         return user.GroupId;
     }
     
+    public async Task<bool> IsGroupInUserScopeAsync(long eventId, long targetGroupId, long userGroupId)
+    {
+        var targetGroup = await groupRepository.GetByIdAsync(targetGroupId);
+        if (targetGroup == null || targetGroup.EventId != eventId)
+            return false;
+
+        return targetGroupId == userGroupId || await IsDescendantOfAsync(targetGroupId, userGroupId);
+    }
+
     public async Task<bool> CanCreateGuestInGroupAsync(long userId, long eventId, long targetGroupId, long userGroupId)
     {
         // Пользователь может создавать гостей в своей группе и дочерних группах
