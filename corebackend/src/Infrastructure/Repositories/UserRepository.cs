@@ -52,6 +52,75 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .Include(x => x.Login)
             .ToListAsync();
     }
+
+    public async Task<List<Application.Entities.User>> SearchForEventAsync(
+        long eventId,
+        string? login,
+        string? surname,
+        string? name,
+        string? email,
+        int limit)
+    {
+        var query = db.Users
+            .AsNoTracking()
+            .Where(user => user.EventId != eventId)
+            .Where(user => !db.Users.Any(current =>
+                current.EventId == eventId && current.LoginId == user.LoginId))
+            .Include(user => user.Login)
+            .Include(user => user.Role)
+            .Include(user => user.Group)
+            .AsQueryable();
+
+        var hasLogin = !string.IsNullOrWhiteSpace(login);
+        var hasSurname = !string.IsNullOrWhiteSpace(surname);
+        var hasName = !string.IsNullOrWhiteSpace(name);
+        var hasEmail = !string.IsNullOrWhiteSpace(email);
+
+        if (!hasLogin && !hasSurname && !hasName && !hasEmail)
+            return [];
+
+        query = query.Where(user =>
+            (hasLogin && user.Login != null && EF.Functions.ILike(user.Login.LoginValue, $"%{login}%")) ||
+            (hasSurname && EF.Functions.ILike(user.Surname, $"%{surname}%")) ||
+            (hasName && EF.Functions.ILike(user.Name, $"%{name}%")) ||
+            (hasEmail && user.Email != null && EF.Functions.ILike(user.Email, $"%{email}%")));
+
+        var candidates = await query
+            .OrderByDescending(user => user.CreatedAt)
+            .Take(limit * 5)
+            .ToListAsync();
+
+        static int MatchScore(string? value, string? searchValue)
+        {
+            if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(searchValue))
+                return 0;
+            if (string.Equals(value, searchValue, StringComparison.OrdinalIgnoreCase))
+                return 100;
+            if (value.StartsWith(searchValue, StringComparison.OrdinalIgnoreCase))
+                return 20;
+            return value.Contains(searchValue, StringComparison.OrdinalIgnoreCase) ? 5 : 0;
+        }
+
+        return candidates
+            .Select(user => new
+            {
+                User = user,
+                Score = MatchScore(user.Login?.LoginValue, login)
+                    + MatchScore(user.Surname, surname)
+                    + MatchScore(user.Name, name)
+                    + MatchScore(user.Email, email)
+            })
+            .GroupBy(item => item.User.LoginId)
+            .Select(group => group
+                .OrderByDescending(item => item.Score)
+                .ThenByDescending(item => item.User.CreatedAt)
+                .First())
+            .OrderByDescending(item => item.Score)
+            .ThenByDescending(item => item.User.CreatedAt)
+            .Take(limit)
+            .Select(item => item.User)
+            .ToList();
+    }
     
     public async Task<List<Application.Entities.User>> GetByGroupIdAsync(long groupId)
     {

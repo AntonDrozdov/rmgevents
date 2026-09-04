@@ -38,6 +38,30 @@ public sealed class UsersController(
         
         return Ok(result);
     }
+
+    [Authorize(Policy = "CanCreateUser")]
+    [HttpGet("search")]
+    public async Task<ActionResult<List<UserSearchResultDto>>> SearchUsers(
+        long eventId,
+        [FromQuery] string? login,
+        [FromQuery] string? surname,
+        [FromQuery] string? name,
+        [FromQuery] string? email)
+    {
+        var users = await userService.SearchUsersForEventAsync(
+            eventId, login, surname, name, email);
+
+        return Ok(users.Select(user => new UserSearchResultDto(
+            user.Id,
+            user.Login?.LoginValue ?? string.Empty,
+            user.Name,
+            user.Surname,
+            user.AdditionalName,
+            user.Email,
+            user.Tel,
+            user.Role?.Name,
+            user.Group?.Name)).ToList());
+    }
     
     [Authorize(Policy = "CanCreateUser")]
     [HttpPost]

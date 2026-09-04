@@ -15,6 +15,17 @@ public sealed record UserDto(
     string? Tel,
     DateTimeOffset CreatedAt);
 
+public sealed record UserSearchResultDto(
+    long Id,
+    string Login,
+    string Name,
+    string Surname,
+    string? AdditionalName,
+    string? Email,
+    string? Tel,
+    string? RoleName,
+    string? GroupName);
+
 public sealed record CreateUserRequest(
     string Login,
     string Name,

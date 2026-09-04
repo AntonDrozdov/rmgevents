@@ -15,6 +15,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Guest> Guests => Set<Guest>();
+    public DbSet<GuestDecision> GuestDecisions => Set<GuestDecision>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

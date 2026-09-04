@@ -27,11 +27,24 @@ export const EventInformationPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [initialValues, setInitialValues] = useState({
+    name: "",
+    description: "",
+    eventDate: "",
+    logoImageId: null as number | null,
+  });
+
+  const isDirty = coverFile !== null ||
+    name.trim() !== initialValues.name ||
+    description.trim() !== initialValues.description ||
+    eventDate !== initialValues.eventDate ||
+    logoImageId !== initialValues.logoImageId;
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError("");
+    setCoverFile(null);
 
     apiClient.getEvent(eventId)
       .then((event) => {
@@ -41,6 +54,12 @@ export const EventInformationPage: React.FC = () => {
         setEventDate(event.eventDate.slice(0, 10));
         setLogoImageId(event.logoImageId ?? null);
         setCoverPreview(event.logoImageId ? apiClient.getImageUrl(event.logoImageId) : null);
+        setInitialValues({
+          name: event.name,
+          description: (event.description ?? "").trim(),
+          eventDate: event.eventDate.slice(0, 10),
+          logoImageId: event.logoImageId ?? null,
+        });
       })
       .catch((requestError) => {
         if (active) setError(getErrorMessage(requestError, "Не удалось загрузить настройки мероприятия."));
@@ -83,6 +102,7 @@ export const EventInformationPage: React.FC = () => {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!isDirty) return;
     setSaving(true);
     setError("");
     setSuccess("");
@@ -103,6 +123,15 @@ export const EventInformationPage: React.FC = () => {
       setLogoImageId(updatedEvent.logoImageId ?? null);
       setCoverFile(null);
       setCoverPreview(updatedEvent.logoImageId ? apiClient.getImageUrl(updatedEvent.logoImageId) : null);
+      setName(updatedEvent.name);
+      setDescription(updatedEvent.description ?? "");
+      setEventDate(updatedEvent.eventDate.slice(0, 10));
+      setInitialValues({
+        name: updatedEvent.name,
+        description: (updatedEvent.description ?? "").trim(),
+        eventDate: updatedEvent.eventDate.slice(0, 10),
+        logoImageId: updatedEvent.logoImageId ?? null,
+      });
       updateEvent(updatedEvent);
       setSuccess("Настройки мероприятия сохранены.");
     } catch (requestError) {
@@ -192,7 +221,7 @@ export const EventInformationPage: React.FC = () => {
             <button
               className="primary-button"
               type="submit"
-              disabled={saving || !name.trim() || !eventDate}
+              disabled={saving || !name.trim() || !eventDate || !isDirty}
             >
               {saving ? "Сохраняем..." : "Сохранить"}
             </button>

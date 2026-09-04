@@ -16,6 +16,12 @@ public interface IUserService
     Task<Entities.User?> GetUserInEventAsync(long userId, long eventId);
     Task<Entities.User?> GetUserByLoginAndEventAsync(long loginId, long eventId);
     Task<List<Entities.User>> GetUsersByEventAsync(long eventId);
+    Task<List<Entities.User>> SearchUsersForEventAsync(
+        long eventId,
+        string? login,
+        string? surname,
+        string? name,
+        string? email);
     Task UpdateUserAsync(
         long userId,
         long eventId,

@@ -10,7 +10,15 @@ public sealed record GuestDto(
     string? Phone,
     string Status,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? ApprovedAt);
+    DateTimeOffset? ApprovedAt,
+    List<GuestDecisionDto> Decisions);
+
+public sealed record GuestDecisionDto(
+    long Id,
+    long? ActorUserId,
+    string Action,
+    string ActorName,
+    DateTimeOffset CreatedAt);
 
 public sealed record CreateGuestRequest(
     string Name,
@@ -21,3 +29,9 @@ public sealed record CreateGuestRequest(
 public sealed record ApproveGuestRequest(
     long GuestId,
     bool Approve);
+
+public sealed record UpdateGuestRequest(
+    string Name,
+    string? Email,
+    string? Phone,
+    long GroupId);

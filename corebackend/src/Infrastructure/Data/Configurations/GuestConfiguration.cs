@@ -44,8 +44,8 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
         builder.Property(x => x.Status)
             .HasColumnName("status")
             .IsRequired()
-            .HasMaxLength(20)
-            .HasDefaultValue("pending");
+            .HasMaxLength(30)
+            .HasDefaultValue("saved");
         
         builder.Property(x => x.Meta)
             .HasColumnName("meta")

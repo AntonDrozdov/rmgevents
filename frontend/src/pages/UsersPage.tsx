@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { useParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
-import { GroupTreeDto, RoleDto, UserDto } from "../types";
+import { GroupTreeDto, RoleDto, UserDto, UserSearchResultDto } from "../types";
 import { flattenGroups } from "../utils/groups";
 
 const formatUserName = (user: Pick<UserDto, "surname" | "name" | "additionalName">) =>
@@ -52,6 +52,10 @@ export const UsersPage: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [formData, setFormData] = useState(emptyForm());
   const [loginManuallyEdited, setLoginManuallyEdited] = useState(false);
+  const [similarUsers, setSimilarUsers] = useState<UserSearchResultDto[]>([]);
+  const [similarUsersLoading, setSimilarUsersLoading] = useState(false);
+  const [similarUsersError, setSimilarUsersError] = useState("");
+  const skipNextSearch = useRef(false);
   const [editingUser, setEditingUser] = useState<UserDto | null>(null);
   const [editFormData, setEditFormData] = useState(emptyForm());
   const [deleteUser, setDeleteUser] = useState<UserDto | null>(null);
@@ -73,6 +77,16 @@ export const UsersPage: React.FC = () => {
   );
   const isEditingOnlyAdministrator =
     editingUser?.roleName?.toLowerCase() === "administrator" && administratorCount <= 1;
+  const isEditDirty = editingUser !== null && (
+    editFormData.login.trim() !== editingUser.login ||
+    editFormData.surname.trim() !== editingUser.surname ||
+    editFormData.name.trim() !== editingUser.name ||
+    editFormData.additionalName.trim() !== (editingUser.additionalName ?? "") ||
+    editFormData.email.trim() !== (editingUser.email ?? "") ||
+    editFormData.tel.trim() !== (editingUser.tel ?? "") ||
+    Number(editFormData.roleId) !== editingUser.roleId ||
+    Number(editFormData.groupId) !== editingUser.groupId
+  );
 
   const loadUsers = async () => {
     if (!eventId) return;
@@ -136,6 +150,61 @@ export const UsersPage: React.FC = () => {
     loadUsers();
   }, [eventId, canCreate]);
 
+  useEffect(() => {
+    if (!isCreateModalOpen || !eventId) return;
+
+    if (skipNextSearch.current) {
+      skipNextSearch.current = false;
+      return;
+    }
+
+    const query = {
+      login: formData.login.trim(),
+      surname: formData.surname.trim(),
+      name: formData.name.trim(),
+      email: formData.email.trim(),
+    };
+    const hasSearchValue = Object.values(query).some((value) => value.length >= 2);
+
+    if (!hasSearchValue) {
+      setSimilarUsers([]);
+      setSimilarUsersError("");
+      setSimilarUsersLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setSimilarUsersLoading(true);
+      setSimilarUsersError("");
+
+      try {
+        const result = await apiClient.searchUsers(eventId, query, controller.signal);
+        setSimilarUsers(result);
+      } catch (err) {
+        if (!axios.isCancel(err)) {
+          setSimilarUsersError("Не удалось найти похожих сотрудников.");
+          setSimilarUsers([]);
+          console.error(err);
+        }
+      } finally {
+        if (!controller.signal.aborted) setSimilarUsersLoading(false);
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [
+    eventId,
+    isCreateModalOpen,
+    formData.login,
+    formData.surname,
+    formData.name,
+    formData.email,
+  ]);
+
   const openCreateModal = async () => {
     setIsCreateModalOpen(true);
     await loadReferencesForCreate();
@@ -146,7 +215,37 @@ export const UsersPage: React.FC = () => {
     setIsCreateModalOpen(false);
     setFormData(emptyForm(String(flatGroups[0]?.id ?? ""), String(roles[0]?.id ?? "")));
     setLoginManuallyEdited(false);
+    setSimilarUsers([]);
+    setSimilarUsersError("");
+    setSimilarUsersLoading(false);
     setError("");
+  };
+
+  const useSimilarUser = (user: UserSearchResultDto) => {
+    const role = roles.find((item) =>
+      item.name.localeCompare(user.roleName ?? "", undefined, { sensitivity: "accent" }) === 0
+    );
+    const group = flatGroups.find((item) =>
+      item.name.localeCompare(user.groupName ?? "", undefined, { sensitivity: "accent" }) === 0
+    );
+    const roleId = String(role?.id ?? formData.roleId);
+
+    skipNextSearch.current = true;
+    setLoginManuallyEdited(true);
+    setFormData({
+      login: user.login,
+      surname: user.surname,
+      name: user.name,
+      additionalName: user.additionalName ?? "",
+      email: user.email ?? "",
+      tel: user.tel ?? "",
+      roleId,
+      groupId: isAdministratorRole(roleId)
+        ? rootGroupId
+        : String(group?.id ?? formData.groupId),
+    });
+    setSimilarUsers([]);
+    setSimilarUsersError("");
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -209,7 +308,7 @@ export const UsersPage: React.FC = () => {
 
   const handleEditSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!editingUser) return;
+    if (!editingUser || !isEditDirty) return;
 
     setError("");
     setSaving(true);
@@ -383,16 +482,18 @@ export const UsersPage: React.FC = () => {
                         >
                           <ResetPasswordIcon />
                         </button>
-                        <button
-                          className="icon-button icon-button-danger"
-                          type="button"
-                          onClick={() => openDeleteModal(user)}
-                          disabled={deletingUserId === user.id}
-                          aria-label={`Удалить ${formatUserName(user)}`}
-                          title="Удалить"
-                        >
-                          <DeleteIcon />
-                        </button>
+                        {(user.roleName?.toLowerCase() !== "administrator" || administratorCount > 1) && (
+                          <button
+                            className="icon-button icon-button-danger"
+                            type="button"
+                            onClick={() => openDeleteModal(user)}
+                            disabled={deletingUserId === user.id}
+                            aria-label={`Удалить ${formatUserName(user)}`}
+                            title="Удалить"
+                          >
+                            <DeleteIcon />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -502,6 +603,43 @@ export const UsersPage: React.FC = () => {
                 )}
               </select>
             </label>
+            <div className="similar-employees" aria-live="polite">
+              <div className="similar-employees-heading">
+                <strong>Похожие сотрудники</strong>
+                {similarUsersLoading && <span>Ищем...</span>}
+              </div>
+              {similarUsersError ? (
+                <div className="similar-employees-message error-text">{similarUsersError}</div>
+              ) : similarUsers.length > 0 ? (
+                <div className="similar-employees-list">
+                  {similarUsers.map((user) => (
+                    <div className="similar-employee-row" key={user.id}>
+                      <div className="similar-employee-data">
+                        <span>{user.login}</span>
+                        <span>{formatUserName(user)}</span>
+                        <span>{user.email || "—"}</span>
+                        <span>{user.roleName || "—"}</span>
+                        <span>{user.groupName || "—"}</span>
+                      </div>
+                      <button
+                        className="secondary-button similar-employee-use"
+                        type="button"
+                        onClick={() => useSimilarUser(user)}
+                        disabled={saving || referencesLoading}
+                      >
+                        Использовать
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="similar-employees-message">
+                  {similarUsersLoading
+                    ? "Поиск по логину, ФИО и email..."
+                    : "Введите не менее двух символов в логине, фамилии, имени или email."}
+                </div>
+              )}
+            </div>
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={closeCreateModal} disabled={saving}>
                 Закрыть
@@ -592,7 +730,7 @@ export const UsersPage: React.FC = () => {
             </label>
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={closeEditModal} disabled={saving}>Закрыть</button>
-              <button className="primary-button" type="submit" disabled={saving || referencesLoading || roles.length === 0 || flatGroups.length === 0}>
+              <button className="primary-button" type="submit" disabled={saving || referencesLoading || roles.length === 0 || flatGroups.length === 0 || !isEditDirty}>
                 {saving ? "Сохраняем..." : "Сохранить"}
               </button>
             </div>

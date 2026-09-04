@@ -85,6 +85,28 @@ public sealed class UserService(
     {
         return await userRepository.GetByLoginAndEventAsync(loginId, eventId);
     }
+
+    public async Task<List<Application.Entities.User>> SearchUsersForEventAsync(
+        long eventId,
+        string? login,
+        string? surname,
+        string? name,
+        string? email)
+    {
+        static string? Normalize(string? value)
+        {
+            var normalized = value?.Trim();
+            return normalized is { Length: >= 2 } ? normalized : null;
+        }
+
+        return await userRepository.SearchForEventAsync(
+            eventId,
+            Normalize(login),
+            Normalize(surname),
+            Normalize(name),
+            Normalize(email),
+            10);
+    }
     
     public async Task<List<Application.Entities.User>> GetUsersByEventAsync(long eventId)
     {

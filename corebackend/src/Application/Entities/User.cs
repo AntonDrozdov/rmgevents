@@ -21,5 +21,6 @@ public sealed class User
     public Role? Role { get; set; }
     public Group? Group { get; set; }
     public ICollection<Guest> CreatedGuests { get; set; } = [];
+    public ICollection<GuestDecision> GuestDecisions { get; set; } = [];
     public ICollection<Event> OwnedEvents { get; set; } = [];
 }

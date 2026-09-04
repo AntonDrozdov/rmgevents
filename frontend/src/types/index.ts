@@ -130,6 +130,18 @@ export interface UserDto {
   createdAt: string;
 }
 
+export interface UserSearchResultDto {
+  id: number;
+  login: string;
+  name: string;
+  surname: string;
+  additionalName?: string | null;
+  email?: string | null;
+  tel?: string | null;
+  roleName?: string | null;
+  groupName?: string | null;
+}
+
 export interface CreateUserRequest {
   login: string;
   name: string;
@@ -160,9 +172,18 @@ export interface GuestDto {
   name: string;
   email?: string | null;
   phone?: string | null;
-  status: "pending" | "approved" | "rejected" | string;
+  status: "saved" | "on_review" | "admin_review" | "approved" | "invited" | "rejected" | string;
   createdAt: string;
   approvedAt?: string | null;
+  decisions: GuestDecisionDto[];
+}
+
+export interface GuestDecisionDto {
+  id: number;
+  actorUserId?: number | null;
+  action: "submitted_for_review" | "reviewer_approved" | "admin_approved" | "invited" | "rejected" | "restored_to_saved" | string;
+  actorName: string;
+  createdAt: string;
 }
 
 export interface CreateGuestRequest {
@@ -176,6 +197,8 @@ export interface ApproveGuestRequest {
   guestId: number;
   approve: boolean;
 }
+
+export interface UpdateGuestRequest extends CreateGuestRequest {}
 
 export interface AuthContextType {
   token: string | null;

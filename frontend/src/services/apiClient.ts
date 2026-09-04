@@ -13,9 +13,11 @@ import {
   LoginResponse,
   RoleDto,
   UpdateGroupRequest,
+  UpdateGuestRequest,
   UpdateEventRequest,
   UpdateUserRequest,
   UserDto,
+  UserSearchResultDto,
   UserProfileDto,
 } from "../types";
 
@@ -159,8 +161,48 @@ class ApiClient {
     return response.data;
   }
 
+  async updateGuest(
+    eventId: string | number,
+    guestId: number,
+    request: UpdateGuestRequest
+  ): Promise<GuestDto> {
+    const response = await this.client.put<GuestDto>(`/events/${eventId}/guests/${guestId}`, request);
+    return response.data;
+  }
+
+  async deleteGuest(eventId: string | number, guestId: number): Promise<void> {
+    await this.client.delete(`/events/${eventId}/guests/${guestId}`);
+  }
+
+  async inviteGuest(eventId: string | number, guestId: number): Promise<GuestDto> {
+    const response = await this.client.post<GuestDto>(`/events/${eventId}/guests/${guestId}/invite`);
+    return response.data;
+  }
+
+  async submitGuestForReview(eventId: string | number, guestId: number): Promise<GuestDto> {
+    const response = await this.client.post<GuestDto>(`/events/${eventId}/guests/${guestId}/submit-for-review`);
+    return response.data;
+  }
+
+  async restoreGuestToSaved(eventId: string | number, guestId: number): Promise<GuestDto> {
+    const response = await this.client.post<GuestDto>(`/events/${eventId}/guests/${guestId}/restore-to-saved`);
+    return response.data;
+  }
+
   async getUsers(eventId: string | number): Promise<UserDto[]> {
     const response = await this.client.get<UserDto[]>(`/events/${eventId}/users`);
+    return response.data;
+  }
+
+  async searchUsers(
+    eventId: string | number,
+    query: { login?: string; surname?: string; name?: string; email?: string },
+    signal?: AbortSignal
+  ): Promise<UserSearchResultDto[]> {
+    const response = await this.client.get<UserSearchResultDto[]>(`/events/${eventId}/users/search`, {
+      params: query,
+      signal,
+    });
     return response.data;
   }
 

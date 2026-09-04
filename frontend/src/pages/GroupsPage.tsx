@@ -129,6 +129,10 @@ export const GroupsPage = () => {
         .filter((child) => child.id !== editingGroup.group.id)
         .reduce((total, child) => total + child.quota, 0)
     : undefined;
+  const isEditDirty = editingGroup !== null && (
+    editForm.name.trim() !== editingGroup.group.name ||
+    editForm.quota !== editingGroup.group.quota
+  );
 
   const loadGroups = async () => {
     if (!eventId || !canCreate) {
@@ -212,6 +216,7 @@ export const GroupsPage = () => {
     if (
       !eventId ||
       !editingGroup ||
+      !isEditDirty ||
       !editForm.name.trim() ||
       editForm.quota < editMinimumQuota ||
       (editMaximumQuota !== undefined && editForm.quota > editMaximumQuota)
@@ -436,6 +441,7 @@ export const GroupsPage = () => {
                 type="submit"
                 disabled={
                   saving ||
+                  !isEditDirty ||
                   !editForm.name.trim() ||
                   editForm.quota < editMinimumQuota ||
                   (editMaximumQuota !== undefined && editForm.quota > editMaximumQuota)

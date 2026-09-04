@@ -10,6 +10,7 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
     {
         return await db.Guests
             .Include(x => x.Group)
+            .Include(x => x.Decisions)
             .FirstOrDefaultAsync(x => x.Id == id);
     }
     
@@ -18,6 +19,7 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         return await db.Guests
             .Where(x => x.EventId == eventId)
             .Include(x => x.Group)
+            .Include(x => x.Decisions)
             .ToListAsync();
     }
     

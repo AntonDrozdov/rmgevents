@@ -22,7 +22,16 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
             guest.Phone,
             guest.Status,
             guest.CreatedAt,
-            guest.ApprovedAt);
+            guest.ApprovedAt,
+            guest.Decisions
+                .OrderBy(item => item.CreatedAt)
+                .Select(item => new GuestDecisionDto(
+                    item.Id,
+                    item.ActorUserId,
+                    item.Action,
+                    item.ActorName,
+                    item.CreatedAt))
+                .ToList());
 
     [HttpGet]
     public async Task<ActionResult<List<GuestDto>>> GetGuests(long eventId)
@@ -91,6 +100,125 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
                 return NotFound();
             
             return Ok(MapGuest(guest));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpPost("{guestId}/submit-for-review")]
+    public async Task<ActionResult<GuestDto>> SubmitGuestForReview(long eventId, long guestId)
+    {
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            await guestService.SubmitGuestForReviewAsync(guestId, userId);
+            var guest = await guestService.GetGuestAsync(guestId);
+            return guest == null ? NotFound() : Ok(MapGuest(guest));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpPost("{guestId}/invite")]
+    public async Task<ActionResult<GuestDto>> InviteGuest(long eventId, long guestId)
+    {
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            await guestService.InviteGuestAsync(guestId, userId);
+            var guest = await guestService.GetGuestAsync(guestId);
+            return guest == null ? NotFound() : Ok(MapGuest(guest));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanApproveGuest")]
+    [HttpPost("{guestId}/restore-to-saved")]
+    public async Task<ActionResult<GuestDto>> RestoreGuestToSaved(long eventId, long guestId)
+    {
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            await guestService.RestoreGuestToSavedAsync(guestId, userId);
+            var guest = await guestService.GetGuestAsync(guestId);
+            return guest == null ? NotFound() : Ok(MapGuest(guest));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpPut("{guestId}")]
+    public async Task<ActionResult<GuestDto>> UpdateGuest(
+        long eventId,
+        long guestId,
+        UpdateGuestRequest request)
+    {
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            await guestService.UpdateGuestAsync(
+                guestId,
+                userId,
+                request.Name,
+                request.Email,
+                request.Phone,
+                request.GroupId);
+
+            var guest = await guestService.GetGuestAsync(guestId);
+            return guest == null ? NotFound() : Ok(MapGuest(guest));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpDelete("{guestId}")]
+    public async Task<IActionResult> DeleteGuest(long eventId, long guestId)
+    {
+        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            await guestService.DeleteGuestAsync(guestId, userId);
+            return NoContent();
         }
         catch (UnauthorizedAccessException ex)
         {
