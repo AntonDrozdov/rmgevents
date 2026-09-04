@@ -390,6 +390,24 @@ button:disabled {
   gap: 6px;
 }
 
+.table-editable-row {
+  cursor: pointer;
+}
+
+.table-hover-row td {
+  transition: background-color 140ms ease;
+}
+
+.table-hover-row:hover td,
+.table-editable-row:focus-visible td {
+  background: #eaf2f8;
+}
+
+.table-editable-row:focus-visible {
+  outline: 2px solid #2f6f87;
+  outline-offset: -2px;
+}
+
 .icon-button {
   display: inline-grid;
   width: 34px;

@@ -454,7 +454,20 @@ export const UsersPage: React.FC = () => {
               </thead>
               <tbody>
                 {users.map((user) => (
-                  <tr key={user.id}>
+                  <tr
+                    className="table-hover-row table-editable-row"
+                    key={user.id}
+                    tabIndex={0}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
+                      void openEditModal(user);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+                      event.preventDefault();
+                      void openEditModal(user);
+                    }}
+                  >
                     <td>{formatUserName(user)}</td>
                     <td>{user.email || "-"}</td>
                     <td>{user.tel || "-"}</td>
