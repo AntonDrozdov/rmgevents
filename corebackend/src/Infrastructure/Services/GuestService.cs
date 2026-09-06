@@ -63,6 +63,28 @@ public sealed class GuestService(
     {
         return await guestRepository.GetByEventIdAsync(eventId);
     }
+
+    public async Task<(List<Application.Entities.Guest> Items, int TotalCount, int Page, int PageSize)> GetGuestsPageByEventAsync(
+        long eventId,
+        int page,
+        int pageSize,
+        string? search)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var normalizedSearch = search?.Trim();
+        if (normalizedSearch is not { Length: >= 2 })
+            normalizedSearch = null;
+
+        var result = await guestRepository.GetPageByEventIdAsync(
+            eventId,
+            normalizedSearch,
+            page,
+            pageSize);
+
+        return (result.Items, result.TotalCount, result.Page, pageSize);
+    }
     
     public async Task<List<Application.Entities.Guest>> GetGuestsByGroupAsync(long groupId)
     {
@@ -72,6 +94,26 @@ public sealed class GuestService(
     public async Task<List<Application.Entities.Guest>> GetGuestsByStatusAsync(long eventId, string status)
     {
         return await guestRepository.GetByStatusAsync(eventId, status);
+    }
+
+    public async Task<List<Application.Entities.Guest>> SearchGuestsForEventAsync(
+        long eventId,
+        string? name,
+        string? email,
+        string? phone)
+    {
+        static string? Normalize(string? value)
+        {
+            var normalized = value?.Trim();
+            return normalized is { Length: >= 2 } ? normalized : null;
+        }
+
+        return await guestRepository.SearchForEventAsync(
+            eventId,
+            Normalize(name),
+            Normalize(email),
+            Normalize(phone),
+            10);
     }
     
     public async Task SubmitGuestForReviewAsync(long guestId, long userId)

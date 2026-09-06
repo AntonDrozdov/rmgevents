@@ -33,10 +33,11 @@ public sealed class AuthService(
         DateOnly EventDate,
         DateTimeOffset CreatedAt,
         string CreatedByName,
-        long? LogoImageId)>> GetAvailableEventsAsync(long loginId)
+        long? LogoImageId,
+        bool IsArchived)>> GetAvailableEventsAsync(long loginId)
     {
         var users = await userRepository.GetByLoginIdAsync(loginId);
-        var result = new List<(long, string, string, DateOnly, DateTimeOffset, string, long?)>();
+        var result = new List<(long, string, string, DateOnly, DateTimeOffset, string, long?, bool)>();
         
         foreach (var user in users)
         {
@@ -55,7 +56,8 @@ public sealed class AuthService(
                     user.Event.EventDate,
                     user.Event.CreatedAt,
                     createdByName,
-                    user.Event.LogoImageId));
+                    user.Event.LogoImageId,
+                    user.Event.IsArchived));
             }
         }
         

@@ -24,6 +24,7 @@ export interface EventOption {
   createdAt?: string;
   createdByName?: string;
   logoImageId?: number | null;
+  isArchived?: boolean;
 }
 
 export interface EventDto {
@@ -51,6 +52,10 @@ export interface UpdateEventRequest {
   logoImageId?: number | null;
 }
 
+export interface UpdateEventArchiveStatusRequest {
+  isArchived: boolean;
+}
+
 export interface EventDetailDto {
   id: number;
   name: string;
@@ -60,6 +65,7 @@ export interface EventDetailDto {
   logoImageId?: number | null;
   ownerId: number;
   createdAt: string;
+  isArchived: boolean;
   currentUserProfile: UserProfileDto;
 }
 
@@ -176,6 +182,23 @@ export interface GuestDto {
   createdAt: string;
   approvedAt?: string | null;
   decisions: GuestDecisionDto[];
+}
+
+export interface PagedResultDto<T> {
+  items: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface GuestSearchResultDto {
+  id: number;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  groupName?: string | null;
+  status: string;
+  createdAt: string;
 }
 
 export interface GuestDecisionDto {

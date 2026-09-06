@@ -9,10 +9,13 @@ import {
   EventDto,
   GroupTreeDto,
   GuestDto,
+  GuestSearchResultDto,
   LoginRequest,
   LoginResponse,
+  PagedResultDto,
   RoleDto,
   UpdateGroupRequest,
+  UpdateEventArchiveStatusRequest,
   UpdateGuestRequest,
   UpdateEventRequest,
   UpdateUserRequest,
@@ -105,6 +108,14 @@ class ApiClient {
     return response.data;
   }
 
+  async updateEventArchiveStatus(
+    eventId: string | number,
+    request: UpdateEventArchiveStatusRequest
+  ): Promise<EventDto> {
+    const response = await this.client.patch<EventDto>(`/events/${eventId}/archive-status`, request);
+    return response.data;
+  }
+
   async uploadEventCover(eventId: string | number, file: File): Promise<number> {
     const formData = new FormData();
     formData.append("file", file);
@@ -143,13 +154,30 @@ class ApiClient {
     await this.client.delete(`/events/${eventId}/groups/${groupId}`);
   }
 
-  async getGuests(eventId: string | number): Promise<GuestDto[]> {
-    const response = await this.client.get<GuestDto[]>(`/events/${eventId}/guests`);
+  async getGuests(
+    eventId: string | number,
+    query: { page?: number; pageSize?: number; search?: string } = {}
+  ): Promise<PagedResultDto<GuestDto>> {
+    const response = await this.client.get<PagedResultDto<GuestDto>>(`/events/${eventId}/guests`, {
+      params: query,
+    });
     return response.data;
   }
 
   async createGuest(eventId: string | number, request: CreateGuestRequest): Promise<GuestDto> {
     const response = await this.client.post<GuestDto>(`/events/${eventId}/guests`, request);
+    return response.data;
+  }
+
+  async searchGuests(
+    eventId: string | number,
+    query: { name?: string; email?: string; phone?: string },
+    signal?: AbortSignal
+  ): Promise<GuestSearchResultDto[]> {
+    const response = await this.client.get<GuestSearchResultDto[]>(`/events/${eventId}/guests/search`, {
+      params: query,
+      signal,
+    });
     return response.data;
   }
 

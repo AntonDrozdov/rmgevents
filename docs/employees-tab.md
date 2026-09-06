@@ -71,7 +71,7 @@
 
 При вводе логина, фамилии, имени или email форма с задержкой 450 мс ищет похожие профили сотрудников из других мероприятий. Поиск запускается, когда хотя бы одно из этих значений содержит не менее двух символов, и выполняется по частичному совпадению без учёта регистра. Точные совпадения выводятся выше совпадений по началу и прочих частичных совпадений.
 
-Сотрудники, чей Login уже связан с текущим мероприятием, в результатах не показываются. Для одного Login выводится не более одной записи, всего — до 10 записей. Строка результата содержит логин, ФИО, email, роль и группу.
+Профили из текущего мероприятия в результатах не показываются. Профили из других мероприятий могут показываться даже тогда, когда тот же Login уже связан с текущим мероприятием: подсказка нужна для переноса данных профиля, а запрет дубля внутри текущего мероприятия остаётся отдельным правилом создания. Для одного Login выводится не более одной записи, всего — до 10 записей. Строка результата содержит логин, ФИО, email, роль и группу; над списком отображаются названия колонок.
 
 Кнопка **«Использовать»** подставляет в форму логин, ФИО, email, телефон, роль и группу выбранного профиля. Роль и группа относятся к конкретному мероприятию, поэтому они сопоставляются со справочниками текущего мероприятия по названию. Если подходящего названия нет, сохраняется текущее значение поля. После подстановки все поля остаются доступными для редактирования.
 
@@ -302,7 +302,7 @@ Backend возвращает `temporaryPassword`, который фактиче�
 
 | Файл | Компонент / класс | Ответственность |
 |---|---|---|
-| `frontend/src/pages/UsersPage.tsx` | `UsersPage` | Таблица, загрузка сотрудников, формы создания/редактирования, иконки, удаление, модалка сброса |
+| `frontend/src/pages/UsersPage.tsx` | `UsersPage` | Таблица, загрузка сотрудников, формы создания/редактирования, поиск похожих, иконки, удаление, модалка сброса |
 | `frontend/src/pages/EventSettingsPage.tsx` | `EventSettingsPage` | Видимость вкладки по `create_user`, desktop/mobile-навигация |
 | `frontend/src/pages/LoginPage.tsx` | `LoginPage` | Вход и перенаправление на смену временного пароля |
 | `frontend/src/pages/ChangePasswordPage.tsx` | `ChangePasswordPage` | Проверка подтверждения, минимальной длины и вызов смены пароля |
@@ -313,7 +313,7 @@ Backend возвращает `temporaryPassword`, который фактиче�
 | `frontend/src/types/index.ts` | DTO и `AuthContextType` | TypeScript-контракты API |
 | `frontend/src/utils/groups.ts` | `flattenGroups` | Преобразование дерева групп в список для `<select>` с уровнем вложенности |
 | `frontend/src/App.tsx` | маршруты | `/events/:eventId/users` и `/change-password` |
-| `frontend/src/index.css` | CSS-классы | `.employee-form-modal`, `.employee-form`, `.table-icon-actions`, `.icon-button*`, мобильные media queries |
+| `frontend/src/index.css` | CSS-классы | `.employee-form-modal`, `.employee-form`, `.similar-employees`, `.table-icon-actions`, `.icon-button*`, мобильные media queries |
 
 ### Состояние `UsersPage`
 
@@ -321,7 +321,7 @@ Backend возвращает `temporaryPassword`, который фактиче�
 
 - данные: `users`, `groups`, `roles`;
 - загрузка: `loading`, `referencesLoading`, `saving`;
-- создание: `isCreateModalOpen`, `formData`, `loginManuallyEdited`;
+- создание: `isCreateModalOpen`, `formData`, `loginManuallyEdited`, `similarUsers`, `similarUsersLoading`, `similarUsersError`;
 - редактирование: `editingUser`, `editFormData`;
 - удаление: `deleteUser`, `deleteError`, `deletingUserId`;
 - сброс: `resetPasswordUser`, `resettingPasswordUserId`, `temporaryPassword`, `resetPasswordError`.
@@ -350,7 +350,7 @@ Backend возвращает `temporaryPassword`, который фактиче�
 | `corebackend/src/Api/Controllers/RolesController.cs` | `RolesController` | Список ролей мероприятия |
 | `corebackend/src/Api/Controllers/AuthController.cs` | `AuthController` | Вход, регистрация, смена пароля |
 | `corebackend/src/Api/Controllers/EventsController.cs` | `EventsController` | `/me`, логин и permissions текущего пользователя |
-| `corebackend/src/Api/Contracts/UserContracts.cs` | `UserDto`, `CreateUserRequest`, `UpdateUserRequest`, `ResetPasswordResponse` | Контракты сотрудников |
+| `corebackend/src/Api/Contracts/UserContracts.cs` | `UserDto`, `UserSearchResultDto`, `CreateUserRequest`, `UpdateUserRequest`, `ResetPasswordResponse` | Контракты сотрудников |
 | `corebackend/src/Api/Contracts/AuthContracts.cs` | auth DTO | Контракты входа и смены пароля |
 | `corebackend/src/Api/Contracts/EventContracts.cs` | `UserProfileDto` | Профиль `/me`, включая логин |
 | `corebackend/src/Api/Contracts/RoleContracts.cs` | `RoleDto`, `PermissionDto` | Справочник ролей |
@@ -380,7 +380,7 @@ Backend возвращает `temporaryPassword`, который фактиче�
 | `Infrastructure/Services/AuthService.cs` | `AuthService` | Хеширование, Login, временный пароль, SID/JWT, claim обязательной смены |
 | `Infrastructure/Services/RoleService.cs` | `RoleService` | Роли и стандартный набор разрешений |
 | `Infrastructure/Services/PermissionService.cs` | `PermissionService` | Получение permissions и серверные проверки |
-| `Infrastructure/Repositories/UserRepository.cs` | `UserRepository` | EF Core-запросы с `Include(Login/Role/Group)` |
+| `Infrastructure/Repositories/UserRepository.cs` | `UserRepository` | EF Core-запросы с `Include(Login/Role/Group)` и поиск похожих сотрудников |
 | `Infrastructure/Repositories/LoginRepository.cs` | `LoginRepository` | Поиск и сохранение Login |
 | `Infrastructure/Repositories/RoleRepository.cs` | `RoleRepository` | Роли мероприятия с permissions |
 | `Infrastructure/Repositories/GroupRepository.cs` | `GroupRepository` | Группы мероприятия |

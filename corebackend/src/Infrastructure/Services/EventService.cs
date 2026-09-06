@@ -138,6 +138,19 @@ public sealed class EventService(
         await eventRepository.SaveChangesAsync();
         return @event;
     }
+
+    public async Task<Application.Entities.Event> UpdateEventArchiveStatusAsync(long eventId, bool isArchived)
+    {
+        var @event = await eventRepository.GetByIdAsync(eventId);
+        if (@event == null)
+            throw new InvalidOperationException("РњРµСЂРѕРїСЂРёСЏС‚РёРµ РЅРµ РЅР°Р№РґРµРЅРѕ.");
+
+        @event.IsArchived = isArchived;
+
+        await eventRepository.UpdateAsync(@event);
+        await eventRepository.SaveChangesAsync();
+        return @event;
+    }
     
     public async Task DeleteEventAsync(long eventId)
     {

@@ -64,8 +64,6 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
         var query = db.Users
             .AsNoTracking()
             .Where(user => user.EventId != eventId)
-            .Where(user => !db.Users.Any(current =>
-                current.EventId == eventId && current.LoginId == user.LoginId))
             .Include(user => user.Login)
             .Include(user => user.Role)
             .Include(user => user.Group)

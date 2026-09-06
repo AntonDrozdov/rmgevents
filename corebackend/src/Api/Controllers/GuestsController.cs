@@ -34,13 +34,40 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
                 .ToList());
 
     [HttpGet]
-    public async Task<ActionResult<List<GuestDto>>> GetGuests(long eventId)
+    public async Task<ActionResult<PagedResultDto<GuestDto>>> GetGuests(
+        long eventId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null)
     {
-        var guests = await guestService.GetGuestsByEventAsync(eventId);
-        
-        var result = guests.Select(MapGuest).ToList();
-        
-        return Ok(result);
+        var guests = await guestService.GetGuestsPageByEventAsync(eventId, page, pageSize, search);
+        var result = guests.Items.Select(MapGuest).ToList();
+
+        return Ok(new PagedResultDto<GuestDto>(
+            result,
+            guests.TotalCount,
+            guests.Page,
+            guests.PageSize));
+    }
+
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpGet("search")]
+    public async Task<ActionResult<List<GuestSearchResultDto>>> SearchGuests(
+        long eventId,
+        [FromQuery] string? name,
+        [FromQuery] string? email,
+        [FromQuery] string? phone)
+    {
+        var guests = await guestService.SearchGuestsForEventAsync(eventId, name, email, phone);
+
+        return Ok(guests.Select(guest => new GuestSearchResultDto(
+            guest.Id,
+            guest.Name,
+            guest.Email,
+            guest.Phone,
+            guest.Group?.Name,
+            guest.Status,
+            guest.CreatedAt)).ToList());
     }
     
     [Authorize(Policy = "CanCreateGuest")]

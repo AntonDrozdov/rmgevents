@@ -12,6 +12,7 @@ public interface IEventService
         string? description,
         DateOnly eventDate,
         long? logoImageId);
+    Task<Entities.Event> UpdateEventArchiveStatusAsync(long eventId, bool isArchived);
     Task DeleteEventAsync(long eventId);
     Task<Entities.Group> CreateRootGroupAsync(long eventId, string name, int quota);
 }

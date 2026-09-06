@@ -62,6 +62,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   createdAt: details.createdAt,
                   createdByName: details.createdByName,
                   logoImageId: details.logoImageId,
+                  isArchived: details.isArchived,
                 }
               : event;
           });
@@ -186,6 +187,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               createdAt: event.createdAt,
               createdByName: event.createdByName,
               logoImageId: event.logoImageId,
+              isArchived: event.isArchived,
             }
           : item
       );
@@ -202,6 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         createdAt: event.createdAt,
         createdByName: event.createdByName,
         logoImageId: event.logoImageId,
+        isArchived: event.isArchived,
       };
       localStorage.setItem("currentEvent", JSON.stringify(nextEvent));
       return nextEvent;

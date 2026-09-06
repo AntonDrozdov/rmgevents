@@ -625,6 +625,16 @@ export const UsersPage: React.FC = () => {
                 <div className="similar-employees-message error-text">{similarUsersError}</div>
               ) : similarUsers.length > 0 ? (
                 <div className="similar-employees-list">
+                  <div className="similar-employee-row similar-employee-header" aria-hidden="true">
+                    <div className="similar-employee-data">
+                      <span>Логин</span>
+                      <span>ФИО</span>
+                      <span>Email</span>
+                      <span>Роль</span>
+                      <span>Группа</span>
+                    </div>
+                    <span className="similar-employee-header-action">Действие</span>
+                  </div>
                   {similarUsers.map((user) => (
                     <div className="similar-employee-row" key={user.id}>
                       <div className="similar-employee-data">

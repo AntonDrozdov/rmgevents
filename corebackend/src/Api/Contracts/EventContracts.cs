@@ -22,6 +22,8 @@ public sealed record UpdateEventRequest(
     DateOnly EventDate,
     long? LogoImageId);
 
+public sealed record UpdateEventArchiveStatusRequest(bool IsArchived);
+
 public sealed record ImageUploadResponse(long Id);
 
 public sealed record EventDetailDto(
@@ -33,6 +35,7 @@ public sealed record EventDetailDto(
     long? LogoImageId,
     long OwnerId,
     DateTimeOffset CreatedAt,
+    bool IsArchived,
     UserProfileDto CurrentUserProfile);
 
 public sealed record UserProfileDto(

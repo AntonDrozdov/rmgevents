@@ -1,6 +1,7 @@
 import axios from "axios";
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
 
@@ -21,10 +22,13 @@ export const EventInformationPage: React.FC = () => {
   const [description, setDescription] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [logoImageId, setLogoImageId] = useState<number | null>(null);
+  const [isArchived, setIsArchived] = useState(false);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [archiveStatusSaving, setArchiveStatusSaving] = useState(false);
+  const [archiveStatusTarget, setArchiveStatusTarget] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [initialValues, setInitialValues] = useState({
@@ -53,6 +57,7 @@ export const EventInformationPage: React.FC = () => {
         setDescription(event.description ?? "");
         setEventDate(event.eventDate.slice(0, 10));
         setLogoImageId(event.logoImageId ?? null);
+        setIsArchived(event.isArchived);
         setCoverPreview(event.logoImageId ? apiClient.getImageUrl(event.logoImageId) : null);
         setInitialValues({
           name: event.name,
@@ -126,6 +131,7 @@ export const EventInformationPage: React.FC = () => {
       setName(updatedEvent.name);
       setDescription(updatedEvent.description ?? "");
       setEventDate(updatedEvent.eventDate.slice(0, 10));
+      setIsArchived(updatedEvent.isArchived);
       setInitialValues({
         name: updatedEvent.name,
         description: (updatedEvent.description ?? "").trim(),
@@ -138,6 +144,36 @@ export const EventInformationPage: React.FC = () => {
       setError(getErrorMessage(requestError, "Не удалось сохранить настройки мероприятия."));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const closeArchiveStatusModal = () => {
+    if (archiveStatusSaving) return;
+    setArchiveStatusTarget(null);
+    setError("");
+  };
+
+  const confirmArchiveStatusChange = async () => {
+    if (archiveStatusTarget === null) return;
+    setArchiveStatusSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const updatedEvent = await apiClient.updateEventArchiveStatus(eventId, {
+        isArchived: archiveStatusTarget,
+      });
+
+      setIsArchived(updatedEvent.isArchived);
+      updateEvent(updatedEvent);
+      setArchiveStatusTarget(null);
+      setSuccess(updatedEvent.isArchived
+        ? "Мероприятие завершено."
+        : "Мероприятие снова активно.");
+    } catch (requestError) {
+      setError(getErrorMessage(requestError, "Не удалось изменить статус мероприятия."));
+    } finally {
+      setArchiveStatusSaving(false);
     }
   };
 
@@ -158,6 +194,30 @@ export const EventInformationPage: React.FC = () => {
         <p className="muted">Загрузка настроек...</p>
       ) : (
         <form className="form event-information-form" onSubmit={handleSubmit}>
+          <div className={`event-status-panel${isArchived ? " archived" : ""}`}>
+            <div>
+              <span>Статус мероприятия</span>
+              <strong>{isArchived ? "Завершено" : "Активно"}</strong>
+              <p>
+                {isArchived
+                  ? "Завершённое мероприятие отображается ниже активных на дашборде."
+                  : "После завершения мероприятие переместится в отдельный раздел дашборда."}
+              </p>
+            </div>
+            <button
+              className={isArchived ? "primary-button" : "danger-button"}
+              type="button"
+              onClick={() => {
+                setArchiveStatusTarget(!isArchived);
+                setSuccess("");
+                setError("");
+              }}
+              disabled={saving || archiveStatusSaving}
+            >
+              {isArchived ? "Вернуть в активные" : "Завершить мероприятие"}
+            </button>
+          </div>
+
           <label className="field">
             <span>Название *</span>
             <input
@@ -227,6 +287,40 @@ export const EventInformationPage: React.FC = () => {
             </button>
           </div>
         </form>
+      )}
+
+      {archiveStatusTarget !== null && (
+        <Modal
+          title={archiveStatusTarget ? "Завершить мероприятие" : "Вернуть мероприятие в активные"}
+          description={archiveStatusTarget
+            ? "Мероприятие будет перенесено в завершённые на дашборде."
+            : "Мероприятие снова будет показано среди активных на дашборде."}
+          onClose={closeArchiveStatusModal}
+        >
+          {error && <div className="alert alert-error">{error}</div>}
+          <div className="modal-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={closeArchiveStatusModal}
+              disabled={archiveStatusSaving}
+            >
+              Отмена
+            </button>
+            <button
+              className={archiveStatusTarget ? "danger-button" : "primary-button"}
+              type="button"
+              onClick={confirmArchiveStatusChange}
+              disabled={archiveStatusSaving}
+            >
+              {archiveStatusSaving
+                ? "Сохраняем..."
+                : archiveStatusTarget
+                  ? "Завершить"
+                  : "Вернуть в активные"}
+            </button>
+          </div>
+        </Modal>
       )}
     </section>
   );

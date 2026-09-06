@@ -27,7 +27,8 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
             item.EventDate,
             item.CreatedAt,
             item.CreatedByName,
-            item.LogoImageId)).ToList();
+            item.LogoImageId,
+            item.IsArchived)).ToList();
         
         return Ok(new LoginResponse(
             loginResult.Value.Sid,

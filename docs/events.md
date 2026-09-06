@@ -24,11 +24,19 @@
 
 После входа пользователь попадает на `/dashboard`. На дашборде отображаются только мероприятия, в которых его Login связан хотя бы с одним профилем сотрудника.
 
+Список разделяется на два блока:
+
+1. **Активные мероприятия** — показываются первыми.
+2. **Завершённые мероприятия** — показываются ниже активных.
+
+Внутри каждого блока мероприятия сортируются по дате начала (`EventDate`) по возрастанию. На плитке дополнительно показывается статус: **«Активно»** или **«Завершено»**.
+
 Плитка мероприятия показывает:
 
 - обложку, если она загружена;
 - стандартную иконку, если обложки нет;
 - название;
+- статус мероприятия;
 - роль текущего пользователя именно в этом мероприятии;
 - дату мероприятия;
 - дату создания;
@@ -57,7 +65,7 @@
 
 Для создания backend проверяет наличие `create_event` хотя бы в одном мероприятии пользователя, потому что у нового мероприятия ещё нет `eventId`.
 
-Для открытия настроек, загрузки обложки и сохранения изменений разрешение проверяется строго в редактируемом мероприятии. Право в другом мероприятии не даёт доступа.
+Для открытия настроек, загрузки обложки, сохранения изменений, завершения мероприятия и возврата его в активные разрешение проверяется строго в редактируемом мероприятии. Право в другом мероприятии не даёт доступа.
 
 Пока профиль пользователя не загружен, вкладка не отображается. Прямой переход на `/events/{eventId}/settings` также защищён проверкой permission.
 
@@ -126,6 +134,13 @@
 | Дата мероприятия | Да | Значение формата даты |
 | Описание | Нет | До 2000 символов, показывается счётчик |
 | Обложка | Нет | JPG, JPEG, PNG или SVG, до 5 МБ |
+
+Отдельно вверху формы показывается статус мероприятия:
+
+- **Активно** — доступна кнопка **«Завершить мероприятие»**;
+- **Завершено** — доступна кнопка **«Вернуть в активные»**.
+
+Перед сменой статуса frontend открывает модальное окно подтверждения. После подтверждения backend записывает новое значение `IsArchived`, а frontend обновляет локальный список мероприятий. На дашборде карточка сразу перемещается между блоками активных и завершённых.
 
 При загрузке страницы данные всегда запрашиваются с backend. Поэтому сохранённая обложка восстанавливается в превью после F5 через `LogoImageId`.
 
@@ -200,6 +215,7 @@ flowchart LR
     UserRepository --> DB
 
     Settings[EventInformationPage] -->|GET/PUT /api/events/eventId| EventsController
+    Settings -->|PATCH /api/events/eventId/archive-status| EventsController
     Settings -->|POST multipart cover| ImagesController
     ImagesController --> ImageService
     ImageService --> ImageRepository
@@ -227,7 +243,7 @@ flowchart LR
 
 ## 3. Frontend: создание
 
-Создание реализовано непосредственно в `DashboardPage`.
+Создание реализовано непосредственно в `DashboardPage`. На дашборде мероприятия разделяются на активные и завершённые: сначала выводится блок активных, ниже — завершённые. Внутри каждого блока карточки сортируются по `eventDate` по возрастанию.
 
 Состояние формы:
 
@@ -270,8 +286,10 @@ Frontend предполагает роль создателя `Administrator`, �
 
 - `name`, `description`, `eventDate`;
 - `logoImageId` — сохранённая связь;
+- `isArchived` — текущий статус мероприятия;
 - `coverFile` — новый локально выбранный файл;
 - `coverPreview` — URL сохранённого изображения или временный object URL;
+- `archiveStatusTarget`, `archiveStatusSaving` — подтверждение и выполнение завершения/возврата в активные;
 - `loading`, `saving`, `error`, `success`.
 
 Для локального превью используется `URL.createObjectURL`. Cleanup эффекта вызывает `URL.revokeObjectURL`, чтобы не удерживать Blob в памяти.
@@ -297,13 +315,34 @@ sequenceDiagram
     UI->>AC: updateEvent(EventDto)
 ```
 
+Завершение и возврат в активные выполняются отдельным действием. Пользователь нажимает кнопку статуса в настройках, подтверждает операцию в `Modal`, после чего frontend вызывает `PATCH /events/{eventId}/archive-status` с `{ isArchived: true }` или `{ isArchived: false }`. Успешный ответ обновляет `AuthContext`, поэтому карточка сразу меняет раздел на дашборде.
+
+```mermaid
+sequenceDiagram
+    participant U as Пользователь
+    participant UI as EventInformationPage
+    participant M as Modal
+    participant EC as EventsController
+    participant DB as PostgreSQL
+    participant AC as AuthContext
+
+    U->>UI: Завершить / Вернуть в активные
+    UI->>M: Открыть подтверждение
+    U->>M: Подтвердить
+    UI->>EC: PATCH /events/eventId/archive-status
+    EC->>DB: UPDATE events.is_archived
+    EC-->>UI: 200 EventDto
+    UI->>AC: updateEvent(EventDto)
+    UI->>UI: Закрыть Modal и показать success
+```
+
 `AuthContext.updateEvent` обновляет:
 
 - элемент массива `events`;
 - `currentEvent`, если редактируется выбранное мероприятие;
 - ключи `events` и `currentEvent` в `localStorage`.
 
-При восстановлении сессии `AuthContext` запрашивает `GET /events` и обновляет дату, дату создания, создателя и `logoImageId` сохранённых `EventOption`.
+При восстановлении сессии `AuthContext` запрашивает `GET /events` и обновляет дату, дату создания, создателя, `logoImageId` и `isArchived` сохранённых `EventOption`.
 
 ## 5. Frontend: типы и API-клиент
 
@@ -311,11 +350,12 @@ sequenceDiagram
 
 | Тип | Назначение |
 |---|---|
-| `EventOption` | Компактные данные плитки и роль текущего пользователя |
-| `EventDto` | Ответ списка, создания и обновления |
-| `EventDetailDto` | Подробности мероприятия вместе с профилем текущего пользователя |
+| `EventOption` | Компактные данные плитки, роль текущего пользователя и `isArchived` для группировки на дашборде |
+| `EventDto` | Ответ списка, создания, обновления данных и смены статуса |
+| `EventDetailDto` | Подробности мероприятия, `isArchived` и профиль текущего пользователя |
 | `CreateEventRequest` | `name`, `eventDate`, опциональный `logoImageId` |
 | `UpdateEventRequest` | `name`, `description`, `eventDate`, `logoImageId` |
+| `UpdateEventArchiveStatusRequest` | `isArchived` для завершения или возврата мероприятия в активные |
 
 Методы `apiClient`:
 
@@ -326,6 +366,7 @@ sequenceDiagram
 | `getCurrentUserProfile(eventId)` | `GET /events/{eventId}/me` |
 | `createEvent(request)` | `POST /events` |
 | `updateEvent(eventId, request)` | `PUT /events/{eventId}` |
+| `updateEventArchiveStatus(eventId, request)` | `PATCH /events/{eventId}/archive-status` |
 | `uploadEventCover(eventId, file)` | `POST /images/events/{eventId}/cover` |
 | `getImageUrl(imageId)` | Формирует `/api/images/{imageId}` |
 
@@ -336,16 +377,16 @@ Axios interceptor добавляет SID как `Authorization: Bearer {sid}`.
 | Файл | Компонент / ответственность |
 |---|---|
 | `frontend/src/App.tsx` | Маршруты дашборда и настроек, permission-защита |
-| `frontend/src/pages/DashboardPage.tsx` | Плитки, модальная форма создания, переход в мероприятие |
+| `frontend/src/pages/DashboardPage.tsx` | Плитки, разделение активных и завершённых мероприятий, сортировка по дате начала, модальная форма создания, переход в мероприятие |
 | `frontend/src/pages/EventSettingsPage.tsx` | Общая оболочка вкладок, видимость «Настроек», название в шапке |
-| `frontend/src/pages/EventInformationPage.tsx` | Загрузка и редактирование данных, выбор и preview обложки |
+| `frontend/src/pages/EventInformationPage.tsx` | Загрузка и редактирование данных, выбор и preview обложки, завершение и возврат мероприятия в активные через модальное подтверждение |
 | `frontend/src/components/ProtectedRoute.tsx` | Проверка SID, временного пароля и permission |
-| `frontend/src/components/Modal.tsx` | Унифицированная модалка создания |
+| `frontend/src/components/Modal.tsx` | Унифицированная модалка создания и подтверждения смены статуса |
 | `frontend/src/components/UserMenu.tsx` | Контекстное отображение роли внутри мероприятия |
 | `frontend/src/contexts/AuthContext.tsx` | Список мероприятий, выбранное мероприятие, профиль и `localStorage` |
 | `frontend/src/services/apiClient.ts` | Axios-вызовы Events и Images API |
 | `frontend/src/types/index.ts` | DTO и request-типы TypeScript |
-| `frontend/src/index.css` | Плитки, полноширинная адаптивная форма, preview и состояния кнопки загрузки |
+| `frontend/src/index.css` | Разделы дашборда, статусы плиток, полноширинная адаптивная форма, preview и состояния кнопок |
 
 ## 7. Backend API
 
@@ -358,6 +399,7 @@ Axios interceptor добавляет SID как `Authorization: Bearer {sid}`.
 | `GET /events/{eventId}/me` | Профиль и permissions | `[Authorize]` + проверка участия | `UserProfileDto` |
 | `POST /events` | Создание мероприятия | `CanCreateEvent` в любом мероприятии | `201 EventDto` |
 | `PUT /events/{eventId}` | Изменение данных | `CanCreateEvent` в указанном мероприятии | `200 EventDto` |
+| `PATCH /events/{eventId}/archive-status` | Завершение мероприятия или возврат в активные | `CanCreateEvent` в указанном мероприятии | `200 EventDto` |
 | `POST /images/events/{eventId}/cover` | Загрузка обложки | `CanCreateEvent` в указанном мероприятии | `201 { id }` |
 | `GET /images/{id}` | Получение изображения | Публичный | Бинарный файл или `404` |
 
@@ -377,11 +419,11 @@ Axios interceptor добавляет SID как `Authorization: Bearer {sid}`.
 - `CreatedAt`;
 - `IsArchived`.
 
-`EventDetailDto` добавляет `CurrentUserProfile`.
+`EventDetailDto` содержит те же данные мероприятия, включая `IsArchived`, и добавляет `CurrentUserProfile`.
 
 `CreateEventRequest` не содержит описание. Хотя контракт допускает `LogoImageId`, текущая форма создания его не отправляет.
 
-`UpdateEventRequest` содержит все редактируемые данные. `ImageUploadResponse` содержит числовой `Id` созданного изображения.
+`UpdateEventRequest` содержит все редактируемые данные. `UpdateEventArchiveStatusRequest` содержит только `IsArchived`, чтобы смена статуса не была связана с сохранением названия, описания, даты или обложки. `ImageUploadResponse` содержит числовой `Id` созданного изображения.
 
 ## 9. Backend: транзакция создания
 
@@ -423,7 +465,9 @@ Axios interceptor добавляет SID как `Authorization: Bearer {sid}`.
 
 Название и описание обрезаются по краям. Пустое описание сохраняется как `null`.
 
-Владелец, дата создания и архивный статус через этот endpoint не изменяются.
+Владелец, дата создания и архивный статус через `PUT /events/{eventId}` не изменяются.
+
+`EventService.UpdateEventArchiveStatusAsync` загружает мероприятие, проверяет его существование и записывает новое значение `IsArchived`. Endpoint `PATCH /events/{eventId}/archive-status` использует тот же permission `CanCreateEvent`, что и редактирование настроек мероприятия.
 
 `IEventService` также содержит `DeleteEventAsync`, но публичного DELETE endpoint и пользовательского интерфейса удаления мероприятия сейчас нет.
 
@@ -493,18 +537,18 @@ erDiagram
 
 | Файл | Класс / ответственность |
 |---|---|
-| `Api/Controllers/EventsController.cs` | Получение, создание, обновление, DTO и безопасные ошибки |
+| `Api/Controllers/EventsController.cs` | Получение, создание, обновление данных, смена `IsArchived`, DTO и безопасные ошибки |
 | `Api/Controllers/ImagesController.cs` | Загрузка и выдача обложек |
 | `Api/Contracts/EventContracts.cs` | Event DTO, requests, profile и ответ загрузки |
 | `Api/Contracts/AuthContracts.cs` | `EventOption` в ответе входа |
 | `Api/Controllers/AuthController.cs` | Возвращает доступные мероприятия и роль пользователя |
 | `Application/Entities/Event.cs` | Доменная сущность мероприятия |
 | `Application/Entities/ImageEntity.cs` | Доменная сущность изображения |
-| `Application/Services/IEventService.cs` | Контракт операций Event |
+| `Application/Services/IEventService.cs` | Контракт операций Event, включая смену архивного статуса |
 | `Application/Services/IImageService.cs` | Контракт чтения и сохранения изображений |
 | `Application/Repositories/IEventRepository.cs` | Контракт хранения Event |
 | `Application/Repositories/IImageRepository.cs` | Контракт хранения ImageEntity |
-| `Infrastructure/Services/EventService.cs` | Транзакция создания и правила обновления |
+| `Infrastructure/Services/EventService.cs` | Транзакция создания, правила обновления и запись `IsArchived` |
 | `Infrastructure/Services/ImageService.cs` | Валидация форматов, сигнатур и SVG |
 | `Infrastructure/Services/RoleService.cs` | Стандартные роли и permissions |
 | `Infrastructure/Services/PermissionService.cs` | Проверки `create_event` |
@@ -544,7 +588,7 @@ erDiagram
 2. **Нет очистки изображений.** Нужен отдельный механизм удаления неиспользуемых `ImageEntity`.
 3. **Нет смены владельца.** Для неё потребуется отдельное бизнес-правило и endpoint.
 4. **Нет удаления мероприятия в API.** Метод сервиса существует, но наружу не опубликован.
-5. **Нет архивации в UI.** Поле `IsArchived` возвращается в DTO, но не редактируется.
+5. **Завершение мероприятия не блокирует остальные операции.** `IsArchived` сейчас влияет на группировку на дашборде, а не на доступность гостей, сотрудников, групп и настроек внутри мероприятия.
 6. **Дата не имеет диапазонной проверки.** При необходимости правило следует реализовать и на frontend, и на backend.
 7. **Источник профиля создателя — самый новый User по LoginId.** Если контактные данные различаются между мероприятиями, копируется профиль с максимальным `CreatedAt`.
 8. **Получение изображения публичное.** Если обложки должны быть закрытыми, потребуется другой механизм доставки авторизации для `<img>`.
@@ -561,6 +605,8 @@ erDiagram
 6. изменение названия, описания и даты;
 7. загрузка каждого допустимого типа изображения;
 8. F5 на настройках и проверка сохранённого preview;
-9. проверка плитки дашборда;
-10. проверка `403` для пользователя без `create_event`;
-11. проверка безопасных `400` без stack trace.
+9. завершение мероприятия в настройках и проверка переноса плитки в блок завершённых;
+10. возврат мероприятия в активные и проверка переноса плитки в блок активных;
+11. проверка сортировки активных и завершённых мероприятий по дате начала;
+12. проверка `403` для пользователя без `create_event`;
+13. проверка безопасных `400` без stack trace.

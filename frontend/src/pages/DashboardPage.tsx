@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { Modal } from "../components/Modal";
@@ -36,6 +36,19 @@ export const DashboardPage: React.FC = () => {
   const [error, setError] = useState("");
 
   const canCreateEvent = currentUser?.permissions.includes("create_event") ?? false;
+  const sortEventsByStartDate = (first: EventOption, second: EventOption) => {
+    const firstDate = first.eventDate ? new Date(`${first.eventDate.slice(0, 10)}T00:00:00`).getTime() : Number.MAX_SAFE_INTEGER;
+    const secondDate = second.eventDate ? new Date(`${second.eventDate.slice(0, 10)}T00:00:00`).getTime() : Number.MAX_SAFE_INTEGER;
+    return firstDate - secondDate;
+  };
+  const activeEvents = useMemo(
+    () => [...events.filter((event) => !event.isArchived)].sort(sortEventsByStartDate),
+    [events]
+  );
+  const archivedEvents = useMemo(
+    () => [...events.filter((event) => event.isArchived)].sort(sortEventsByStartDate),
+    [events]
+  );
 
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
@@ -78,6 +91,7 @@ export const DashboardPage: React.FC = () => {
         createdAt: createdEvent.createdAt,
         createdByName: createdEvent.createdByName,
         logoImageId: createdEvent.logoImageId,
+        isArchived: createdEvent.isArchived,
       };
 
       addEvent(eventOption);
@@ -100,6 +114,43 @@ export const DashboardPage: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const renderEventTile = (event: EventOption) => (
+    <button
+      className={`event-tile${event.isArchived ? " event-tile-archived" : ""}`}
+      key={event.id}
+      onClick={() => openEvent(event)}
+    >
+      <span className={`event-status-badge${event.isArchived ? " archived" : ""}`}>
+        {event.isArchived ? "Завершено" : "Активно"}
+      </span>
+      {event.logoImageId ? (
+        <img
+          className="event-tile-cover"
+          src={apiClient.getImageUrl(event.logoImageId)}
+          alt=""
+        />
+      ) : (
+        <span className="event-tile-icon">🎟️</span>
+      )}
+      <strong>{event.name}</strong>
+      <span className="event-tile-role">{event.roleName}</span>
+      <div className="event-tile-details">
+        <span>
+          <small>Дата мероприятия</small>
+          <b>{formatEventDate(event.eventDate)}</b>
+        </span>
+        <span>
+          <small>Создано</small>
+          <b>{formatCreatedAt(event.createdAt)}</b>
+        </span>
+        <span>
+          <small>Создатель</small>
+          <b>{event.createdByName || "—"}</b>
+        </span>
+      </div>
+    </button>
+  );
 
   return (
     <main className="dashboard-page">
@@ -153,37 +204,36 @@ export const DashboardPage: React.FC = () => {
           </p>
         </section>
       ) : (
-        <section className="events-grid" aria-label="Список мероприятий">
-          {events.map((event) => (
-            <button className="event-tile" key={event.id} onClick={() => openEvent(event)}>
-              {event.logoImageId ? (
-                <img
-                  className="event-tile-cover"
-                  src={apiClient.getImageUrl(event.logoImageId)}
-                  alt=""
-                />
-              ) : (
-                <span className="event-tile-icon">🎟️</span>
-              )}
-              <strong>{event.name}</strong>
-              <span className="event-tile-role">{event.roleName}</span>
-              <div className="event-tile-details">
-                <span>
-                  <small>Дата мероприятия</small>
-                  <b>{formatEventDate(event.eventDate)}</b>
-                </span>
-                <span>
-                  <small>Создано</small>
-                  <b>{formatCreatedAt(event.createdAt)}</b>
-                </span>
-                <span>
-                  <small>Создатель</small>
-                  <b>{event.createdByName || "—"}</b>
-                </span>
+        <div className="events-sections">
+          <section className="events-section" aria-label="Активные мероприятия">
+            <div className="events-section-heading">
+              <h2>Активные мероприятия</h2>
+              <span className="badge">{activeEvents.length}</span>
+            </div>
+            {activeEvents.length > 0 ? (
+              <div className="events-grid">
+                {activeEvents.map(renderEventTile)}
               </div>
-            </button>
-          ))}
-        </section>
+            ) : (
+              <div className="empty-state events-section-empty">
+                <h2>Нет активных мероприятий</h2>
+                <p>Завершённые мероприятия доступны ниже.</p>
+              </div>
+            )}
+          </section>
+
+          {archivedEvents.length > 0 && (
+            <section className="events-section" aria-label="Завершённые мероприятия">
+              <div className="events-section-heading">
+                <h2>Завершённые мероприятия</h2>
+                <span className="badge">{archivedEvents.length}</span>
+              </div>
+              <div className="events-grid">
+                {archivedEvents.map(renderEventTile)}
+              </div>
+            </section>
+          )}
+        </div>
       )}
 
       {isCreateModalOpen && (

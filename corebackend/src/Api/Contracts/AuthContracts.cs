@@ -12,4 +12,5 @@ public sealed record EventOption(
     DateOnly EventDate,
     DateTimeOffset CreatedAt,
     string CreatedByName,
-    long? LogoImageId);
+    long? LogoImageId,
+    bool IsArchived);

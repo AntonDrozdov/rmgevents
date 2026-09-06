@@ -13,6 +13,21 @@ public sealed record GuestDto(
     DateTimeOffset? ApprovedAt,
     List<GuestDecisionDto> Decisions);
 
+public sealed record PagedResultDto<T>(
+    List<T> Items,
+    int TotalCount,
+    int Page,
+    int PageSize);
+
+public sealed record GuestSearchResultDto(
+    long Id,
+    string Name,
+    string? Email,
+    string? Phone,
+    string? GroupName,
+    string Status,
+    DateTimeOffset CreatedAt);
+
 public sealed record GuestDecisionDto(
     long Id,
     long? ActorUserId,

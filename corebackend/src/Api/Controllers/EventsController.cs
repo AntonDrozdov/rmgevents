@@ -35,23 +35,25 @@ public sealed class EventsController(
             user.GroupId,
             permissions);
 
+    private static EventDto MapEvent(Application.Entities.Event @event) =>
+        new(
+            @event.Id,
+            @event.Name,
+            @event.Description,
+            @event.EventDate,
+            FormatUserName(@event.Owner),
+            @event.LogoImageId,
+            @event.OwnerId,
+            @event.CreatedAt,
+            @event.IsArchived);
+
     [HttpGet]
     public async Task<ActionResult<List<EventDto>>> GetAvailableEvents()
     {
         var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         var events = await eventService.GetEventsByUserAsync(userId);
         
-        var result = events.Select(e => new EventDto(
-            e.Id,
-            e.Name,
-            e.Description,
-            e.EventDate,
-            FormatUserName(e.Owner),
-            e.LogoImageId,
-            e.OwnerId,
-            e.CreatedAt,
-            e.IsArchived))
-            .ToList();
+        var result = events.Select(MapEvent).ToList();
         
         return Ok(result);
     }
@@ -81,6 +83,7 @@ public sealed class EventsController(
             @event.LogoImageId,
             @event.OwnerId,
             @event.CreatedAt,
+            @event.IsArchived,
             userProfile));
     }
     
@@ -118,16 +121,7 @@ public sealed class EventsController(
 
             return Created(
                 $"/events/{@event.Id}",
-                new EventDto(
-                    @event.Id,
-                    @event.Name,
-                    @event.Description,
-                    @event.EventDate,
-                    FormatUserName(@event.Owner),
-                    @event.LogoImageId,
-                    @event.OwnerId,
-                    @event.CreatedAt,
-                    @event.IsArchived));
+                MapEvent(@event));
         }
         catch (InvalidOperationException ex)
         {
@@ -154,16 +148,7 @@ public sealed class EventsController(
                 request.EventDate,
                 request.LogoImageId);
 
-            return Ok(new EventDto(
-                @event.Id,
-                @event.Name,
-                @event.Description,
-                @event.EventDate,
-                FormatUserName(@event.Owner),
-                @event.LogoImageId,
-                @event.OwnerId,
-                @event.CreatedAt,
-                @event.IsArchived));
+            return Ok(MapEvent(@event));
         }
         catch (InvalidOperationException ex)
         {
@@ -174,6 +159,29 @@ public sealed class EventsController(
         {
             logger.LogError(ex, "Event update failed for event {EventId}", eventId);
             return BadRequest(new { message = "Не удалось сохранить настройки мероприятия." });
+        }
+    }
+
+    [Authorize(Policy = "CanCreateEvent")]
+    [HttpPatch("{eventId:long}/archive-status")]
+    public async Task<ActionResult<EventDto>> UpdateEventArchiveStatus(
+        long eventId,
+        UpdateEventArchiveStatusRequest request)
+    {
+        try
+        {
+            var @event = await eventService.UpdateEventArchiveStatusAsync(eventId, request.IsArchived);
+            return Ok(MapEvent(@event));
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(ex, "Event archive status update was rejected for event {EventId}", eventId);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Event archive status update failed for event {EventId}", eventId);
+            return BadRequest(new { message = "Не удалось изменить статус мероприятия." });
         }
     }
 }
