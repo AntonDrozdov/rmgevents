@@ -68,6 +68,9 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .IsUnique();
 
         builder.HasIndex(x => x.CreatedByUserId);
+
+        builder.HasIndex(x => new { x.EventId, x.CreatedAt })
+            .HasDatabaseName("IX_users_event_id_created_at");
         
         builder.HasOne(x => x.Login)
             .WithMany(x => x.Users)

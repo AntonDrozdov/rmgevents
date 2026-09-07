@@ -20,18 +20,19 @@ public sealed class RoleService(
         
         await roleRepository.AddAsync(role);
         
-        // Add permissions to role
-        foreach (var code in permissionCodes)
+        var normalizedPermissionCodes = permissionCodes
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var permissions = await permissionRepository.GetByCodesAsync(normalizedPermissionCodes);
+
+        foreach (var permission in permissions)
         {
-            var permission = await permissionRepository.GetByCodeAsync(code);
-            if (permission != null)
+            role.RolePermissions.Add(new Application.Entities.RolePermission
             {
-                role.RolePermissions.Add(new Application.Entities.RolePermission
-                {
-                    RoleId = role.Id,
-                    PermissionId = permission.Id
-                });
-            }
+                RoleId = role.Id,
+                PermissionId = permission.Id
+            });
         }
         
         await roleRepository.SaveChangesAsync();
@@ -57,18 +58,20 @@ public sealed class RoleService(
         
         role.Name = name;
         role.RolePermissions.Clear();
-        
-        foreach (var code in permissionCodes)
+
+        var normalizedPermissionCodes = permissionCodes
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var permissions = await permissionRepository.GetByCodesAsync(normalizedPermissionCodes);
+
+        foreach (var permission in permissions)
         {
-            var permission = await permissionRepository.GetByCodeAsync(code);
-            if (permission != null)
+            role.RolePermissions.Add(new Application.Entities.RolePermission
             {
-                role.RolePermissions.Add(new Application.Entities.RolePermission
-                {
-                    RoleId = role.Id,
-                    PermissionId = permission.Id
-                });
-            }
+                RoleId = role.Id,
+                PermissionId = permission.Id
+            });
         }
         
         await roleRepository.UpdateAsync(role);

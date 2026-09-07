@@ -16,6 +16,11 @@ const statusLabel: Record<string, string> = {
   rejected: "Отклонён",
 };
 
+const guestStatusFilterOptions = [
+  { value: "", label: "Все статусы" },
+  ...Object.entries(statusLabel).map(([value, label]) => ({ value, label })),
+];
+
 const EditIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.5-16.5 4 4 1-1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1 1Z" /></svg>;
 const DeleteIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 0 1-2-2V6h14v13a2 2 0 0 1-2 2H7Zm1-3h2V9H8v9Zm6 0h2V9h-2v9ZM4 5V3h5l1-1h4l1 1h5v2H4Z" /></svg>;
 const RejectIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4 6.4 5Z" /></svg>;
@@ -35,7 +40,7 @@ const collectScopeIds = (groups: GroupTreeDto[], userGroupId?: number) => {
 
 export const GuestsPage: React.FC = () => {
   const { eventId = "" } = useParams<{ eventId: string }>();
-  const { currentUser } = useAuth();
+  const { currentUser, currentEvent, events } = useAuth();
   const [guests, setGuests] = useState<GuestDto[]>([]);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +52,7 @@ export const GuestsPage: React.FC = () => {
   const [formData, setFormData] = useState(emptyForm());
   const [guestSearch, setGuestSearch] = useState("");
   const [debouncedGuestSearch, setDebouncedGuestSearch] = useState("");
+  const [guestStatusFilter, setGuestStatusFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalGuestCount, setTotalGuestCount] = useState(0);
@@ -55,8 +61,10 @@ export const GuestsPage: React.FC = () => {
   const [similarGuestsError, setSimilarGuestsError] = useState("");
   const skipNextSearch = useRef(false);
 
-  const canCreate = currentUser?.permissions.includes("create_guest") ?? false;
-  const canApprove = currentUser?.permissions.includes("approve_guest") ?? false;
+  const selectedEvent = useMemo(() => events.find((event) => String(event.id) === eventId) ?? currentEvent, [events, eventId, currentEvent]);
+  const isArchived = selectedEvent?.isArchived ?? false;
+  const canCreate = (currentUser?.permissions.includes("create_guest") ?? false) && !isArchived;
+  const canApprove = (currentUser?.permissions.includes("approve_guest") ?? false) && !isArchived;
   const isAdministrator = currentUser?.roleName.toLowerCase() === "administrator";
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
   const scopeIds = useMemo(() => collectScopeIds(groups, currentUser?.groupId), [groups, currentUser?.groupId]);
@@ -84,6 +92,7 @@ export const GuestsPage: React.FC = () => {
           page: currentPage,
           pageSize,
           search: debouncedGuestSearch || undefined,
+          status: guestStatusFilter || undefined,
         }),
         apiClient.getGroupTree(eventId),
       ]);
@@ -98,7 +107,7 @@ export const GuestsPage: React.FC = () => {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadData(); }, [eventId, currentPage, pageSize, debouncedGuestSearch]);
+  useEffect(() => { loadData(); }, [eventId, currentPage, pageSize, debouncedGuestSearch, guestStatusFilter]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -165,6 +174,11 @@ export const GuestsPage: React.FC = () => {
   ]);
 
   const applyGuestUpdate = (updatedGuest: GuestDto) => {
+    if (guestStatusFilter && updatedGuest.status !== guestStatusFilter) {
+      void loadData();
+      return;
+    }
+
     setGuests((current) => current.map((guest) =>
       guest.id === updatedGuest.id ? updatedGuest : guest));
     setEditingGuest((current) =>
@@ -369,7 +383,39 @@ export const GuestsPage: React.FC = () => {
   return <div className="tab-content">
     <div className="section-heading guests-heading"><div className="section-title-row"><h2>Гости</h2><span className="badge">Всего: {totalGuestCount}</span></div><div className="section-actions">{canCreate && <button className="primary-button create-action-button guest-create-button" onClick={openCreateModal}>Добавить гостя</button>}</div></div>
     {error && !isCreateModalOpen && !editingGuest && !deleteGuest && <div className="alert alert-error">{error}</div>}
-    <section className="panel guests-table-panel"><div className="guest-search-row"><label className="field guest-search-field"><span>Поиск гостей</span><input value={guestSearch} onChange={(event) => setGuestSearch(event.target.value)} placeholder="Имя, email или телефон" /></label>{isGuestSearchActive && <span className="guest-search-count">Найдено: {totalGuestCount}</span>}</div>{loading ? <div className="empty-state compact">Загрузка...</div> : totalGuestCount === 0 && !debouncedGuestSearch ? <div className="empty-state compact">Гостей пока нет.</div> : totalGuestCount === 0 ? <div className="empty-state compact">По запросу ничего не найдено.</div> : <><div className="table-wrap guests-table-wrap"><table><thead><tr><th>Имя</th><th>Контакты</th><th>Группа</th><th>Статус</th><th>Кем создан</th><th>Создан</th><th className="actions-column" aria-label="Действия" /></tr></thead><tbody>{guests.map((guest) => {
+    {isArchived && <div className="alert alert-info">Мероприятие завершено. Просмотр и поиск доступны, изменения — только после возврата в активные.</div>}
+    <section className="panel guests-table-panel">
+      <div className="guest-search-row">
+        <label className="field guest-search-field">
+          <span>Поиск гостей</span>
+          <input
+            value={guestSearch}
+            onChange={(event) => setGuestSearch(event.target.value)}
+            placeholder="Имя, email или телефон"
+          />
+        </label>
+        <label className="field guest-status-filter-field">
+          <span>Статус</span>
+          <select
+            value={guestStatusFilter}
+            onChange={(event) => {
+              setGuestStatusFilter(event.target.value);
+              setCurrentPage(1);
+            }}
+            disabled={loading}
+          >
+            {guestStatusFilterOptions.map((option) => (
+              <option key={option.value || "all"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {(isGuestSearchActive || guestStatusFilter) && (
+          <span className="guest-search-count">Найдено: {totalGuestCount}</span>
+        )}
+      </div>
+      {loading ? <div className="empty-state compact">Загрузка...</div> : totalGuestCount === 0 && !debouncedGuestSearch && !guestStatusFilter ? <div className="empty-state compact">Гостей пока нет.</div> : totalGuestCount === 0 ? <div className="empty-state compact">По фильтрам ничего не найдено.</div> : <><div className="table-wrap guests-table-wrap"><table><thead><tr><th>Имя</th><th>Email</th><th>Группа</th><th>Статус</th><th>Кем создан</th><th>Создан</th><th className="actions-column" aria-label="Действия" /></tr></thead><tbody>{guests.map((guest) => {
       const showApprove = canApproveGuest(guest);
       const showReject = canRejectGuest(guest);
       const showSubmit = canSubmitGuest(guest);
@@ -392,9 +438,10 @@ export const GuestsPage: React.FC = () => {
             ? "Отправить на согласование"
             : "Согласовать";
       const canEdit = canManageGuest(guest);
-      return <tr className={`table-hover-row${canEdit ? " table-editable-row" : ""}`} key={guest.id} tabIndex={canEdit ? 0 : undefined} onClick={canEdit ? (event) => { if (!(event.target as HTMLElement).closest("button, a, input, select, textarea")) openEditModal(guest); } : undefined} onKeyDown={canEdit ? (event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openEditModal(guest); } } : undefined}><td>{guest.name}</td><td><div>{guest.email || "-"}</div><small>{guest.phone || ""}</small></td><td>{guest.groupName || guest.groupId}</td><td><div className="guest-status-actions">{nextAction ? <button className={`status status-action-button ${guest.status}`} type="button" onClick={nextAction} title={nextActionLabel}><span className="status-current">{statusLabel[guest.status] ?? guest.status}</span><span className="status-next">{nextActionLabel}</span></button> : <span className={`status ${guest.status}`}>{statusLabel[guest.status] ?? guest.status}</span>}{showReject && <button className="icon-button icon-button-danger guest-reject-button" onClick={() => updateGuestStatus(guest.id, false)} title="Отклонить" aria-label={`Отклонить ${guest.name}`}><RejectIcon /></button>}</div></td><td><div>{guest.createdByName || "-"}</div>{guest.createdByRoleName && <small>{guest.createdByRoleName}</small>}</td><td>{formatDateTime(guest.createdAt)}</td>
+      return <tr className={`table-hover-row${canEdit ? " table-editable-row" : ""}`} key={guest.id} tabIndex={canEdit ? 0 : undefined} onClick={canEdit ? (event) => { if (!(event.target as HTMLElement).closest("button, a, input, select, textarea")) openEditModal(guest); } : undefined} onKeyDown={canEdit ? (event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openEditModal(guest); } } : undefined}><td>{guest.name}</td><td>{guest.email || "-"}</td><td>{guest.groupName || guest.groupId}</td><td><div className="guest-status-actions">{nextAction ? <button className={`status status-action-button ${guest.status}`} type="button" onClick={nextAction} title={nextActionLabel}><span className="status-current">{statusLabel[guest.status] ?? guest.status}</span><span className="status-next">{nextActionLabel}</span></button> : <span className={`status ${guest.status}`}>{statusLabel[guest.status] ?? guest.status}</span>}{showReject && <button className="icon-button icon-button-danger guest-reject-button" onClick={() => updateGuestStatus(guest.id, false)} title="Отклонить" aria-label={`Отклонить ${guest.name}`}><RejectIcon /></button>}</div></td><td><div>{guest.createdByName || "-"}</div>{guest.createdByRoleName && <small>{guest.createdByRoleName}</small>}</td><td>{formatDateTime(guest.createdAt)}</td>
         <td className="actions-column">{canManageGuest(guest) ? <div className="table-icon-actions"><button className="icon-button" onClick={() => openEditModal(guest)} title="Редактировать" aria-label={`Редактировать ${guest.name}`}><EditIcon /></button><button className="icon-button icon-button-danger" onClick={() => setDeleteGuest(guest)} title="Удалить" aria-label={`Удалить ${guest.name}`}><DeleteIcon /></button></div> : "-"}</td></tr>;
-    })}</tbody></table></div><div className="pagination-row"><div className="pagination-summary">Показаны {pageStart}-{pageEnd} из {totalGuestCount}</div><label className="pagination-size"><span>На странице</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setCurrentPage(1); }} disabled={loading}><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option></select></label><div className="pagination-actions"><button className="secondary-button pagination-button" type="button" onClick={() => setCurrentPage((value) => Math.max(1, value - 1))} disabled={loading || !canGoPreviousPage}>Назад</button><span className="pagination-current">Страница {currentPage} из {totalPages}</span><button className="secondary-button pagination-button" type="button" onClick={() => setCurrentPage((value) => Math.min(totalPages, value + 1))} disabled={loading || !canGoNextPage}>Вперёд</button></div></div></>}</section>
+    })}</tbody></table></div><div className="pagination-row"><div className="pagination-summary">Показаны {pageStart}-{pageEnd} из {totalGuestCount}</div><label className="pagination-size"><span>На странице</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setCurrentPage(1); }} disabled={loading}><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option></select></label><div className="pagination-actions"><button className="secondary-button pagination-button" type="button" onClick={() => setCurrentPage((value) => Math.max(1, value - 1))} disabled={loading || !canGoPreviousPage}>Назад</button><span className="pagination-current">Страница {currentPage} из {totalPages}</span><button className="secondary-button pagination-button" type="button" onClick={() => setCurrentPage((value) => Math.min(totalPages, value + 1))} disabled={loading || !canGoNextPage}>Вперёд</button></div></div></>}
+    </section>
 
     {(isCreateModalOpen || editingGuest) && <Modal className="guest-form-modal" title={editingGuest ? "Редактировать гостя" : "Добавить гостя"} description={editingGuest ? "Измените данные гостя и просмотрите цепочку согласования." : "Гость будет сохранён в выбранной группе."} onClose={closeForm}>{error && <div className="alert alert-error">{error}</div>}<form className="form guest-edit-form" onSubmit={submitGuest}>
       <label className="field"><span>Имя</span><input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={saving} required /></label>

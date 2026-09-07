@@ -103,7 +103,7 @@ const GroupNode = ({
 
 export const GroupsPage = () => {
   const { eventId = "" } = useParams<{ eventId: string }>();
-  const { currentUser } = useAuth();
+  const { currentUser, currentEvent, events } = useAuth();
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -117,7 +117,10 @@ export const GroupsPage = () => {
   const [form, setForm] = useState({ name: "", quota: 1 });
   const [editForm, setEditForm] = useState({ name: "", quota: 0 });
 
-  const canCreate = currentUser?.permissions.includes("create_group") ?? false;
+  const selectedEvent = useMemo(() => events.find((event) => String(event.id) === eventId) ?? currentEvent, [events, eventId, currentEvent]);
+  const hasCreatePermission = currentUser?.permissions.includes("create_group") ?? false;
+  const isArchived = selectedEvent?.isArchived ?? false;
+  const canCreate = hasCreatePermission && !isArchived;
   const groupsCount = useMemo(() => countGroups(groups), [groups]);
   const parentAvailableQuota = parentGroup ? getAvailableChildQuota(parentGroup) : 0;
   const editMinimumQuota = editingGroup
@@ -135,7 +138,7 @@ export const GroupsPage = () => {
   );
 
   const loadGroups = async () => {
-    if (!eventId || !canCreate) {
+    if (!eventId || !hasCreatePermission) {
       setGroups([]);
       setLoading(false);
       return;
@@ -156,7 +159,7 @@ export const GroupsPage = () => {
   useEffect(() => {
     void loadGroups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventId, canCreate]);
+  }, [eventId, hasCreatePermission]);
 
   const openCreateModal = (group: GroupTreeDto) => {
     const availableQuota = getAvailableChildQuota(group);
@@ -279,13 +282,13 @@ export const GroupsPage = () => {
         </div>
       </div>
 
-      {!canCreate && (
+      {!hasCreatePermission && (
         <section className="panel empty-state">
           У вас нет права на просмотр и создание групп.
         </section>
       )}
 
-      {canCreate && (
+      {hasCreatePermission && (
         <section className="panel groups-tree-panel">
           {loading ? (
             <div className="empty-state">Загружаем дерево групп...</div>
@@ -310,6 +313,11 @@ export const GroupsPage = () => {
           )}
           {error && !parentGroup && !editingGroup && !deleteGroup && (
             <div className="alert alert-error">{error}</div>
+          )}
+          {isArchived && (
+            <div className="alert alert-info">
+              Мероприятие завершено. Дерево групп доступно только для просмотра. Для изменений верните мероприятие в активные.
+            </div>
           )}
         </section>
       )}

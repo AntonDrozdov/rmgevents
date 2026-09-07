@@ -9,7 +9,8 @@ public interface IGuestService
         long eventId,
         int page,
         int pageSize,
-        string? search);
+        string? search,
+        string? status = null);
     Task<List<Entities.Guest>> GetGuestsByGroupAsync(long groupId);
     Task<List<Entities.Guest>> GetGuestsByStatusAsync(long eventId, string status);
     Task<List<Entities.Guest>> SearchGuestsForEventAsync(

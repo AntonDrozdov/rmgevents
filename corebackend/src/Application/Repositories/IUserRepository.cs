@@ -14,6 +14,7 @@ public interface IUserRepository
         string? email,
         int limit);
     Task<List<Entities.User>> GetByGroupIdAsync(long groupId);
+    Task<bool> ExistsByGroupIdsAsync(IReadOnlyCollection<long> groupIds);
     Task AddAsync(Entities.User user);
     Task UpdateAsync(Entities.User user);
     Task DeleteAsync(long id);

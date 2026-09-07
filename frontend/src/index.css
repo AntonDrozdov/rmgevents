@@ -230,6 +230,11 @@ button:disabled {
   color: #176247;
 }
 
+.alert-info {
+  background: #e8f1ff;
+  color: #174a8b;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -308,6 +313,24 @@ button:disabled {
 .employee-form .field input,
 .employee-form .field select {
   padding: 9px 11px;
+}
+
+.role-select-administrator,
+.role-option-administrator {
+  color: #b42318;
+  font-weight: 800;
+}
+
+.admin-role-warning {
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-promotion-warning {
+  color: #34405a;
+  line-height: 1.5;
+  margin: 0;
 }
 
 .employee-form .modal-actions {
@@ -786,6 +809,10 @@ td small,
   max-width: 460px;
 }
 
+.guest-status-filter-field {
+  flex: 0 0 250px;
+}
+
 .guest-search-count {
   color: #657086;
   font-size: 13px;
@@ -891,13 +918,13 @@ code {
 }
 
 .status.saved {
-  background: #e8f2ff;
-  color: #315f91;
+  background: #edf7ee;
+  color: #2f6d3a;
 }
 
 .status.on_review {
-  background: #eaf3fb;
-  color: #426b8d;
+  background: #fff6d8;
+  color: #8a6410;
 }
 
 .status.approved {
@@ -2110,7 +2137,9 @@ code {
     gap: 8px;
   }
 
-  .guest-search-field {
+  .guest-search-field,
+  .guest-status-filter-field {
+    flex-basis: auto;
     max-width: none;
   }
 

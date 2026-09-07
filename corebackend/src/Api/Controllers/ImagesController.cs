@@ -8,7 +8,9 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/images")]
-public sealed class ImagesController(IImageService imageService) : ControllerBase
+public sealed class ImagesController(
+    IImageService imageService,
+    IEventStateGuard eventStateGuard) : ControllerBase
 {
     [HttpGet("{id:long}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -40,6 +42,8 @@ public sealed class ImagesController(IImageService imageService) : ControllerBas
 
         try
         {
+            await eventStateGuard.EnsureActiveAsync(eventId);
+
             await using var stream = new MemoryStream();
             await file.CopyToAsync(stream, cancellationToken);
             var image = await imageService.SaveEventCover(

@@ -4,6 +4,7 @@ public interface IPermissionRepository
 {
     Task<Entities.Permission?> GetByIdAsync(long id);
     Task<Entities.Permission?> GetByCodeAsync(string code);
+    Task<List<Entities.Permission>> GetByCodesAsync(IReadOnlyCollection<string> codes);
     Task<List<Entities.Permission>> GetAllAsync();
     Task<List<Entities.Permission>> GetByRoleIdAsync(long roleId);
     Task AddAsync(Entities.Permission permission);

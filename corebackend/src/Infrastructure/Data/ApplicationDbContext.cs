@@ -17,6 +17,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Guest> Guests => Set<Guest>();
     public DbSet<GuestDecision> GuestDecisions => Set<GuestDecision>();
 
+    [DbFunction("regexp_replace", IsBuiltIn = true)]
+    public static string RegexpReplace(string input, string pattern, string replacement, string flags)
+        => throw new NotSupportedException("This method is translated to PostgreSQL regexp_replace.");
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("corebackend");

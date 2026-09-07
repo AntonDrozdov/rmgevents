@@ -38,6 +38,20 @@ public sealed class GroupRepository(ApplicationDbContext db) : IGroupRepository
     
     public async Task<List<Application.Entities.Group>> GetAllDescendantsAsync(long groupId)
     {
+        var root = await db.Groups
+            .AsNoTracking()
+            .FirstOrDefaultAsync(group => group.Id == groupId);
+        if (root == null)
+            return [];
+
+        var groups = await db.Groups
+            .AsNoTracking()
+            .Where(group => group.EventId == root.EventId)
+            .ToListAsync();
+        var childrenByParentId = groups
+            .Where(group => group.ParentGroupId.HasValue)
+            .GroupBy(group => group.ParentGroupId!.Value)
+            .ToDictionary(group => group.Key, group => group.ToList());
         var descendants = new List<Application.Entities.Group>();
         var queue = new Queue<long>();
         queue.Enqueue(groupId);
@@ -45,7 +59,7 @@ public sealed class GroupRepository(ApplicationDbContext db) : IGroupRepository
         while (queue.Count > 0)
         {
             var currentId = queue.Dequeue();
-            var children = await GetChildrenAsync(currentId);
+            var children = childrenByParentId.GetValueOrDefault(currentId) ?? [];
             descendants.AddRange(children);
             
             foreach (var child in children)

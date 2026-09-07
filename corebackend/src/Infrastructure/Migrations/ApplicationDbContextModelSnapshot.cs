@@ -178,6 +178,12 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("EventId");
 
+                    b.HasIndex("EventId", "CreatedAt")
+                        .HasDatabaseName("IX_guests_event_id_created_at");
+
+                    b.HasIndex("EventId", "Status", "CreatedAt")
+                        .HasDatabaseName("IX_guests_event_id_status_created_at");
+
                     b.HasIndex("GroupId");
 
                     b.ToTable("guests", "corebackend");
@@ -445,6 +451,9 @@ namespace Infrastructure.Migrations
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("EventId");
+
+                    b.HasIndex("EventId", "CreatedAt")
+                        .HasDatabaseName("IX_users_event_id_created_at");
 
                     b.HasIndex("GroupId");
 

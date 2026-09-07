@@ -71,5 +71,11 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
             .WithMany(x => x.CreatedGuests)
             .HasForeignKey(x => x.CreatedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(x => new { x.EventId, x.CreatedAt })
+            .HasDatabaseName("IX_guests_event_id_created_at");
+
+        builder.HasIndex(x => new { x.EventId, x.Status, x.CreatedAt })
+            .HasDatabaseName("IX_guests_event_id_status_created_at");
     }
 }

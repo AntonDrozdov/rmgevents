@@ -16,6 +16,16 @@ public sealed class PermissionRepository(ApplicationDbContext db) : IPermissionR
         return await db.Permissions
             .FirstOrDefaultAsync(x => x.Code == code);
     }
+
+    public async Task<List<Application.Entities.Permission>> GetByCodesAsync(IReadOnlyCollection<string> codes)
+    {
+        if (codes.Count == 0)
+            return [];
+
+        return await db.Permissions
+            .Where(permission => codes.Contains(permission.Code))
+            .ToListAsync();
+    }
     
     public async Task<List<Application.Entities.Permission>> GetAllAsync()
     {

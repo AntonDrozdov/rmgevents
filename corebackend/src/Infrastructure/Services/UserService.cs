@@ -12,7 +12,8 @@ public sealed class UserService(
     ILoginRepository loginRepository,
     IAuthService authService,
     IRoleRepository roleRepository,
-    IGroupRepository groupRepository) : IUserService
+    IGroupRepository groupRepository,
+    IEventStateGuard eventStateGuard) : IUserService
 {
     public async Task<Application.Entities.User> CreateUserAsync(
         long eventId,
@@ -28,6 +29,8 @@ public sealed class UserService(
     {
         if (string.IsNullOrWhiteSpace(loginValue))
             throw new InvalidOperationException("Login is required");
+
+        await eventStateGuard.EnsureActiveAsync(eventId);
 
         await ValidateRoleAndGroupAsync(eventId, roleId, groupId);
         var creator = await userRepository.GetByLoginAndEventAsync(creatorLoginId, eventId)
@@ -143,6 +146,8 @@ public sealed class UserService(
         if (user.EventId != eventId)
             throw new InvalidOperationException("Сотрудник не принадлежит этому мероприятию.");
 
+        await eventStateGuard.EnsureActiveAsync(eventId);
+
         await ValidateRoleAndGroupAsync(eventId, roleId, groupId);
 
         var targetRole = await roleRepository.GetByIdAsync(roleId)
@@ -206,6 +211,8 @@ public sealed class UserService(
         if (user.EventId != eventId)
             throw new InvalidOperationException("User is not part of this event");
 
+        await eventStateGuard.EnsureActiveAsync(eventId);
+
         await ValidateRoleAndGroupAsync(eventId, roleId, groupId);
         
         user.RoleId = roleId;
@@ -220,6 +227,8 @@ public sealed class UserService(
         var user = await userRepository.GetByIdAsync(userId);
         if (user == null)
             return;
+
+        await eventStateGuard.EnsureActiveAsync(user.EventId);
 
         if (string.Equals(user.Role?.Name, "Administrator", StringComparison.OrdinalIgnoreCase))
         {
@@ -241,6 +250,8 @@ public sealed class UserService(
         var user = await userRepository.GetByIdAsync(userId);
         if (user == null || user.EventId != eventId)
             throw new InvalidOperationException($"User {userId} not found");
+
+        await eventStateGuard.EnsureActiveAsync(eventId);
 
         await authService.ResetPasswordAsync(user.LoginId);
         return user.Login?.LoginValue

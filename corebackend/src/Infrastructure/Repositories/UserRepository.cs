@@ -134,6 +134,14 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .Include(x => x.Role)
             .ToListAsync();
     }
+
+    public async Task<bool> ExistsByGroupIdsAsync(IReadOnlyCollection<long> groupIds)
+    {
+        if (groupIds.Count == 0)
+            return false;
+
+        return await db.Users.AnyAsync(user => groupIds.Contains(user.GroupId));
+    }
     
     public async Task AddAsync(Application.Entities.User user)
     {

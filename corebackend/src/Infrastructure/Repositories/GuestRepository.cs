@@ -6,6 +6,9 @@ namespace Infrastructure.Repositories;
 
 public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
 {
+    private static string DigitsOnly(string value) =>
+        new(value.Where(char.IsDigit).ToArray());
+
     public async Task<Application.Entities.Guest?> GetByIdAsync(long id)
     {
         return await db.Guests
@@ -30,6 +33,7 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
     public async Task<(List<Application.Entities.Guest> Items, int TotalCount, int Page)> GetPageByEventIdAsync(
         long eventId,
         string? search,
+        string? status,
         int page,
         int pageSize)
     {
@@ -37,13 +41,25 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .AsNoTracking()
             .Where(guest => guest.EventId == eventId);
 
-        var hasSearch = !string.IsNullOrWhiteSpace(search);
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(guest => guest.Status == status);
+        }
+
+        var trimmedSearch = search?.Trim();
+        var hasSearch = !string.IsNullOrWhiteSpace(trimmedSearch);
+        var searchDigits = hasSearch ? DigitsOnly(trimmedSearch!) : string.Empty;
+        var hasPhoneDigits = searchDigits.Length >= 2;
         if (hasSearch)
         {
             query = query.Where(guest =>
-                EF.Functions.ILike(guest.Name, $"%{search}%") ||
-                (guest.Email != null && EF.Functions.ILike(guest.Email, $"%{search}%")) ||
-                (guest.Phone != null && EF.Functions.ILike(guest.Phone, $"%{search}%")));
+                EF.Functions.ILike(guest.Name, $"%{trimmedSearch}%") ||
+                (guest.Email != null && EF.Functions.ILike(guest.Email, $"%{trimmedSearch}%")) ||
+                (guest.Phone != null && (
+                    EF.Functions.ILike(guest.Phone, $"%{trimmedSearch}%") ||
+                    (hasPhoneDigits && EF.Functions.Like(
+                        ApplicationDbContext.RegexpReplace(guest.Phone, "[^0-9]", "", "g"),
+                        $"%{searchDigits}%")))));
         }
 
         var totalCount = await query.CountAsync();
@@ -54,15 +70,24 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         {
             query = query
                 .OrderByDescending(guest =>
-                    (EF.Functions.ILike(guest.Name, search!) ? 100 :
-                        EF.Functions.ILike(guest.Name, $"{search}%") ? 20 :
-                        EF.Functions.ILike(guest.Name, $"%{search}%") ? 5 : 0)
-                    + (guest.Email != null && EF.Functions.ILike(guest.Email, search!) ? 100 :
-                        guest.Email != null && EF.Functions.ILike(guest.Email, $"{search}%") ? 20 :
-                        guest.Email != null && EF.Functions.ILike(guest.Email, $"%{search}%") ? 5 : 0)
-                    + (guest.Phone != null && EF.Functions.ILike(guest.Phone, search!) ? 100 :
-                        guest.Phone != null && EF.Functions.ILike(guest.Phone, $"{search}%") ? 20 :
-                        guest.Phone != null && EF.Functions.ILike(guest.Phone, $"%{search}%") ? 5 : 0))
+                    (EF.Functions.ILike(guest.Name, trimmedSearch!) ? 100 :
+                        EF.Functions.ILike(guest.Name, $"{trimmedSearch}%") ? 20 :
+                        EF.Functions.ILike(guest.Name, $"%{trimmedSearch}%") ? 5 : 0)
+                    + (guest.Email != null && EF.Functions.ILike(guest.Email, trimmedSearch!) ? 100 :
+                        guest.Email != null && EF.Functions.ILike(guest.Email, $"{trimmedSearch}%") ? 20 :
+                        guest.Email != null && EF.Functions.ILike(guest.Email, $"%{trimmedSearch}%") ? 5 : 0)
+                    + (guest.Phone != null && EF.Functions.ILike(guest.Phone, trimmedSearch!) ? 100 :
+                        guest.Phone != null && EF.Functions.ILike(guest.Phone, $"{trimmedSearch}%") ? 20 :
+                        guest.Phone != null && EF.Functions.ILike(guest.Phone, $"%{trimmedSearch}%") ? 5 : 0)
+                    + (hasPhoneDigits && guest.Phone != null && EF.Functions.Like(
+                        ApplicationDbContext.RegexpReplace(guest.Phone, "[^0-9]", "", "g"),
+                        searchDigits) ? 100 :
+                        hasPhoneDigits && guest.Phone != null && EF.Functions.Like(
+                            ApplicationDbContext.RegexpReplace(guest.Phone, "[^0-9]", "", "g"),
+                            $"{searchDigits}%") ? 20 :
+                        hasPhoneDigits && guest.Phone != null && EF.Functions.Like(
+                            ApplicationDbContext.RegexpReplace(guest.Phone, "[^0-9]", "", "g"),
+                            $"%{searchDigits}%") ? 5 : 0))
                 .ThenByDescending(guest => guest.CreatedAt);
         }
         else
@@ -88,6 +113,14 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         return await db.Guests
             .Where(x => x.GroupId == groupId)
             .ToListAsync();
+    }
+
+    public async Task<bool> ExistsByGroupIdsAsync(IReadOnlyCollection<long> groupIds)
+    {
+        if (groupIds.Count == 0)
+            return false;
+
+        return await db.Guests.AnyAsync(guest => groupIds.Contains(guest.GroupId));
     }
     
     public async Task<List<Application.Entities.Guest>> GetByStatusAsync(long eventId, string status)

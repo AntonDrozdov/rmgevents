@@ -38,6 +38,7 @@ export const EventInformationPage: React.FC = () => {
     logoImageId: null as number | null,
   });
 
+  const isReadOnly = isArchived;
   const isDirty = coverFile !== null ||
     name.trim() !== initialValues.name ||
     description.trim() !== initialValues.description ||
@@ -90,6 +91,11 @@ export const EventInformationPage: React.FC = () => {
     setSuccess("");
     const file = event.target.files?.[0] ?? null;
     if (!file) return;
+    if (isReadOnly) {
+      setError("Мероприятие завершено. Чтобы изменить обложку, верните его в активные.");
+      event.target.value = "";
+      return;
+    }
 
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
     if (!allowedExtensions.has(extension)) {
@@ -107,6 +113,10 @@ export const EventInformationPage: React.FC = () => {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (isReadOnly) {
+      setError("Мероприятие завершено. Чтобы изменить настройки, верните его в активные.");
+      return;
+    }
     if (!isDirty) return;
     setSaving(true);
     setError("");
@@ -189,6 +199,7 @@ export const EventInformationPage: React.FC = () => {
 
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
+      {isArchived && !loading && <div className="alert alert-info">Мероприятие завершено. Настройки доступны только для просмотра. Нажмите «Вернуть в активные», чтобы снова редактировать.</div>}
 
       {loading ? (
         <p className="muted">Загрузка настроек...</p>
@@ -200,7 +211,7 @@ export const EventInformationPage: React.FC = () => {
               <strong>{isArchived ? "Завершено" : "Активно"}</strong>
               <p>
                 {isArchived
-                  ? "Завершённое мероприятие отображается ниже активных на дашборде."
+                  ? "Завершённое мероприятие доступно только для просмотра. Чтобы снова менять гостей, сотрудников, группы и настройки, верните его в активные."
                   : "После завершения мероприятие переместится в отдельный раздел дашборда."}
               </p>
             </div>
@@ -224,7 +235,7 @@ export const EventInformationPage: React.FC = () => {
               value={name}
               onChange={(event) => { setName(event.target.value); setSuccess(""); }}
               maxLength={255}
-              disabled={saving}
+              disabled={saving || isReadOnly}
               required
             />
           </label>
@@ -235,7 +246,7 @@ export const EventInformationPage: React.FC = () => {
               type="date"
               value={eventDate}
               onChange={(event) => { setEventDate(event.target.value); setSuccess(""); }}
-              disabled={saving}
+              disabled={saving || isReadOnly}
               required
             />
           </label>
@@ -247,7 +258,7 @@ export const EventInformationPage: React.FC = () => {
               onChange={(event) => { setDescription(event.target.value); setSuccess(""); }}
               rows={5}
               maxLength={2000}
-              disabled={saving}
+              disabled={saving || isReadOnly}
             />
             <small>{description.length}/2000</small>
           </label>
@@ -268,7 +279,7 @@ export const EventInformationPage: React.FC = () => {
                   type="file"
                   accept=".jpg,.jpeg,.png,.svg,image/jpeg,image/png,image/svg+xml"
                   onChange={handleCoverChange}
-                  disabled={saving}
+                  disabled={saving || isReadOnly}
                 />
               </label>
               <small className={coverFile ? "event-cover-file-name" : undefined}>
@@ -281,7 +292,7 @@ export const EventInformationPage: React.FC = () => {
             <button
               className="primary-button"
               type="submit"
-              disabled={saving || !name.trim() || !eventDate || !isDirty}
+              disabled={saving || isReadOnly || !name.trim() || !eventDate || !isDirty}
             >
               {saving ? "Сохраняем..." : "Сохранить"}
             </button>

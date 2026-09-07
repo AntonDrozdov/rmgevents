@@ -53,9 +53,10 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
         long eventId,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        [FromQuery] string? search = null)
+        [FromQuery] string? search = null,
+        [FromQuery] string? status = null)
     {
-        var guests = await guestService.GetGuestsPageByEventAsync(eventId, page, pageSize, search);
+        var guests = await guestService.GetGuestsPageByEventAsync(eventId, page, pageSize, search, status);
         var result = guests.Items.Select(MapGuest).ToList();
 
         return Ok(new PagedResultDto<GuestDto>(

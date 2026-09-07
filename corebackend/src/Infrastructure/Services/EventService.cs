@@ -11,6 +11,7 @@ public sealed class EventService(
     IRoleRepository roleRepository,
     IUserRepository userRepository,
     IImageRepository imageRepository,
+    IEventStateGuard eventStateGuard,
     ApplicationDbContext db) : IEventService
 {
     public async Task<Application.Entities.Event> CreateEventAsync(
@@ -127,6 +128,8 @@ public sealed class EventService(
         var @event = await eventRepository.GetByIdAsync(eventId);
         if (@event == null)
             throw new InvalidOperationException("Мероприятие не найдено.");
+
+        await eventStateGuard.EnsureActiveAsync(eventId);
 
         if (logoImageId.HasValue && await imageRepository.GetImage(logoImageId.Value) == null)
             throw new InvalidOperationException("Выбранная обложка не найдена.");

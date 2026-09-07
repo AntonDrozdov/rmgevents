@@ -7,9 +7,11 @@ public interface IGuestRepository
     Task<(List<Entities.Guest> Items, int TotalCount, int Page)> GetPageByEventIdAsync(
         long eventId,
         string? search,
+        string? status,
         int page,
         int pageSize);
     Task<List<Entities.Guest>> GetByGroupIdAsync(long groupId);
+    Task<bool> ExistsByGroupIdsAsync(IReadOnlyCollection<long> groupIds);
     Task<List<Entities.Guest>> GetByStatusAsync(long eventId, string status);
     Task<List<Entities.Guest>> SearchForEventAsync(
         long eventId,

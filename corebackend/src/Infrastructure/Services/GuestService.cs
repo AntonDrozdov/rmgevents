@@ -7,8 +7,19 @@ public sealed class GuestService(
     IGuestRepository guestRepository,
     IGroupRepository groupRepository,
     IPermissionService permissionService,
-    IUserRepository userRepository) : IGuestService
+    IUserRepository userRepository,
+    IEventStateGuard eventStateGuard) : IGuestService
 {
+    private static readonly HashSet<string> KnownStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "saved",
+        "on_review",
+        "admin_review",
+        "approved",
+        "invited",
+        "rejected"
+    };
+
     public async Task<Application.Entities.Guest> CreateGuestAsync(
         long eventId,
         long loginId,
@@ -17,6 +28,8 @@ public sealed class GuestService(
         string? phone,
         long groupId)
     {
+        await eventStateGuard.EnsureActiveAsync(eventId);
+
         // Проверяем разрешение
         if (!await permissionService.HasPermissionAsync(loginId, eventId, "create_guest"))
             throw new UnauthorizedAccessException("No permission to create guests");
@@ -68,7 +81,8 @@ public sealed class GuestService(
         long eventId,
         int page,
         int pageSize,
-        string? search)
+        string? search,
+        string? status = null)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
@@ -77,9 +91,16 @@ public sealed class GuestService(
         if (normalizedSearch is not { Length: >= 2 })
             normalizedSearch = null;
 
+        var normalizedStatus = status?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedStatus) || !KnownStatuses.Contains(normalizedStatus))
+            normalizedStatus = null;
+        else
+            normalizedStatus = normalizedStatus.ToLowerInvariant();
+
         var result = await guestRepository.GetPageByEventIdAsync(
             eventId,
             normalizedSearch,
+            normalizedStatus,
             page,
             pageSize);
 
@@ -122,6 +143,8 @@ public sealed class GuestService(
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
+        await eventStateGuard.EnsureActiveAsync(guest.EventId);
+
         await EnsureCanManageGuestAsync(guest, loginId);
         if (guest.Status != "saved")
             throw new InvalidOperationException("Only a saved guest can be submitted for review");
@@ -145,7 +168,9 @@ public sealed class GuestService(
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
-        
+
+        await eventStateGuard.EnsureActiveAsync(guest.EventId);
+
         // Проверяем разрешение
         if (!await permissionService.HasPermissionAsync(approverLoginId, guest.EventId, "approve_guest"))
             throw new UnauthorizedAccessException("No permission to approve guests");
@@ -200,6 +225,8 @@ public sealed class GuestService(
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
+        await eventStateGuard.EnsureActiveAsync(guest.EventId);
+
         if (!await permissionService.HasPermissionAsync(approverLoginId, guest.EventId, "approve_guest"))
             throw new UnauthorizedAccessException("No permission to reject guests");
 
@@ -230,6 +257,8 @@ public sealed class GuestService(
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
+        await eventStateGuard.EnsureActiveAsync(guest.EventId);
+
         if (!await permissionService.HasPermissionAsync(inviterLoginId, guest.EventId, "create_guest"))
             throw new UnauthorizedAccessException("No permission to invite guests");
 
@@ -257,6 +286,8 @@ public sealed class GuestService(
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
+
+        await eventStateGuard.EnsureActiveAsync(guest.EventId);
 
         if (!await permissionService.HasPermissionAsync(loginId, guest.EventId, "approve_guest"))
             throw new UnauthorizedAccessException("No permission to restore guests");
@@ -309,6 +340,8 @@ public sealed class GuestService(
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
+        await eventStateGuard.EnsureActiveAsync(guest.EventId);
+
         await EnsureCanManageGuestAsync(guest, loginId);
 
         var targetGroup = await groupRepository.GetByIdAsync(groupId);
@@ -339,6 +372,8 @@ public sealed class GuestService(
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
+
+        await eventStateGuard.EnsureActiveAsync(guest.EventId);
 
         await EnsureCanManageGuestAsync(guest, loginId);
         await guestRepository.DeleteAsync(guestId);

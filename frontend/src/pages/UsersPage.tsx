@@ -12,6 +12,8 @@ const formatUserName = (user: Pick<UserDto, "surname" | "name" | "additionalName
 
 const formatDateTime = (value: string) => new Date(value).toLocaleString("ru-RU");
 
+const isAdministratorRoleName = (roleName?: string | null) => roleName?.toLowerCase() === "administrator";
+
 const emptyForm = (groupId = "", roleId = "") => ({
   surname: "",
   name: "",
@@ -43,7 +45,7 @@ const ResetPasswordIcon = () => (
 
 export const UsersPage: React.FC = () => {
   const { eventId = "" } = useParams<{ eventId: string }>();
-  const { currentUser } = useAuth();
+  const { currentUser, currentEvent, events } = useAuth();
   const [users, setUsers] = useState<UserDto[]>([]);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [roles, setRoles] = useState<RoleDto[]>([]);
@@ -57,6 +59,8 @@ export const UsersPage: React.FC = () => {
   const [similarUsers, setSimilarUsers] = useState<UserSearchResultDto[]>([]);
   const [similarUsersLoading, setSimilarUsersLoading] = useState(false);
   const [similarUsersError, setSimilarUsersError] = useState("");
+  const [similarUserSourceRoleName, setSimilarUserSourceRoleName] = useState<string | null>(null);
+  const [isAdminPromotionWarningOpen, setIsAdminPromotionWarningOpen] = useState(false);
   const skipNextSearch = useRef(false);
   const [editingUser, setEditingUser] = useState<UserDto | null>(null);
   const [editFormData, setEditFormData] = useState(emptyForm());
@@ -68,17 +72,24 @@ export const UsersPage: React.FC = () => {
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [resetPasswordError, setResetPasswordError] = useState("");
 
-  const canCreate = currentUser?.permissions.includes("create_user") ?? false;
+  const selectedEvent = useMemo(() => events.find((event) => String(event.id) === eventId) ?? currentEvent, [events, eventId, currentEvent]);
+  const hasCreatePermission = currentUser?.permissions.includes("create_user") ?? false;
+  const isArchived = selectedEvent?.isArchived ?? false;
+  const canCreate = hasCreatePermission && !isArchived;
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
   const rootGroupId = String(groups[0]?.id ?? "");
   const isAdministratorRole = (roleId: string) =>
-    roles.find((role) => String(role.id) === roleId)?.name.toLowerCase() === "administrator";
+    isAdministratorRoleName(roles.find((role) => String(role.id) === roleId)?.name);
+  const isPromotingSimilarUserToAdministrator =
+    similarUserSourceRoleName !== null &&
+    isAdministratorRole(formData.roleId) &&
+    !isAdministratorRoleName(similarUserSourceRoleName);
   const administratorCount = useMemo(
-    () => users.filter((user) => user.roleName?.toLowerCase() === "administrator").length,
+    () => users.filter((user) => isAdministratorRoleName(user.roleName)).length,
     [users]
   );
   const isEditingOnlyAdministrator =
-    editingUser?.roleName?.toLowerCase() === "administrator" && administratorCount <= 1;
+    isAdministratorRoleName(editingUser?.roleName) && administratorCount <= 1;
   const isEditDirty = editingUser !== null && (
     editFormData.login.trim() !== editingUser.login ||
     editFormData.surname.trim() !== editingUser.surname ||
@@ -143,14 +154,14 @@ export const UsersPage: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!canCreate) {
+    if (!hasCreatePermission) {
       setError("У вас нет прав для управления сотрудниками.");
       setLoading(false);
       return;
     }
 
     loadUsers();
-  }, [eventId, canCreate]);
+  }, [eventId, hasCreatePermission]);
 
   useEffect(() => {
     if (!isCreateModalOpen || !eventId) return;
@@ -209,6 +220,8 @@ export const UsersPage: React.FC = () => {
 
   const openCreateModal = async () => {
     setIsCreateModalOpen(true);
+    setSimilarUserSourceRoleName(null);
+    setIsAdminPromotionWarningOpen(false);
     await loadReferencesForCreate();
   };
 
@@ -220,6 +233,8 @@ export const UsersPage: React.FC = () => {
     setSimilarUsers([]);
     setSimilarUsersError("");
     setSimilarUsersLoading(false);
+    setSimilarUserSourceRoleName(null);
+    setIsAdminPromotionWarningOpen(false);
     setError("");
   };
 
@@ -248,10 +263,10 @@ export const UsersPage: React.FC = () => {
     });
     setSimilarUsers([]);
     setSimilarUsersError("");
+    setSimilarUserSourceRoleName(user.roleName ?? null);
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const createUserFromForm = async () => {
     setError("");
     setSaving(true);
 
@@ -268,6 +283,8 @@ export const UsersPage: React.FC = () => {
       });
       setFormData(emptyForm(String(flatGroups[0]?.id ?? ""), String(roles[0]?.id ?? "")));
       setLoginManuallyEdited(false);
+      setSimilarUserSourceRoleName(null);
+      setIsAdminPromotionWarningOpen(false);
       setIsCreateModalOpen(false);
       await loadUsers();
     } catch (err) {
@@ -279,10 +296,23 @@ export const UsersPage: React.FC = () => {
             ? responseData.message
             : null;
       setError(serverMessage ?? "Не удалось создать сотрудника. Проверьте логин, роль и группу.");
+      setIsAdminPromotionWarningOpen(false);
       console.error(err);
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
+
+    if (isPromotingSimilarUserToAdministrator) {
+      setIsAdminPromotionWarningOpen(true);
+      return;
+    }
+
+    await createUserFromForm();
   };
 
   const openEditModal = async (user: UserDto) => {
@@ -434,6 +464,7 @@ export const UsersPage: React.FC = () => {
       </div>
 
       {error && !isCreateModalOpen && !editingUser && <div className="alert alert-error">{error}</div>}
+      {isArchived && <div className="alert alert-info">Мероприятие завершено. Список сотрудников доступен только для просмотра. Для изменений верните мероприятие в активные.</div>}
 
       <section className="panel">
         {loading ? (
@@ -447,7 +478,6 @@ export const UsersPage: React.FC = () => {
                 <tr>
                   <th>ФИО</th>
                   <th>Email</th>
-                  <th>Телефон</th>
                   <th>Роль</th>
                   <th>Группа</th>
                   <th>Кем создан</th>
@@ -458,7 +488,7 @@ export const UsersPage: React.FC = () => {
               <tbody>
                 {users.map((user) => (
                   <tr
-                    className="table-hover-row table-editable-row"
+                    className={`table-hover-row${canCreate ? " table-editable-row" : ""}`}
                     key={user.id}
                     tabIndex={0}
                     onClick={(event) => {
@@ -466,14 +496,13 @@ export const UsersPage: React.FC = () => {
                       void openEditModal(user);
                     }}
                     onKeyDown={(event) => {
-                      if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+                      if (!canCreate || event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
                       event.preventDefault();
                       void openEditModal(user);
                     }}
                   >
                     <td>{formatUserName(user)}</td>
                     <td>{user.email || "-"}</td>
-                    <td>{user.tel || "-"}</td>
                     <td>{user.roleName || "-"}</td>
                     <td>{user.groupName || "-"}</td>
                     <td>
@@ -482,7 +511,7 @@ export const UsersPage: React.FC = () => {
                     </td>
                     <td>{formatDateTime(user.createdAt)}</td>
                     <td className="actions-column">
-                      <div className="table-icon-actions">
+                      {canCreate ? <div className="table-icon-actions">
                         <button
                           className="icon-button"
                           type="button"
@@ -514,7 +543,7 @@ export const UsersPage: React.FC = () => {
                             <DeleteIcon />
                           </button>
                         )}
-                      </div>
+                      </div> : "-"}
                     </td>
                   </tr>
                 ))}
@@ -583,6 +612,7 @@ export const UsersPage: React.FC = () => {
               <span>Роль *</span>
               <select
                 value={formData.roleId}
+                className={isAdministratorRole(formData.roleId) ? "role-select-administrator" : undefined}
                 onChange={(event) => {
                   const roleId = event.target.value;
                   setFormData({
@@ -600,12 +630,21 @@ export const UsersPage: React.FC = () => {
                   <option value="">Роли не найдены</option>
                 ) : (
                   roles.map((role) => (
-                    <option key={role.id} value={role.id}>
+                    <option
+                      key={role.id}
+                      value={role.id}
+                      className={isAdministratorRoleName(role.name) ? "role-option-administrator" : undefined}
+                    >
                       {role.name}
                     </option>
                   ))
                 )}
               </select>
+              {isPromotingSimilarUserToAdministrator && (
+                <small className="admin-role-warning">
+                  При сохранении сотрудник будет повышен до Administrator.
+                </small>
+              )}
             </label>
             <label className="field">
               <span>Группа *</span>
@@ -684,6 +723,38 @@ export const UsersPage: React.FC = () => {
         </Modal>
       )}
 
+      {isAdminPromotionWarningOpen && (
+        <Modal
+          title="Повысить сотрудника до Administrator?"
+          description="Эта роль даёт полный доступ, включая создание мероприятий."
+          onClose={() => {
+            if (!saving) setIsAdminPromotionWarningOpen(false);
+          }}
+        >
+          <p className="admin-promotion-warning">
+            Вы используете данные похожего сотрудника и меняете его роль на Administrator. После создания сотрудник получит полный доступ к системе, включая создание мероприятий.
+          </p>
+          <div className="modal-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setIsAdminPromotionWarningOpen(false)}
+              disabled={saving}
+            >
+              Отмена
+            </button>
+            <button
+              className="danger-button"
+              type="button"
+              onClick={() => void createUserFromForm()}
+              disabled={saving}
+            >
+              {saving ? "Создаем..." : "Создать администратором"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {editingUser && (
         <Modal
           className="employee-form-modal"
@@ -727,6 +798,7 @@ export const UsersPage: React.FC = () => {
               <span>Роль *</span>
               <select
                 value={editFormData.roleId}
+                className={isAdministratorRole(editFormData.roleId) ? "role-select-administrator" : undefined}
                 onChange={(event) => {
                   const roleId = event.target.value;
                   setEditFormData({
@@ -742,7 +814,8 @@ export const UsersPage: React.FC = () => {
                   <option
                     key={role.id}
                     value={role.id}
-                    disabled={isEditingOnlyAdministrator && role.name.toLowerCase() !== "administrator"}
+                    className={isAdministratorRoleName(role.name) ? "role-option-administrator" : undefined}
+                    disabled={isEditingOnlyAdministrator && !isAdministratorRoleName(role.name)}
                   >
                     {role.name}
                   </option>

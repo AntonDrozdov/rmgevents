@@ -7,7 +7,8 @@ public sealed class GroupService(
     IGroupRepository groupRepository,
     IUserRepository userRepository,
     IGuestRepository guestRepository,
-    IPermissionService permissionService) : IGroupService
+    IPermissionService permissionService,
+    IEventStateGuard eventStateGuard) : IGroupService
 {
     public async Task<Application.Entities.Group> CreateGroupAsync(
         long eventId,
@@ -16,6 +17,8 @@ public sealed class GroupService(
         int quota,
         long? parentGroupId)
     {
+        await eventStateGuard.EnsureActiveAsync(eventId);
+
         // Проверяем разрешение
         if (!await permissionService.HasPermissionAsync(userId, eventId, "create_group"))
             throw new UnauthorizedAccessException("No permission to create groups");
@@ -139,6 +142,8 @@ public sealed class GroupService(
         if (group == null || group.EventId != eventId)
             throw new InvalidOperationException($"Group {groupId} not found");
 
+        await eventStateGuard.EnsureActiveAsync(eventId);
+
         await EnsureCanManageGroupAsync(eventId, userId, groupId);
         
         await ValidateQuotaHierarchyAsync(groupId, quota);
@@ -156,6 +161,8 @@ public sealed class GroupService(
         if (group == null || group.EventId != eventId)
             throw new InvalidOperationException($"Group {groupId} not found");
 
+        await eventStateGuard.EnsureActiveAsync(eventId);
+
         if (!group.ParentGroupId.HasValue)
             throw new InvalidOperationException("The root group cannot be deleted");
 
@@ -163,15 +170,13 @@ public sealed class GroupService(
 
         var descendants = await groupRepository.GetAllDescendantsAsync(groupId);
         var branch = descendants.Append(group).ToList();
+        var branchGroupIds = branch.Select(branchGroup => branchGroup.Id).ToList();
 
-        foreach (var branchGroup in branch)
-        {
-            if ((await userRepository.GetByGroupIdAsync(branchGroup.Id)).Any())
-                throw new InvalidOperationException("Cannot delete a group branch that contains employees");
+        if (await userRepository.ExistsByGroupIdsAsync(branchGroupIds))
+            throw new InvalidOperationException("Cannot delete a group branch that contains employees");
 
-            if ((await guestRepository.GetByGroupIdAsync(branchGroup.Id)).Any())
-                throw new InvalidOperationException("Cannot delete a group branch that contains guests");
-        }
+        if (await guestRepository.ExistsByGroupIdsAsync(branchGroupIds))
+            throw new InvalidOperationException("Cannot delete a group branch that contains guests");
 
         foreach (var descendant in descendants.AsEnumerable().Reverse())
             await groupRepository.DeleteAsync(descendant.Id);

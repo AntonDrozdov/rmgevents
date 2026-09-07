@@ -156,7 +156,7 @@ class ApiClient {
 
   async getGuests(
     eventId: string | number,
-    query: { page?: number; pageSize?: number; search?: string } = {}
+    query: { page?: number; pageSize?: number; search?: string; status?: string } = {}
   ): Promise<PagedResultDto<GuestDto>> {
     const response = await this.client.get<PagedResultDto<GuestDto>>(`/events/${eventId}/guests`, {
       params: query,
