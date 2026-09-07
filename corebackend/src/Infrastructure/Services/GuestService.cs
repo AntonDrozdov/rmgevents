@@ -11,23 +11,23 @@ public sealed class GuestService(
 {
     public async Task<Application.Entities.Guest> CreateGuestAsync(
         long eventId,
-        long userId,
+        long loginId,
         string name,
         string? email,
         string? phone,
         long groupId)
     {
         // Проверяем разрешение
-        if (!await permissionService.HasPermissionAsync(userId, eventId, "create_guest"))
+        if (!await permissionService.HasPermissionAsync(loginId, eventId, "create_guest"))
             throw new UnauthorizedAccessException("No permission to create guests");
         
+        var actor = await GetActorAsync(loginId, eventId);
+        
         // Получаем группу пользователя
-        var userGroupId = await permissionService.GetUserGroupInEventAsync(userId, eventId);
-        if (!userGroupId.HasValue)
-            throw new InvalidOperationException("User not assigned to a group");
+        var userGroupId = actor.GroupId;
         
         // Проверяем иерархию групп
-        if (!await permissionService.CanCreateGuestInGroupAsync(userId, eventId, groupId, userGroupId.Value))
+        if (!await permissionService.CanCreateGuestInGroupAsync(loginId, eventId, groupId, userGroupId))
             throw new UnauthorizedAccessException("Cannot create guest in this group");
         
         // Проверяем квоту
@@ -40,7 +40,7 @@ public sealed class GuestService(
             Id = 0,
             EventId = eventId,
             GroupId = groupId,
-            CreatedByUserId = userId,
+            CreatedByUserId = actor.Id,
             Name = name,
             Email = email,
             Phone = phone,
@@ -116,17 +116,17 @@ public sealed class GuestService(
             10);
     }
     
-    public async Task SubmitGuestForReviewAsync(long guestId, long userId)
+    public async Task SubmitGuestForReviewAsync(long guestId, long loginId)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
-        await EnsureCanManageGuestAsync(guest, userId);
+        await EnsureCanManageGuestAsync(guest, loginId);
         if (guest.Status != "saved")
             throw new InvalidOperationException("Only a saved guest can be submitted for review");
 
-        var actor = await GetActorAsync(userId, guest.EventId);
+        var actor = await GetActorAsync(loginId, guest.EventId);
         guest.Decisions.Add(new Application.Entities.GuestDecision
         {
             ActorUserId = actor.Id,
@@ -140,19 +140,19 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
 
-    public async Task ApproveGuestAsync(long guestId, long approverUserId)
+    public async Task ApproveGuestAsync(long guestId, long approverLoginId)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
         
         // Проверяем разрешение
-        if (!await permissionService.HasPermissionAsync(approverUserId, guest.EventId, "approve_guest"))
+        if (!await permissionService.HasPermissionAsync(approverLoginId, guest.EventId, "approve_guest"))
             throw new UnauthorizedAccessException("No permission to approve guests");
 
-        await EnsureGuestIsInApproverScopeAsync(guest, approverUserId);
+        await EnsureGuestIsInApproverScopeAsync(guest, approverLoginId);
 
-        var actor = await GetActorAsync(approverUserId, guest.EventId);
+        var actor = await GetActorAsync(approverLoginId, guest.EventId);
         var isAdministrator = string.Equals(
             actor.Role?.Name,
             "Administrator",
@@ -194,23 +194,23 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
     
-    public async Task RejectGuestAsync(long guestId, long approverUserId)
+    public async Task RejectGuestAsync(long guestId, long approverLoginId)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
-        if (!await permissionService.HasPermissionAsync(approverUserId, guest.EventId, "approve_guest"))
+        if (!await permissionService.HasPermissionAsync(approverLoginId, guest.EventId, "approve_guest"))
             throw new UnauthorizedAccessException("No permission to reject guests");
 
-        await EnsureGuestIsInApproverScopeAsync(guest, approverUserId);
+        await EnsureGuestIsInApproverScopeAsync(guest, approverLoginId);
 
         if (guest.Status == "saved")
             throw new InvalidOperationException("A saved guest cannot be rejected");
         if (guest.Status == "rejected")
             throw new InvalidOperationException("Guest is already rejected");
 
-        var actor = await GetActorAsync(approverUserId, guest.EventId);
+        var actor = await GetActorAsync(approverLoginId, guest.EventId);
         guest.Decisions.Add(new Application.Entities.GuestDecision
         {
             ActorUserId = actor.Id,
@@ -224,21 +224,21 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
 
-    public async Task InviteGuestAsync(long guestId, long inviterUserId)
+    public async Task InviteGuestAsync(long guestId, long inviterLoginId)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
-        if (!await permissionService.HasPermissionAsync(inviterUserId, guest.EventId, "create_guest"))
+        if (!await permissionService.HasPermissionAsync(inviterLoginId, guest.EventId, "create_guest"))
             throw new UnauthorizedAccessException("No permission to invite guests");
 
-        await EnsureCanManageGuestAsync(guest, inviterUserId);
+        await EnsureCanManageGuestAsync(guest, inviterLoginId);
 
         if (guest.Status != "approved")
             throw new InvalidOperationException("Only an approved guest can be invited");
 
-        var actor = await GetActorAsync(inviterUserId, guest.EventId);
+        var actor = await GetActorAsync(inviterLoginId, guest.EventId);
         guest.Decisions.Add(new Application.Entities.GuestDecision
         {
             ActorUserId = actor.Id,
@@ -252,21 +252,21 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
 
-    public async Task RestoreGuestToSavedAsync(long guestId, long userId)
+    public async Task RestoreGuestToSavedAsync(long guestId, long loginId)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
-        if (!await permissionService.HasPermissionAsync(userId, guest.EventId, "approve_guest"))
+        if (!await permissionService.HasPermissionAsync(loginId, guest.EventId, "approve_guest"))
             throw new UnauthorizedAccessException("No permission to restore guests");
 
-        await EnsureGuestIsInApproverScopeAsync(guest, userId);
+        await EnsureGuestIsInApproverScopeAsync(guest, loginId);
 
         if (guest.Status != "rejected")
             throw new InvalidOperationException("Only a rejected guest can be restored");
 
-        var actor = await GetActorAsync(userId, guest.EventId);
+        var actor = await GetActorAsync(loginId, guest.EventId);
         guest.Decisions.Add(new Application.Entities.GuestDecision
         {
             ActorUserId = actor.Id,
@@ -281,9 +281,9 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
 
-    private async Task EnsureGuestIsInApproverScopeAsync(Application.Entities.Guest guest, long approverUserId)
+    private async Task EnsureGuestIsInApproverScopeAsync(Application.Entities.Guest guest, long approverLoginId)
     {
-        var approverGroupId = await permissionService.GetUserGroupInEventAsync(approverUserId, guest.EventId);
+        var approverGroupId = await permissionService.GetUserGroupInEventAsync(approverLoginId, guest.EventId);
         if (!approverGroupId.HasValue)
             throw new InvalidOperationException("User not assigned to a group");
 
@@ -299,7 +299,7 @@ public sealed class GuestService(
     
     public async Task UpdateGuestAsync(
         long guestId,
-        long userId,
+        long loginId,
         string name,
         string? email,
         string? phone,
@@ -309,13 +309,13 @@ public sealed class GuestService(
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
-        await EnsureCanManageGuestAsync(guest, userId);
+        await EnsureCanManageGuestAsync(guest, loginId);
 
         var targetGroup = await groupRepository.GetByIdAsync(groupId);
         if (targetGroup == null || targetGroup.EventId != guest.EventId)
             throw new InvalidOperationException("Target group does not belong to the guest event");
 
-        var userGroupId = await permissionService.GetUserGroupInEventAsync(userId, guest.EventId);
+        var userGroupId = await permissionService.GetUserGroupInEventAsync(loginId, guest.EventId);
         if (!userGroupId.HasValue ||
             !await permissionService.IsGroupInUserScopeAsync(guest.EventId, groupId, userGroupId.Value))
         {
@@ -334,23 +334,23 @@ public sealed class GuestService(
         await guestRepository.SaveChangesAsync();
     }
     
-    public async Task DeleteGuestAsync(long guestId, long userId)
+    public async Task DeleteGuestAsync(long guestId, long loginId)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
             throw new InvalidOperationException($"Guest {guestId} not found");
 
-        await EnsureCanManageGuestAsync(guest, userId);
+        await EnsureCanManageGuestAsync(guest, loginId);
         await guestRepository.DeleteAsync(guestId);
         await guestRepository.SaveChangesAsync();
     }
 
-    private async Task EnsureCanManageGuestAsync(Application.Entities.Guest guest, long userId)
+    private async Task EnsureCanManageGuestAsync(Application.Entities.Guest guest, long loginId)
     {
-        if (!await permissionService.HasPermissionAsync(userId, guest.EventId, "create_guest"))
+        if (!await permissionService.HasPermissionAsync(loginId, guest.EventId, "create_guest"))
             throw new UnauthorizedAccessException("No permission to manage guests");
 
-        var userGroupId = await permissionService.GetUserGroupInEventAsync(userId, guest.EventId);
+        var userGroupId = await permissionService.GetUserGroupInEventAsync(loginId, guest.EventId);
         if (!userGroupId.HasValue ||
             !await permissionService.IsGroupInUserScopeAsync(guest.EventId, guest.GroupId, userGroupId.Value))
         {

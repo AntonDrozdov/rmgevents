@@ -10,6 +10,8 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
     {
         return await db.Guests
             .Include(x => x.Group)
+            .Include(x => x.CreatedByUser)
+            .ThenInclude(x => x!.Role)
             .Include(x => x.Decisions)
             .FirstOrDefaultAsync(x => x.Id == id);
     }
@@ -19,6 +21,8 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         return await db.Guests
             .Where(x => x.EventId == eventId)
             .Include(x => x.Group)
+            .Include(x => x.CreatedByUser)
+            .ThenInclude(x => x!.Role)
             .Include(x => x.Decisions)
             .ToListAsync();
     }
@@ -70,6 +74,8 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Include(guest => guest.Group)
+            .Include(guest => guest.CreatedByUser)
+            .ThenInclude(user => user!.Role)
             .Include(guest => guest.Decisions)
             .AsSplitQuery()
             .ToListAsync();
@@ -102,6 +108,7 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         var query = db.Guests
             .AsNoTracking()
             .Where(guest => guest.EventId != eventId)
+            .Include(guest => guest.Event)
             .Include(guest => guest.Group)
             .AsQueryable();
 

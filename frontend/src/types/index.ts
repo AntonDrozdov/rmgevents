@@ -116,7 +116,6 @@ export interface GroupTreeDto {
 
 export interface RoleDto {
   id: number;
-  eventId: number;
   name: string;
 }
 
@@ -133,6 +132,8 @@ export interface UserDto {
   additionalName?: string | null;
   email?: string | null;
   tel?: string | null;
+  createdByName?: string | null;
+  createdByRoleName?: string | null;
   createdAt: string;
 }
 
@@ -144,6 +145,7 @@ export interface UserSearchResultDto {
   additionalName?: string | null;
   email?: string | null;
   tel?: string | null;
+  eventName?: string | null;
   roleName?: string | null;
   groupName?: string | null;
 }
@@ -179,6 +181,8 @@ export interface GuestDto {
   email?: string | null;
   phone?: string | null;
   status: "saved" | "on_review" | "admin_review" | "approved" | "invited" | "rejected" | string;
+  createdByName?: string | null;
+  createdByRoleName?: string | null;
   createdAt: string;
   approvedAt?: string | null;
   decisions: GuestDecisionDto[];
@@ -196,6 +200,7 @@ export interface GuestSearchResultDto {
   name: string;
   email?: string | null;
   phone?: string | null;
+  eventName?: string | null;
   groupName?: string | null;
   status: string;
   createdAt: string;

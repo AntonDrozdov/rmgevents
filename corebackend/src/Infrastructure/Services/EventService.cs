@@ -10,7 +10,6 @@ public sealed class EventService(
     IGroupRepository groupRepository,
     IRoleRepository roleRepository,
     IUserRepository userRepository,
-    IRoleService roleService,
     IImageRepository imageRepository,
     ApplicationDbContext db) : IEventService
 {
@@ -54,10 +53,9 @@ public sealed class EventService(
             await eventRepository.SaveChangesAsync();
 
             var rootGroup = await CreateRootGroupAsync(@event.Id, "РМГ", 500);
-            await roleService.SeedDefaultRolesAsync(@event.Id);
 
-            var administratorRole = await roleRepository.GetByEventAndNameAsync(@event.Id, "Administrator")
-                ?? throw new InvalidOperationException("Роль Administrator не создана.");
+            var administratorRole = await roleRepository.GetByNameAsync("Administrator")
+                ?? throw new InvalidOperationException("Роль Administrator не найдена.");
 
             var administrator = new Application.Entities.User
             {
@@ -76,6 +74,10 @@ public sealed class EventService(
             };
 
             await userRepository.AddAsync(administrator);
+            await userRepository.SaveChangesAsync();
+
+            administrator.CreatedByUserId = administrator.Id;
+            await userRepository.UpdateAsync(administrator);
             await userRepository.SaveChangesAsync();
 
             @event.OwnerId = administrator.Id;
@@ -143,7 +145,7 @@ public sealed class EventService(
     {
         var @event = await eventRepository.GetByIdAsync(eventId);
         if (@event == null)
-            throw new InvalidOperationException("РњРµСЂРѕРїСЂРёСЏС‚РёРµ РЅРµ РЅР°Р№РґРµРЅРѕ.");
+            throw new InvalidOperationException("Мероприятие не найдено.");
 
         @event.IsArchived = isArchived;
 

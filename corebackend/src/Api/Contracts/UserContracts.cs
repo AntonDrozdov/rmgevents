@@ -13,6 +13,8 @@ public sealed record UserDto(
     string? AdditionalName,
     string? Email,
     string? Tel,
+    string? CreatedByName,
+    string? CreatedByRoleName,
     DateTimeOffset CreatedAt);
 
 public sealed record UserSearchResultDto(
@@ -23,6 +25,7 @@ public sealed record UserSearchResultDto(
     string? AdditionalName,
     string? Email,
     string? Tel,
+    string? EventName,
     string? RoleName,
     string? GroupName);
 

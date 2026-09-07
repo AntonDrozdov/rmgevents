@@ -16,10 +16,6 @@ public sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
             .HasColumnName("id")
             .ValueGeneratedOnAdd();
         
-        builder.Property(x => x.EventId)
-            .HasColumnName("event_id")
-            .IsRequired();
-        
         builder.Property(x => x.Name)
             .HasColumnName("name")
             .IsRequired()
@@ -28,13 +24,8 @@ public sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
         builder.Property(x => x.CreatedAt)
             .HasColumnName("created_at");
         
-        builder.HasIndex(x => new { x.EventId, x.Name })
+        builder.HasIndex(x => x.Name)
             .IsUnique();
-        
-        builder.HasOne(x => x.Event)
-            .WithMany(x => x.Roles)
-            .HasForeignKey(x => x.EventId)
-            .OnDelete(DeleteBehavior.Cascade);
         
         builder.HasMany(x => x.RolePermissions)
             .WithOne(x => x.Role)

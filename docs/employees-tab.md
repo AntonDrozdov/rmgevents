@@ -25,7 +25,7 @@
 |---|---|
 | `Administrator` | Да, потому что стандартный администратор получает все разрешения |
 | `Manager` | Нет по умолчанию |
-| `Approver` | Нет по умолчанию |
+| `Creator` | Нет по умолчанию |
 | Пользовательская роль | Да, если роли назначено разрешение `create_user` |
 
 Прямой переход по адресу `/events/{eventId}/users` также защищён проверкой `create_user` на фронтенде. До смены временного пароля все защищённые страницы, включая сотрудников, недоступны.
@@ -39,7 +39,8 @@
 - телефон;
 - роль;
 - группа;
-- дата создания;
+- кем создан: ФИО создателя и роль под ФИО;
+- дата и время создания;
 - иконки редактирования, сброса пароля и удаления.
 
 Логин не выводится отдельной колонкой, но загружается с сервера и показывается в форме редактирования.
@@ -60,7 +61,7 @@
 | Email | Да | Проверяется браузером как email |
 | Логин | Да | Изначально автоматически повторяет email |
 | Телефон | Нет | Поле типа `tel` |
-| Роль | Да | Выпадающий список ролей мероприятия; отправляется ID роли |
+| Роль | Да | Выпадающий список глобальных ролей; отправляется ID роли |
 | Группа | Да | Выпадающий иерархический список групп; отправляется ID группы. Для `Administrator` автоматически выбирается корневая группа |
 
 ### Синхронизация email и логина
@@ -71,9 +72,9 @@
 
 При вводе логина, фамилии, имени или email форма с задержкой 450 мс ищет похожие профили сотрудников из других мероприятий. Поиск запускается, когда хотя бы одно из этих значений содержит не менее двух символов, и выполняется по частичному совпадению без учёта регистра. Точные совпадения выводятся выше совпадений по началу и прочих частичных совпадений.
 
-Профили из текущего мероприятия в результатах не показываются. Профили из других мероприятий могут показываться даже тогда, когда тот же Login уже связан с текущим мероприятием: подсказка нужна для переноса данных профиля, а запрет дубля внутри текущего мероприятия остаётся отдельным правилом создания. Для одного Login выводится не более одной записи, всего — до 10 записей. Строка результата содержит логин, ФИО, email, роль и группу; над списком отображаются названия колонок.
+Профили из текущего мероприятия в результатах не показываются. Профили из других мероприятий могут показываться даже тогда, когда тот же Login уже связан с текущим мероприятием: подсказка нужна для переноса данных профиля, а запрет дубля внутри текущего мероприятия остаётся отдельным правилом создания. Для одного Login выводится не более одной записи, всего — до 10 записей. Строка результата содержит логин, ФИО, email, мероприятие-источник, роль и группу; над списком отображаются названия колонок.
 
-Кнопка **«Использовать»** подставляет в форму логин, ФИО, email, телефон, роль и группу выбранного профиля. Роль и группа относятся к конкретному мероприятию, поэтому они сопоставляются со справочниками текущего мероприятия по названию. Если подходящего названия нет, сохраняется текущее значение поля. После подстановки все поля остаются доступными для редактирования.
+Кнопка **«Использовать»** подставляет в форму логин, ФИО, email, телефон, роль и группу выбранного профиля. Роль сопоставляется с глобальным справочником по названию, группа — со справочником групп текущего мероприятия по названию. Если подходящего названия нет, сохраняется текущее значение поля. После подстановки все поля остаются доступными для редактирования.
 
 ### Роли и группы
 
@@ -86,7 +87,7 @@
 - выбрать дочернюю группу нельзя;
 - после смены роли на другую поле группы снова становится доступным.
 
-Это правило проверяется повторно на backend. Роль и группа также должны принадлежать текущему мероприятию.
+Это правило проверяется повторно на backend. Роль должна существовать в глобальном справочнике, а группа должна принадлежать текущему мероприятию.
 
 ### Учётная запись и временный пароль
 
@@ -118,7 +119,7 @@
 
 При выборе роли `Administrator` группа автоматически меняется на корневую и блокируется. Чтобы назначить другую группу, сначала нужно выбрать другую роль.
 
-Администратору доступен полный список ролей выбранного мероприятия. Роль единственного сотрудника с ролью `Administrator` нельзя заменить на другую: сначала нужно назначить `Administrator` ещё одному сотруднику. Ограничение действует и в интерфейсе, и на backend.
+Администратору доступен полный глобальный список ролей. Роль единственного сотрудника с ролью `Administrator` нельзя заменить на другую: сначала нужно назначить `Administrator` ещё одному сотруднику. Ограничение действует и в интерфейсе, и на backend.
 
 Фамилия, имя, email, логин, роль и группа обязательны. После сохранения список загружается повторно.
 
@@ -198,7 +199,7 @@ Login (глобальная учётная запись)
 
 Уникальный индекс `(login_id, event_id)` не позволяет создать два профиля одного Login в одном мероприятии. Один Login может иметь профили в разных мероприятиях.
 
-Связи User с Role и Group обязательны. Удаление Role и Group при наличии пользователей ограничено через `DeleteBehavior.Restrict`. Для роли `Administrator` сервис требует единственную корневую группу мероприятия (`ParentGroupId == null`).
+Связи User с Role и Group обязательны. Role берётся из общего справочника `roles`, а Group остаётся частью конкретного мероприятия. Удаление Role и Group при наличии пользователей ограничено через `DeleteBehavior.Restrict`. Для роли `Administrator` сервис требует единственную корневую группу мероприятия (`ParentGroupId == null`).
 
 ## 2. Основные потоки
 
@@ -219,7 +220,7 @@ sequenceDiagram
         US->>AS: CreateTemporaryLoginAsync(login)
         AS->>DB: создать Login, password=login, must_change=true
     end
-    US->>DB: проверить принадлежность Role и Group мероприятию
+    US->>DB: проверить существование Role и принадлежность Group мероприятию
     opt Role = Administrator
         US->>DB: проверить, что Group — единственная корневая группа
     end
@@ -276,7 +277,7 @@ stateDiagram-v2
 | `PUT /events/{eventId}/users/{userId}` | Изменить логин, профиль, роль и группу | `CanCreateUser` | `204` |
 | `DELETE /events/{eventId}/users/{userId}` | Удалить профиль | `CanCreateUser` | `204` |
 | `POST /events/{eventId}/users/{userId}/reset-password` | Сбросить пароль Login | `CanCreateUser` | `{ temporaryPassword }` |
-| `GET /events/{eventId}/roles` | Справочник ролей | `[Authorize]` | `RoleDto[]` |
+| `GET /events/{eventId}/roles` | Глобальный справочник ролей | `[Authorize]` | `RoleDto[]` |
 | `GET /events/{eventId}/groups` | Дерево групп | `[Authorize]` | `GroupTreeDto[]` |
 | `GET /events/{eventId}/me` | Профиль, логин и permissions текущего пользователя | `[Authorize]` | `UserProfileDto` |
 | `POST /auth/login` | Вход | Анонимно | `{ sid, events, mustChangePassword }` |
@@ -284,11 +285,15 @@ stateDiagram-v2
 
 ### `UserDto`
 
-Содержит `id`, `eventId`, `login`, `roleId`, `roleName`, `groupId`, `groupName`, ФИО, email, телефон и дату создания. Связи `Login`, `Role` и `Group` должны быть загружены репозиторием до маппинга.
+Содержит `id`, `eventId`, `login`, `roleId`, `roleName`, `groupId`, `groupName`, ФИО, email, телефон, `createdByName`, `createdByRoleName` и дату/время создания. Связи `Login`, `Role`, `Group`, `CreatedByUser` и роль создателя должны быть загружены репозиторием до маппинга.
+
+### `UserSearchResultDto`
+
+Используется для блока похожих сотрудников при создании. Помимо логина, ФИО, email, телефона, роли и группы содержит `eventName` — название мероприятия, где найден профиль.
 
 ### Создание
 
-`CreateUserRequest` принимает строковый `login`, данные профиля, `roleId` и `groupId`. Числовой `loginId` наружу больше не передаётся.
+`CreateUserRequest` принимает строковый `login`, данные профиля, `roleId` и `groupId`. Числовой `loginId` наружу больше не передаётся. Backend берёт `LoginId` текущего пользователя из claims, находит его `User`-профиль в текущем мероприятии и записывает `users.created_by_user_id = User.Id` найденного профиля.
 
 ### Обновление
 
@@ -347,7 +352,7 @@ Backend возвращает `temporaryPassword`, который фактиче�
 | Файл | Класс / контракт | Ответственность |
 |---|---|---|
 | `corebackend/src/Api/Controllers/UsersController.cs` | `UsersController` | CRUD сотрудников, сброс пароля, маппинг `UserDto` |
-| `corebackend/src/Api/Controllers/RolesController.cs` | `RolesController` | Список ролей мероприятия |
+| `corebackend/src/Api/Controllers/RolesController.cs` | `RolesController` | Список глобальных ролей |
 | `corebackend/src/Api/Controllers/AuthController.cs` | `AuthController` | Вход, регистрация, смена пароля |
 | `corebackend/src/Api/Controllers/EventsController.cs` | `EventsController` | `/me`, логин и permissions текущего пользователя |
 | `corebackend/src/Api/Contracts/UserContracts.cs` | `UserDto`, `UserSearchResultDto`, `CreateUserRequest`, `UpdateUserRequest`, `ResetPasswordResponse` | Контракты сотрудников |
@@ -378,11 +383,11 @@ Backend возвращает `temporaryPassword`, который фактиче�
 |---|---|---|
 | `Infrastructure/Services/UserService.cs` | `UserService` | Создание/изменение/удаление User, назначение и проверка роли/группы, правило корневой группы и защита последнего Administrator, сброс пароля |
 | `Infrastructure/Services/AuthService.cs` | `AuthService` | Хеширование, Login, временный пароль, SID/JWT, claim обязательной смены |
-| `Infrastructure/Services/RoleService.cs` | `RoleService` | Роли и стандартный набор разрешений |
+| `Infrastructure/Services/RoleService.cs` | `RoleService` | Глобальный справочник ролей и permissions |
 | `Infrastructure/Services/PermissionService.cs` | `PermissionService` | Получение permissions и серверные проверки |
 | `Infrastructure/Repositories/UserRepository.cs` | `UserRepository` | EF Core-запросы с `Include(Login/Role/Group)` и поиск похожих сотрудников |
 | `Infrastructure/Repositories/LoginRepository.cs` | `LoginRepository` | Поиск и сохранение Login |
-| `Infrastructure/Repositories/RoleRepository.cs` | `RoleRepository` | Роли мероприятия с permissions |
+| `Infrastructure/Repositories/RoleRepository.cs` | `RoleRepository` | Глобальные роли с permissions |
 | `Infrastructure/Repositories/GroupRepository.cs` | `GroupRepository` | Группы мероприятия |
 | `Infrastructure/Data/ApplicationDbContext.cs` | `ApplicationDbContext` | DbSet и схема EF Core |
 | `Infrastructure/Data/Configurations/UserConfiguration.cs` | `UserConfiguration` | Таблица `users`, индексы и FK |
@@ -391,7 +396,7 @@ Backend возвращает `temporaryPassword`, который фактиче�
 | `Infrastructure/Authorization/PermissionAuthorizationHandler.cs` | handler | Проверка permission для eventId |
 | `Infrastructure/DependencyInjection.cs` | `AddInfrastructure` | Регистрация сервисов и репозиториев |
 | `WebApi/Program.cs` | конфигурация приложения | Authentication, policies, middleware HTTP 428, миграции при старте |
-| `Infrastructure/Migrations/20260901111221_InitialCreate.cs` | единая начальная миграция | Создаёт актуальную схему, `must_change_password`, bootstrap-admin, стандартные роли и permissions |
+| `Infrastructure/Migrations/20260901111221_InitialCreate.cs` | единая начальная миграция | Создаёт актуальную схему, `must_change_password`, bootstrap-admin, глобальные роли и permissions |
 
 ## 7. Пароли и SID
 
@@ -441,6 +446,7 @@ Middleware в `Program.cs` после `UseAuthentication()` проверяет c
 - `event_id`;
 - `role_id`;
 - `group_id`;
+- `created_by_user_id`;
 - `name`, `surname`, `additional_name`;
 - `email`, `tel`;
 - `created_at`.
@@ -449,13 +455,15 @@ Middleware в `Program.cs` после `UseAuthentication()` проверяет c
 
 - уникальный `(login_id, event_id)`;
 - обязательные FK на Login, Event, Role и Group;
+- nullable self-FK `created_by_user_id` на `users.id`, при удалении создателя значение сбрасывается в `NULL`;
 - Role и Group удаляются с `Restrict`, если используются;
-- роль и группа при создании/изменении проверяются на принадлежность текущему мероприятию;
+- роль при создании/изменении проверяется на существование в глобальном справочнике;
+- группа при создании/изменении проверяется на принадлежность текущему мероприятию;
 - `Administrator` может быть связан только с единственной корневой группой мероприятия;
 - удаление Login каскадно удалит связанные User;
 - удаление User само по себе Login не удаляет.
 
-Миграции применяются автоматически при запуске WebApi через `Database.MigrateAsync()`.
+Миграции применяются автоматически при запуске WebApi через `Database.MigrateAsync()`. Актуальная схема схлопнута в начальную миграцию `20260901111221_InitialCreate`; она сразу создаёт `users.created_by_user_id`, self-FK и индекс.
 
 ## 9. Важные нюансы и текущие ограничения
 

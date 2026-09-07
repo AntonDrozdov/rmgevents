@@ -14,6 +14,8 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .ThenInclude(x => x.Permission)
             .Include(x => x.Group)
             .Include(x => x.Login)
+            .Include(x => x.CreatedByUser)
+            .ThenInclude(x => x!.Role)
             .FirstOrDefaultAsync(x => x.Id == id);
     }
     
@@ -40,6 +42,8 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .ThenInclude(x => x.Permission)
             .Include(x => x.Group)
             .Include(x => x.Login)
+            .Include(x => x.CreatedByUser)
+            .ThenInclude(x => x!.Role)
             .FirstOrDefaultAsync();
     }
     
@@ -50,6 +54,8 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .Include(x => x.Role)
             .Include(x => x.Group)
             .Include(x => x.Login)
+            .Include(x => x.CreatedByUser)
+            .ThenInclude(x => x!.Role)
             .ToListAsync();
     }
 
@@ -65,6 +71,7 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .AsNoTracking()
             .Where(user => user.EventId != eventId)
             .Include(user => user.Login)
+            .Include(user => user.Event)
             .Include(user => user.Role)
             .Include(user => user.Group)
             .AsQueryable();

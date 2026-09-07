@@ -14,7 +14,6 @@ public sealed class Event
     // Navigation properties
     public ImageEntity? LogoImage { get; set; }
     public User? Owner { get; set; }
-    public ICollection<Role> Roles { get; set; } = [];
     public ICollection<Group> Groups { get; set; } = [];
     public ICollection<User> Users { get; set; } = [];
     public ICollection<Guest> Guests { get; set; } = [];

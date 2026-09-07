@@ -345,10 +345,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<long>("EventId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("event_id");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -357,7 +353,7 @@ namespace Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EventId", "Name")
+                    b.HasIndex("Name")
                         .IsUnique();
 
                     b.ToTable("roles", "corebackend");
@@ -397,6 +393,10 @@ namespace Infrastructure.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<long?>("CreatedByUserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_by_user_id");
 
                     b.Property<string>("Email")
                         .HasMaxLength(255)
@@ -441,6 +441,8 @@ namespace Infrastructure.Migrations
                         .HasColumnName("tel");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("EventId");
 
@@ -535,17 +537,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("Guest");
                 });
 
-            modelBuilder.Entity("Application.Entities.Role", b =>
-                {
-                    b.HasOne("Application.Entities.Event", "Event")
-                        .WithMany("Roles")
-                        .HasForeignKey("EventId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Event");
-                });
-
             modelBuilder.Entity("Application.Entities.RolePermission", b =>
                 {
                     b.HasOne("Application.Entities.Permission", "Permission")
@@ -567,6 +558,11 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.User", b =>
                 {
+                    b.HasOne("Application.Entities.User", "CreatedByUser")
+                        .WithMany("CreatedUsers")
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Application.Entities.Event", "Event")
                         .WithMany("Users")
                         .HasForeignKey("EventId")
@@ -591,6 +587,8 @@ namespace Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("CreatedByUser");
+
                     b.Navigation("Event");
 
                     b.Navigation("Group");
@@ -605,8 +603,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("Groups");
 
                     b.Navigation("Guests");
-
-                    b.Navigation("Roles");
 
                     b.Navigation("Users");
                 });
@@ -650,6 +646,8 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("Application.Entities.User", b =>
                 {
                     b.Navigation("CreatedGuests");
+
+                    b.Navigation("CreatedUsers");
 
                     b.Navigation("GuestDecisions");
 

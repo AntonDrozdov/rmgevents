@@ -170,9 +170,9 @@ namespace Infrastructure.Migrations
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasDefaultValue("pending")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("saved")
                         .HasColumnName("status");
 
                     b.HasKey("Id");
@@ -184,6 +184,48 @@ namespace Infrastructure.Migrations
                     b.HasIndex("GroupId");
 
                     b.ToTable("guests", "corebackend");
+                });
+
+            modelBuilder.Entity("Application.Entities.GuestDecision", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("action");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(767)
+                        .HasColumnType("character varying(767)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<long?>("ActorUserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("actor_user_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("GuestId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("guest_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("GuestId", "CreatedAt");
+
+                    b.ToTable("guest_decisions", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.ImageEntity", b =>
@@ -306,10 +348,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<long>("EventId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("event_id");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -318,7 +356,7 @@ namespace Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EventId", "Name")
+                    b.HasIndex("Name")
                         .IsUnique();
 
                     b.ToTable("roles", "corebackend");
@@ -358,6 +396,10 @@ namespace Infrastructure.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<long?>("CreatedByUserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("created_by_user_id");
 
                     b.Property<string>("Email")
                         .HasMaxLength(255)
@@ -402,6 +444,8 @@ namespace Infrastructure.Migrations
                         .HasColumnName("tel");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("EventId");
 
@@ -478,15 +522,22 @@ namespace Infrastructure.Migrations
                     b.Navigation("Group");
                 });
 
-            modelBuilder.Entity("Application.Entities.Role", b =>
+            modelBuilder.Entity("Application.Entities.GuestDecision", b =>
                 {
-                    b.HasOne("Application.Entities.Event", "Event")
-                        .WithMany("Roles")
-                        .HasForeignKey("EventId")
+                    b.HasOne("Application.Entities.User", "ActorUser")
+                        .WithMany("GuestDecisions")
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Application.Entities.Guest", "Guest")
+                        .WithMany("Decisions")
+                        .HasForeignKey("GuestId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("Event");
+                    b.Navigation("ActorUser");
+
+                    b.Navigation("Guest");
                 });
 
             modelBuilder.Entity("Application.Entities.RolePermission", b =>
@@ -510,6 +561,11 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Application.Entities.User", b =>
                 {
+                    b.HasOne("Application.Entities.User", "CreatedByUser")
+                        .WithMany("CreatedUsers")
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Application.Entities.Event", "Event")
                         .WithMany("Users")
                         .HasForeignKey("EventId")
@@ -534,6 +590,8 @@ namespace Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("CreatedByUser");
+
                     b.Navigation("Event");
 
                     b.Navigation("Group");
@@ -549,8 +607,6 @@ namespace Infrastructure.Migrations
 
                     b.Navigation("Guests");
 
-                    b.Navigation("Roles");
-
                     b.Navigation("Users");
                 });
 
@@ -561,6 +617,11 @@ namespace Infrastructure.Migrations
                     b.Navigation("Guests");
 
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("Application.Entities.Guest", b =>
+                {
+                    b.Navigation("Decisions");
                 });
 
             modelBuilder.Entity("Application.Entities.ImageEntity", b =>
@@ -589,9 +650,14 @@ namespace Infrastructure.Migrations
                 {
                     b.Navigation("CreatedGuests");
 
+                    b.Navigation("CreatedUsers");
+
+                    b.Navigation("GuestDecisions");
+
                     b.Navigation("OwnedEvents");
                 });
 #pragma warning restore 612, 618
         }
     }
 }
+

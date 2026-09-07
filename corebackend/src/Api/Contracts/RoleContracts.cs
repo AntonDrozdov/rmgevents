@@ -7,7 +7,6 @@ public sealed record PermissionDto(
 
 public sealed record RoleDto(
     long Id,
-    long EventId,
     string Name,
     List<PermissionDto> Permissions,
     DateTimeOffset CreatedAt);

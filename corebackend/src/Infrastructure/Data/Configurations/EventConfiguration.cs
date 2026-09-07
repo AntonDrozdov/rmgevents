@@ -56,11 +56,6 @@ public sealed class EventConfiguration : IEntityTypeConfiguration<Event>
             .HasForeignKey(x => x.OwnerId)
             .OnDelete(DeleteBehavior.Restrict);
         
-        builder.HasMany(x => x.Roles)
-            .WithOne(x => x.Event)
-            .HasForeignKey(x => x.EventId)
-            .OnDelete(DeleteBehavior.Cascade);
-        
         builder.HasMany(x => x.Groups)
             .WithOne(x => x.Event)
             .HasForeignKey(x => x.EventId)

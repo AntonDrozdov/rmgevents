@@ -10,6 +10,8 @@ import { flattenGroups } from "../utils/groups";
 const formatUserName = (user: Pick<UserDto, "surname" | "name" | "additionalName">) =>
   [user.surname, user.name, user.additionalName].filter(Boolean).join(" ");
 
+const formatDateTime = (value: string) => new Date(value).toLocaleString("ru-RU");
+
 const emptyForm = (groupId = "", roleId = "") => ({
   surname: "",
   name: "",
@@ -448,6 +450,7 @@ export const UsersPage: React.FC = () => {
                   <th>Телефон</th>
                   <th>Роль</th>
                   <th>Группа</th>
+                  <th>Кем создан</th>
                   <th>Создан</th>
                   <th className="actions-column" aria-label="Действия" />
                 </tr>
@@ -473,7 +476,11 @@ export const UsersPage: React.FC = () => {
                     <td>{user.tel || "-"}</td>
                     <td>{user.roleName || "-"}</td>
                     <td>{user.groupName || "-"}</td>
-                    <td>{new Date(user.createdAt).toLocaleDateString("ru-RU")}</td>
+                    <td>
+                      <div>{user.createdByName || "-"}</div>
+                      {user.createdByRoleName && <small>{user.createdByRoleName}</small>}
+                    </td>
+                    <td>{formatDateTime(user.createdAt)}</td>
                     <td className="actions-column">
                       <div className="table-icon-actions">
                         <button
@@ -630,6 +637,7 @@ export const UsersPage: React.FC = () => {
                       <span>Логин</span>
                       <span>ФИО</span>
                       <span>Email</span>
+                      <span>Мероприятие</span>
                       <span>Роль</span>
                       <span>Группа</span>
                     </div>
@@ -641,6 +649,7 @@ export const UsersPage: React.FC = () => {
                         <span>{user.login}</span>
                         <span>{formatUserName(user)}</span>
                         <span>{user.email || "—"}</span>
+                        <span title={user.eventName || undefined}>{user.eventName || "—"}</span>
                         <span>{user.roleName || "—"}</span>
                         <span>{user.groupName || "—"}</span>
                       </div>

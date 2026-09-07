@@ -67,6 +67,48 @@ namespace Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "roles",
+                schema: "corebackend",
+                columns: table => new
+                {
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_roles", x => x.id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "role_permissions",
+                schema: "corebackend",
+                columns: table => new
+                {
+                    role_id = table.Column<long>(type: "bigint", nullable: false),
+                    permission_id = table.Column<long>(type: "bigint", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_role_permissions", x => new { x.role_id, x.permission_id });
+                    table.ForeignKey(
+                        name: "FK_role_permissions_permissions_permission_id",
+                        column: x => x.permission_id,
+                        principalSchema: "corebackend",
+                        principalTable: "permissions",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_role_permissions_roles_role_id",
+                        column: x => x.role_id,
+                        principalSchema: "corebackend",
+                        principalTable: "roles",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "events",
                 schema: "corebackend",
                 columns: table => new
@@ -126,56 +168,6 @@ namespace Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "roles",
-                schema: "corebackend",
-                columns: table => new
-                {
-                    id = table.Column<long>(type: "bigint", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    event_id = table.Column<long>(type: "bigint", nullable: false),
-                    name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
-                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_roles", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_roles_events_event_id",
-                        column: x => x.event_id,
-                        principalSchema: "corebackend",
-                        principalTable: "events",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "role_permissions",
-                schema: "corebackend",
-                columns: table => new
-                {
-                    role_id = table.Column<long>(type: "bigint", nullable: false),
-                    permission_id = table.Column<long>(type: "bigint", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_role_permissions", x => new { x.role_id, x.permission_id });
-                    table.ForeignKey(
-                        name: "FK_role_permissions_permissions_permission_id",
-                        column: x => x.permission_id,
-                        principalSchema: "corebackend",
-                        principalTable: "permissions",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_role_permissions_roles_role_id",
-                        column: x => x.role_id,
-                        principalSchema: "corebackend",
-                        principalTable: "roles",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "users",
                 schema: "corebackend",
                 columns: table => new
@@ -186,6 +178,7 @@ namespace Infrastructure.Migrations
                     event_id = table.Column<long>(type: "bigint", nullable: false),
                     role_id = table.Column<long>(type: "bigint", nullable: false),
                     group_id = table.Column<long>(type: "bigint", nullable: false),
+                    created_by_user_id = table.Column<long>(type: "bigint", nullable: true),
                     name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     surname = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     additional_name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
@@ -225,6 +218,13 @@ namespace Infrastructure.Migrations
                         principalTable: "roles",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_users_users_created_by_user_id",
+                        column: x => x.created_by_user_id,
+                        principalSchema: "corebackend",
+                        principalTable: "users",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.SetNull);
                 });
 
             migrationBuilder.CreateTable(
@@ -240,7 +240,7 @@ namespace Infrastructure.Migrations
                     name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: false),
                     email = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
                     phone = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true),
-                    status = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false, defaultValue: "pending"),
+                    status = table.Column<string>(type: "character varying(30)", maxLength: 30, nullable: false, defaultValue: "saved"),
                     meta = table.Column<string>(type: "jsonb", nullable: true),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     approved_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
@@ -271,6 +271,38 @@ namespace Infrastructure.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
+            migrationBuilder.CreateTable(
+                name: "guest_decisions",
+                schema: "corebackend",
+                columns: table => new
+                {
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    guest_id = table.Column<long>(type: "bigint", nullable: false),
+                    actor_user_id = table.Column<long>(type: "bigint", nullable: true),
+                    actor_name = table.Column<string>(type: "character varying(767)", maxLength: 767, nullable: false),
+                    action = table.Column<string>(type: "character varying(30)", maxLength: 30, nullable: false),
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_guest_decisions", x => x.id);
+                    table.ForeignKey(
+                        name: "FK_guest_decisions_guests_guest_id",
+                        column: x => x.guest_id,
+                        principalSchema: "corebackend",
+                        principalTable: "guests",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_guest_decisions_users_actor_user_id",
+                        column: x => x.actor_user_id,
+                        principalSchema: "corebackend",
+                        principalTable: "users",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.SetNull);
+                });
+
             migrationBuilder.CreateIndex(
                 name: "IX_events_logo_image_id",
                 schema: "corebackend",
@@ -295,6 +327,18 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 table: "groups",
                 column: "parent_group_id");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_guest_decisions_actor_user_id",
+                schema: "corebackend",
+                table: "guest_decisions",
+                column: "actor_user_id");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_guest_decisions_guest_id_created_at",
+                schema: "corebackend",
+                table: "guest_decisions",
+                columns: new[] { "guest_id", "created_at" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_guests_created_by_user_id",
@@ -335,10 +379,10 @@ namespace Infrastructure.Migrations
                 column: "permission_id");
 
             migrationBuilder.CreateIndex(
-                name: "IX_roles_event_id_name",
+                name: "IX_roles_name",
                 schema: "corebackend",
                 table: "roles",
-                columns: new[] { "event_id", "name" },
+                column: "name",
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -346,6 +390,12 @@ namespace Infrastructure.Migrations
                 schema: "corebackend",
                 table: "users",
                 column: "event_id");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_users_created_by_user_id",
+                schema: "corebackend",
+                table: "users",
+                column: "created_by_user_id");
 
             migrationBuilder.CreateIndex(
                 name: "IX_users_group_id",
@@ -392,6 +442,34 @@ namespace Infrastructure.Migrations
 
             migrationBuilder.InsertData(
                 schema: "corebackend",
+                table: "roles",
+                columns: new[] { "id", "name", "created_at" },
+                values: new object[,]
+                {
+                    { 1L, "Administrator", createdAt },
+                    { 2L, "Manager", createdAt },
+                    { 3L, "Creator", createdAt }
+                });
+
+            migrationBuilder.InsertData(
+                schema: "corebackend",
+                table: "role_permissions",
+                columns: new[] { "role_id", "permission_id" },
+                values: new object[,]
+                {
+                    { 1L, 1L },
+                    { 1L, 2L },
+                    { 1L, 3L },
+                    { 1L, 4L },
+                    { 1L, 5L },
+                    { 2L, 2L },
+                    { 2L, 3L },
+                    { 2L, 4L },
+                    { 3L, 2L }
+                });
+
+            migrationBuilder.InsertData(
+                schema: "corebackend",
                 table: "events",
                 columns: new[]
                 {
@@ -417,42 +495,15 @@ namespace Infrastructure.Migrations
 
             migrationBuilder.InsertData(
                 schema: "corebackend",
-                table: "roles",
-                columns: new[] { "id", "event_id", "name", "created_at" },
-                values: new object[,]
-                {
-                    { 1L, 1L, "Administrator", createdAt },
-                    { 2L, 1L, "Manager", createdAt },
-                    { 3L, 1L, "Approver", createdAt }
-                });
-
-            migrationBuilder.InsertData(
-                schema: "corebackend",
-                table: "role_permissions",
-                columns: new[] { "role_id", "permission_id" },
-                values: new object[,]
-                {
-                    { 1L, 1L },
-                    { 1L, 2L },
-                    { 1L, 3L },
-                    { 1L, 4L },
-                    { 1L, 5L },
-                    { 2L, 2L },
-                    { 2L, 3L },
-                    { 3L, 4L }
-                });
-
-            migrationBuilder.InsertData(
-                schema: "corebackend",
                 table: "users",
                 columns: new[]
                 {
-                    "id", "login_id", "event_id", "role_id", "group_id", "name", "surname",
+                    "id", "login_id", "event_id", "role_id", "group_id", "created_by_user_id", "name", "surname",
                     "additional_name", "email", "tel", "meta", "created_at"
                 },
                 values: new object[]
                 {
-                    1L, 1L, 1L, 1L, 1L, "Admin", "Administrator", null,
+                    1L, 1L, 1L, 1L, 1L, 1L, "Admin", "Administrator", null,
                     "admin@example.com", null, null, createdAt
                 });
 
@@ -491,11 +542,15 @@ namespace Infrastructure.Migrations
                 table: "events");
 
             migrationBuilder.DropTable(
-                name: "guests",
+                name: "guest_decisions",
                 schema: "corebackend");
 
             migrationBuilder.DropTable(
                 name: "role_permissions",
+                schema: "corebackend");
+
+            migrationBuilder.DropTable(
+                name: "guests",
                 schema: "corebackend");
 
             migrationBuilder.DropTable(

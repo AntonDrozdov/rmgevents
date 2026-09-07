@@ -11,6 +11,19 @@ namespace Api.Controllers;
 [Authorize]
 public sealed class GuestsController(IGuestService guestService) : ControllerBase
 {
+    private static string FormatUserName(Application.Entities.User? user)
+    {
+        if (user == null)
+            return string.Empty;
+
+        return string.Join(" ", new[]
+        {
+            user.Surname,
+            user.Name,
+            user.AdditionalName
+        }.Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
     private static GuestDto MapGuest(Application.Entities.Guest guest) =>
         new(
             guest.Id,
@@ -21,6 +34,8 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
             guest.Email,
             guest.Phone,
             guest.Status,
+            FormatUserName(guest.CreatedByUser),
+            guest.CreatedByUser?.Role?.Name,
             guest.CreatedAt,
             guest.ApprovedAt,
             guest.Decisions
@@ -65,6 +80,7 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
             guest.Name,
             guest.Email,
             guest.Phone,
+            guest.Event?.Name,
             guest.Group?.Name,
             guest.Status,
             guest.CreatedAt)).ToList());
@@ -76,13 +92,13 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
         long eventId,
         CreateGuestRequest request)
     {
-        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         
         try
         {
             var guest = await guestService.CreateGuestAsync(
                 eventId,
-                userId,
+                loginId,
                 request.Name,
                 request.Email,
                 request.Phone,
@@ -109,17 +125,17 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
         long guestId,
         ApproveGuestRequest request)
     {
-        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         
         try
         {
             if (request.Approve)
             {
-                await guestService.ApproveGuestAsync(guestId, userId);
+                await guestService.ApproveGuestAsync(guestId, loginId);
             }
             else
             {
-                await guestService.RejectGuestAsync(guestId, userId);
+                await guestService.RejectGuestAsync(guestId, loginId);
             }
             
             var guest = await guestService.GetGuestAsync(guestId);
@@ -142,11 +158,11 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
     [HttpPost("{guestId}/submit-for-review")]
     public async Task<ActionResult<GuestDto>> SubmitGuestForReview(long eventId, long guestId)
     {
-        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
         try
         {
-            await guestService.SubmitGuestForReviewAsync(guestId, userId);
+            await guestService.SubmitGuestForReviewAsync(guestId, loginId);
             var guest = await guestService.GetGuestAsync(guestId);
             return guest == null ? NotFound() : Ok(MapGuest(guest));
         }
@@ -164,11 +180,11 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
     [HttpPost("{guestId}/invite")]
     public async Task<ActionResult<GuestDto>> InviteGuest(long eventId, long guestId)
     {
-        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
         try
         {
-            await guestService.InviteGuestAsync(guestId, userId);
+            await guestService.InviteGuestAsync(guestId, loginId);
             var guest = await guestService.GetGuestAsync(guestId);
             return guest == null ? NotFound() : Ok(MapGuest(guest));
         }
@@ -186,11 +202,11 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
     [HttpPost("{guestId}/restore-to-saved")]
     public async Task<ActionResult<GuestDto>> RestoreGuestToSaved(long eventId, long guestId)
     {
-        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
         try
         {
-            await guestService.RestoreGuestToSavedAsync(guestId, userId);
+            await guestService.RestoreGuestToSavedAsync(guestId, loginId);
             var guest = await guestService.GetGuestAsync(guestId);
             return guest == null ? NotFound() : Ok(MapGuest(guest));
         }
@@ -211,13 +227,13 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
         long guestId,
         UpdateGuestRequest request)
     {
-        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
         try
         {
             await guestService.UpdateGuestAsync(
                 guestId,
-                userId,
+                loginId,
                 request.Name,
                 request.Email,
                 request.Phone,
@@ -240,11 +256,11 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
     [HttpDelete("{guestId}")]
     public async Task<IActionResult> DeleteGuest(long eventId, long guestId)
     {
-        var userId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
         try
         {
-            await guestService.DeleteGuestAsync(guestId, userId);
+            await guestService.DeleteGuestAsync(guestId, loginId);
             return NoContent();
         }
         catch (UnauthorizedAccessException ex)

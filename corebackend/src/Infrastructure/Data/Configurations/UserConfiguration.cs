@@ -31,6 +31,9 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(x => x.GroupId)
             .HasColumnName("group_id")
             .IsRequired();
+
+        builder.Property(x => x.CreatedByUserId)
+            .HasColumnName("created_by_user_id");
         
         builder.Property(x => x.Name)
             .HasColumnName("name")
@@ -63,6 +66,8 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         
         builder.HasIndex(x => new { x.LoginId, x.EventId })
             .IsUnique();
+
+        builder.HasIndex(x => x.CreatedByUserId);
         
         builder.HasOne(x => x.Login)
             .WithMany(x => x.Users)
@@ -83,6 +88,11 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .WithMany(x => x.Users)
             .HasForeignKey(x => x.GroupId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.CreatedByUser)
+            .WithMany(x => x.CreatedUsers)
+            .HasForeignKey(x => x.CreatedByUserId)
+            .OnDelete(DeleteBehavior.SetNull);
         
         builder.HasMany(x => x.CreatedGuests)
             .WithOne(x => x.CreatedByUser)

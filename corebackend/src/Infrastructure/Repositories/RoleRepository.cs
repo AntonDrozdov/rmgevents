@@ -14,22 +14,21 @@ public sealed class RoleRepository(ApplicationDbContext db) : IRoleRepository
             .FirstOrDefaultAsync(x => x.Id == id);
     }
     
-    public async Task<List<Application.Entities.Role>> GetByEventIdAsync(long eventId)
+    public async Task<List<Application.Entities.Role>> GetAllAsync()
     {
         return await db.Roles
-            .Where(x => x.EventId == eventId)
             .Include(x => x.RolePermissions)
             .ThenInclude(x => x.Permission)
+            .OrderBy(x => x.Name)
             .ToListAsync();
     }
     
-    public async Task<Application.Entities.Role?> GetByEventAndNameAsync(long eventId, string name)
+    public async Task<Application.Entities.Role?> GetByNameAsync(string name)
     {
         return await db.Roles
-            .Where(x => x.EventId == eventId && x.Name == name)
             .Include(x => x.RolePermissions)
             .ThenInclude(x => x.Permission)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(x => x.Name == name);
     }
     
     public async Task AddAsync(Application.Entities.Role role)

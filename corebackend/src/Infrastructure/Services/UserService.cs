@@ -16,6 +16,7 @@ public sealed class UserService(
 {
     public async Task<Application.Entities.User> CreateUserAsync(
         long eventId,
+        long creatorLoginId,
         string loginValue,
         string name,
         string surname,
@@ -29,6 +30,8 @@ public sealed class UserService(
             throw new InvalidOperationException("Login is required");
 
         await ValidateRoleAndGroupAsync(eventId, roleId, groupId);
+        var creator = await userRepository.GetByLoginAndEventAsync(creatorLoginId, eventId)
+            ?? throw new InvalidOperationException("Профиль создателя сотрудника не найден.");
 
         try
         {
@@ -46,6 +49,7 @@ public sealed class UserService(
                 EventId = eventId,
                 RoleId = roleId,
                 GroupId = groupId,
+                CreatedByUserId = creator.Id,
                 Name = name,
                 Surname = surname,
                 AdditionalName = additionalName,
@@ -246,8 +250,8 @@ public sealed class UserService(
     private async Task ValidateRoleAndGroupAsync(long eventId, long roleId, long groupId)
     {
         var role = await roleRepository.GetByIdAsync(roleId);
-        if (role == null || role.EventId != eventId)
-            throw new InvalidOperationException("Выбранная роль не принадлежит мероприятию.");
+        if (role == null)
+            throw new InvalidOperationException("Выбранная роль не найдена.");
 
         var group = await groupRepository.GetByIdAsync(groupId);
         if (group == null || group.EventId != eventId)

@@ -10,7 +10,6 @@ public sealed class EventRepository(ApplicationDbContext db) : IEventRepository
     {
         return await db.Events
             .Include(x => x.Owner)
-            .Include(x => x.Roles)
             .Include(x => x.Groups)
             .Include(x => x.Users)
             .FirstOrDefaultAsync(x => x.Id == id);

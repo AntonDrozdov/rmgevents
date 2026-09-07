@@ -9,6 +9,8 @@ public sealed record GuestDto(
     string? Email,
     string? Phone,
     string Status,
+    string? CreatedByName,
+    string? CreatedByRoleName,
     DateTimeOffset CreatedAt,
     DateTimeOffset? ApprovedAt,
     List<GuestDecisionDto> Decisions);
@@ -24,6 +26,7 @@ public sealed record GuestSearchResultDto(
     string Name,
     string? Email,
     string? Phone,
+    string? EventName,
     string? GroupName,
     string Status,
     DateTimeOffset CreatedAt);

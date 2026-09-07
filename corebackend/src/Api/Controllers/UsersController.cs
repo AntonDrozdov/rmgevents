@@ -3,6 +3,7 @@ using Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using System.Security.Claims;
 
 namespace Api.Controllers;
 
@@ -13,6 +14,19 @@ public sealed class UsersController(
     IUserService userService,
     ILogger<UsersController> logger) : ControllerBase
 {
+    private static string FormatUserName(Application.Entities.User? user)
+    {
+        if (user == null)
+            return string.Empty;
+
+        return string.Join(" ", new[]
+        {
+            user.Surname,
+            user.Name,
+            user.AdditionalName
+        }.Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
     private static UserDto MapUser(Application.Entities.User user) =>
         new(
             user.Id,
@@ -27,6 +41,8 @@ public sealed class UsersController(
             user.AdditionalName,
             user.Email,
             user.Tel,
+            FormatUserName(user.CreatedByUser),
+            user.CreatedByUser?.Role?.Name,
             user.CreatedAt);
 
     [HttpGet]
@@ -59,6 +75,7 @@ public sealed class UsersController(
             user.AdditionalName,
             user.Email,
             user.Tel,
+            user.Event?.Name,
             user.Role?.Name,
             user.Group?.Name)).ToList());
     }
@@ -69,10 +86,13 @@ public sealed class UsersController(
         long eventId,
         CreateUserRequest request)
     {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
         try
         {
             var user = await userService.CreateUserAsync(
                 eventId,
+                loginId,
                 request.Login.Trim(),
                 request.Name,
                 request.Surname,

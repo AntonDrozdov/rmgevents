@@ -4,6 +4,7 @@ public interface IUserService
 {
     Task<Entities.User> CreateUserAsync(
         long eventId,
+        long creatorLoginId,
         string loginValue,
         string name,
         string surname,

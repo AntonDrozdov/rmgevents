@@ -16,7 +16,6 @@ public sealed class RolesController(IRoleService roleService) : ControllerBase
         var roles = await roleService.GetRolesByEventAsync(eventId);
         var result = roles.Select(role => new RoleDto(
             role.Id,
-            role.EventId,
             role.Name,
             role.RolePermissions
                 .Where(item => item.Permission != null)

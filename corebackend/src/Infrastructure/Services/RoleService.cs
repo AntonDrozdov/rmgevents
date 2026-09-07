@@ -8,14 +8,12 @@ public sealed class RoleService(
     IPermissionRepository permissionRepository) : IRoleService
 {
     public async Task<Application.Entities.Role> CreateRoleAsync(
-        long eventId,
         string name,
         List<string> permissionCodes)
     {
         var role = new Application.Entities.Role
         {
             Id = 0,
-            EventId = eventId,
             Name = name,
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -48,7 +46,7 @@ public sealed class RoleService(
     
     public async Task<List<Application.Entities.Role>> GetRolesByEventAsync(long eventId)
     {
-        return await roleRepository.GetByEventIdAsync(eventId);
+        return await roleRepository.GetAllAsync();
     }
     
     public async Task UpdateRoleAsync(long roleId, string name, List<string> permissionCodes)
@@ -81,29 +79,5 @@ public sealed class RoleService(
     {
         await roleRepository.DeleteAsync(roleId);
         await roleRepository.SaveChangesAsync();
-    }
-    
-    public async Task SeedDefaultRolesAsync(long eventId)
-    {
-        var permissions = await permissionRepository.GetAllAsync();
-        
-        // Administrator - all permissions
-        var adminRole = await CreateRoleAsync(
-            eventId,
-            "Administrator",
-            permissions.Select(p => p.Code).ToList());
-        
-        // Manager - create_guest, create_group, approve_guest
-        var managerPermissions = new[] { "create_guest", "create_group", "approve_guest" };
-        await CreateRoleAsync(
-            eventId,
-            "Manager",
-            permissions.Where(p => managerPermissions.Contains(p.Code)).Select(p => p.Code).ToList());
-        
-        // Creator - create_guest
-        await CreateRoleAsync(
-            eventId,
-            "Creator",
-            new List<string> { "create_guest" });
     }
 }

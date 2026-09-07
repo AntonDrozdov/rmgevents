@@ -27,7 +27,7 @@
 |---|---|
 | `Administrator` | Да, стандартный администратор получает все разрешения |
 | `Manager` | Да, стандартному менеджеру назначается `create_group` |
-| `Approver` | Нет по умолчанию |
+| `Creator` | Нет по умолчанию |
 | Пользовательская роль | Да, если роли назначено `create_group` |
 
 Разрешение проверяется для текущего мероприятия. Наличие такого же разрешения в другом мероприятии не даёт доступ к группам выбранного мероприятия.
@@ -373,7 +373,7 @@ Frontend-проверка нужна для интерфейса, но не сч
 | `Infrastructure/Services/PermissionService.cs` | `PermissionService` | `create_group`, группа пользователя, проверка собственной группы и потомков |
 | `Infrastructure/Services/EventService.cs` | `EventService` | Автоматическое создание корневой группы |
 | `Infrastructure/Services/GuestService.cs` | `GuestService` | Использование квоты группы при создании гостей |
-| `Infrastructure/Services/RoleService.cs` | `RoleService` | Назначает `create_group` стандартным Administrator и Manager |
+| `Infrastructure/Services/RoleService.cs` | `RoleService` | Отдаёт глобальный справочник ролей с permissions |
 | `Infrastructure/Repositories/GroupRepository.cs` | `GroupRepository` | EF Core-запросы дерева, детей и обход потомков в ширину |
 | `Infrastructure/Repositories/UserRepository.cs` | `UserRepository` | `GetByGroupIdAsync` для защиты удаления |
 | `Infrastructure/Repositories/GuestRepository.cs` | `GuestRepository` | `GetByGroupIdAsync` для защиты удаления |

@@ -369,14 +369,14 @@ button:disabled {
 .similar-employee-data {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr) minmax(0, 1.2fr) minmax(0, .8fr) minmax(0, .8fr);
+  grid-template-columns: minmax(0, .7fr) minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, .9fr) minmax(0, .7fr) minmax(0, .7fr);
   gap: 8px;
   min-width: 0;
   font-size: 12px;
 }
 
 .similar-guest-data {
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.2fr) minmax(0, .9fr) minmax(0, .9fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, .85fr) minmax(0, .9fr) minmax(0, .75fr) minmax(0, .8fr);
 }
 
 .similar-employee-data span {
