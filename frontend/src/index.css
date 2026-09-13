@@ -2249,14 +2249,14 @@ code {
 .settings-page {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
-  min-height: 100vh;
+  min-height: calc(100vh / var(--app-ui-scale));
   min-width: 0;
 }
 
 .settings-sidebar {
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: calc(100vh / var(--app-ui-scale));
   overflow-y: auto;
   display: grid;
   align-content: start;
