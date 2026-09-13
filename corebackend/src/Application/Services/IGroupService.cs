@@ -1,5 +1,11 @@
 namespace Application.Services;
 
+public sealed record ResetGroupsResult(
+    int GroupsDeleted,
+    int GuestsMoved,
+    int UsersMoved,
+    int RootQuota);
+
 public interface IGroupService
 {
     Task<Entities.Group> CreateGroupAsync(long eventId, long userId, string name, int quota, long? parentGroupId);
@@ -10,4 +16,5 @@ public interface IGroupService
     Task ValidateQuotaHierarchyAsync(long groupId, int newQuota);
     Task UpdateGroupAsync(long eventId, long userId, long groupId, string name, int quota);
     Task DeleteGroupAsync(long eventId, long userId, long groupId);
+    Task<ResetGroupsResult> ResetGroupsAsync(long eventId, long userId);
 }

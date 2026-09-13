@@ -8,11 +8,12 @@ public interface IEventService
     Task<List<Entities.Event>> GetEventsByOwnerAsync(long ownerId);
     Task<Entities.Event> UpdateEventAsync(
         long eventId,
+        long actorLoginId,
         string name,
         string? description,
         DateOnly eventDate,
         long? logoImageId);
-    Task<Entities.Event> UpdateEventArchiveStatusAsync(long eventId, bool isArchived);
+    Task<Entities.Event> UpdateEventArchiveStatusAsync(long eventId, long actorLoginId, bool isArchived);
     Task DeleteEventAsync(long eventId);
     Task<Entities.Group> CreateRootGroupAsync(long eventId, string name, int quota);
 }

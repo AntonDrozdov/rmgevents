@@ -1,23 +1,34 @@
 import axios, { AxiosInstance } from "axios";
 import {
   ApproveGuestRequest,
+  ApplyOriginalStructureResultDto,
+  CategoryDto,
+  CreateCategoryRequest,
   CreateEventRequest,
   CreateGroupRequest,
   CreateGuestRequest,
+  CreateTagRequest,
   CreateUserRequest,
   EventDetailDto,
   EventDto,
+  EventLogDto,
+  EventLogFilterOptionsDto,
   GroupTreeDto,
   GuestDto,
   GuestSearchResultDto,
   LoginRequest,
   LoginResponse,
+  OrganizationImportResultDto,
   PagedResultDto,
+  ResetGroupsResultDto,
   RoleDto,
+  TagDto,
+  UpdateCategoryRequest,
   UpdateGroupRequest,
   UpdateEventArchiveStatusRequest,
   UpdateGuestRequest,
   UpdateEventRequest,
+  UpdateTagRequest,
   UpdateUserRequest,
   UserDto,
   UserSearchResultDto,
@@ -154,12 +165,115 @@ class ApiClient {
     await this.client.delete(`/events/${eventId}/groups/${groupId}`);
   }
 
+  async importOriginalStructure(
+    eventId: string | number,
+    file: File
+  ): Promise<OrganizationImportResultDto> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await this.client.post<OrganizationImportResultDto>(
+      `/events/${eventId}/groups/import-original-structure`,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return response.data;
+  }
+
+  async applyOriginalStructure(eventId: string | number): Promise<ApplyOriginalStructureResultDto> {
+    const response = await this.client.post<ApplyOriginalStructureResultDto>(
+      `/events/${eventId}/groups/apply-original-structure`
+    );
+    return response.data;
+  }
+
+  async resetGroups(eventId: string | number): Promise<ResetGroupsResultDto> {
+    const response = await this.client.post<ResetGroupsResultDto>(`/events/${eventId}/groups/reset`);
+    return response.data;
+  }
+
+  async getCategories(eventId: string | number): Promise<CategoryDto[]> {
+    const response = await this.client.get<CategoryDto[]>(`/events/${eventId}/categories`);
+    return response.data;
+  }
+
+  async createCategory(eventId: string | number, request: CreateCategoryRequest): Promise<CategoryDto> {
+    const response = await this.client.post<CategoryDto>(`/events/${eventId}/categories`, request);
+    return response.data;
+  }
+
+  async updateCategory(
+    eventId: string | number,
+    categoryId: number,
+    request: UpdateCategoryRequest
+  ): Promise<CategoryDto> {
+    const response = await this.client.put<CategoryDto>(
+      `/events/${eventId}/categories/${categoryId}`,
+      request
+    );
+    return response.data;
+  }
+
+  async deleteCategory(eventId: string | number, categoryId: number): Promise<void> {
+    await this.client.delete(`/events/${eventId}/categories/${categoryId}`);
+  }
+
+  async getTags(eventId: string | number): Promise<TagDto[]> {
+    const response = await this.client.get<TagDto[]>(`/events/${eventId}/tags`);
+    return response.data;
+  }
+
+  async createTag(eventId: string | number, request: CreateTagRequest): Promise<TagDto> {
+    const response = await this.client.post<TagDto>(`/events/${eventId}/tags`, request);
+    return response.data;
+  }
+
+  async updateTag(
+    eventId: string | number,
+    tagId: number,
+    request: UpdateTagRequest
+  ): Promise<TagDto> {
+    const response = await this.client.put<TagDto>(
+      `/events/${eventId}/tags/${tagId}`,
+      request
+    );
+    return response.data;
+  }
+
+  async deleteTag(eventId: string | number, tagId: number): Promise<void> {
+    await this.client.delete(`/events/${eventId}/tags/${tagId}`);
+  }
+
+  async getEventLogs(
+    eventId: string | number,
+    query: {
+      page?: number;
+      pageSize?: number;
+      userId?: number;
+      action?: string;
+      entityType?: string;
+      search?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    } = {}
+  ): Promise<PagedResultDto<EventLogDto>> {
+    const response = await this.client.get<PagedResultDto<EventLogDto>>(`/events/${eventId}/logs`, {
+      params: query,
+    });
+    return response.data;
+  }
+
+  async getEventLogFilterOptions(eventId: string | number): Promise<EventLogFilterOptionsDto> {
+    const response = await this.client.get<EventLogFilterOptionsDto>(`/events/${eventId}/logs/filter-options`);
+    return response.data;
+  }
+
   async getGuests(
     eventId: string | number,
-    query: { page?: number; pageSize?: number; search?: string; status?: string } = {}
+    query: { page?: number; pageSize?: number; search?: string; status?: string; categoryId?: number; tagIds?: number[] } = {}
   ): Promise<PagedResultDto<GuestDto>> {
     const response = await this.client.get<PagedResultDto<GuestDto>>(`/events/${eventId}/guests`, {
       params: query,
+      paramsSerializer: { indexes: null },
     });
     return response.data;
   }

@@ -27,3 +27,9 @@ public sealed record GroupTreeDto(
     int UsedQuota,
     int AvailableQuota,
     List<GroupTreeDto> Children);
+
+public sealed record ResetGroupsResultDto(
+    int GroupsDeleted,
+    int GuestsMoved,
+    int UsersMoved,
+    int RootQuota);

@@ -34,16 +34,23 @@ public static class DependencyInjection
         services.AddScoped<IGroupRepository, GroupRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IGuestRepository, GuestRepository>();
+        services.AddScoped<ICategoryRepository, CategoryRepository>();
+        services.AddScoped<ITagRepository, TagRepository>();
+        services.AddScoped<IEventLogRepository, EventLogRepository>();
         
         // New services
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IEventService, EventService>();
         services.AddScoped<IGroupService, GroupService>();
         services.AddScoped<IGuestService, GuestService>();
+        services.AddScoped<ICategoryService, CategoryService>();
+        services.AddScoped<ITagService, TagService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IEventStateGuard, EventStateGuard>();
+        services.AddScoped<IEventLogService, EventLogService>();
+        services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
 
         return services;
     }

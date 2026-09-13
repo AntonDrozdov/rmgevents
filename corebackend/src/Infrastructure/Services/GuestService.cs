@@ -6,9 +6,12 @@ namespace Infrastructure.Services;
 public sealed class GuestService(
     IGuestRepository guestRepository,
     IGroupRepository groupRepository,
+    ICategoryRepository categoryRepository,
+    ITagRepository tagRepository,
     IPermissionService permissionService,
     IUserRepository userRepository,
-    IEventStateGuard eventStateGuard) : IGuestService
+    IEventStateGuard eventStateGuard,
+    IEventLogService eventLogService) : IGuestService
 {
     private static readonly HashSet<string> KnownStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -26,7 +29,9 @@ public sealed class GuestService(
         string name,
         string? email,
         string? phone,
-        long groupId)
+        long groupId,
+        long? categoryId,
+        IReadOnlyCollection<long> tagIds)
     {
         await eventStateGuard.EnsureActiveAsync(eventId);
 
@@ -47,6 +52,9 @@ public sealed class GuestService(
         var availableQuota = await GetAvailableQuotaInGroupAsync(groupId);
         if (availableQuota <= 0)
             throw new InvalidOperationException("Group quota is full");
+
+        await EnsureCategoryBelongsToEventAsync(eventId, categoryId);
+        var normalizedTagIds = await EnsureTagsBelongToEventAsync(eventId, tagIds);
         
         var guest = new Application.Entities.Guest
         {
@@ -63,8 +71,25 @@ public sealed class GuestService(
         
         await guestRepository.AddAsync(guest);
         await guestRepository.SaveChangesAsync();
+
+        if (categoryId.HasValue)
+        {
+            await guestRepository.SetGuestCategoryAsync(guest.Id, categoryId);
+        }
+
+        await guestRepository.SetGuestTagsAsync(guest.Id, normalizedTagIds);
+        await guestRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            eventId,
+            loginId,
+            "created",
+            "Guest",
+            guest.Id,
+            "Создан гость",
+            BuildGuestDescription(name, email, phone));
         
-        return guest;
+        return await guestRepository.GetByIdAsync(guest.Id) ?? guest;
     }
     
     public async Task<Application.Entities.Guest?> GetGuestAsync(long guestId)
@@ -82,7 +107,9 @@ public sealed class GuestService(
         int page,
         int pageSize,
         string? search,
-        string? status = null)
+        string? status = null,
+        long? categoryId = null,
+        IReadOnlyCollection<long>? tagIds = null)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
@@ -97,10 +124,17 @@ public sealed class GuestService(
         else
             normalizedStatus = normalizedStatus.ToLowerInvariant();
 
+        var normalizedTagIds = tagIds?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList() ?? [];
+
         var result = await guestRepository.GetPageByEventIdAsync(
             eventId,
             normalizedSearch,
             normalizedStatus,
+            categoryId,
+            normalizedTagIds,
             page,
             pageSize);
 
@@ -161,6 +195,15 @@ public sealed class GuestService(
 
         await guestRepository.UpdateAsync(guest);
         await guestRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            guest.EventId,
+            loginId,
+            "submitted_for_review",
+            "Guest",
+            guest.Id,
+            "Гость отправлен на согласование",
+            $"Гость: {guest.Name}");
     }
 
     public async Task ApproveGuestAsync(long guestId, long approverLoginId)
@@ -217,6 +260,15 @@ public sealed class GuestService(
         
         await guestRepository.UpdateAsync(guest);
         await guestRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            guest.EventId,
+            approverLoginId,
+            action,
+            "Guest",
+            guest.Id,
+            isAdministrator ? "Гость согласован администратором" : "Гость согласован",
+            $"Гость: {guest.Name}. Новый статус: {GetStatusLabel(nextStatus)}");
     }
     
     public async Task RejectGuestAsync(long guestId, long approverLoginId)
@@ -249,6 +301,15 @@ public sealed class GuestService(
         
         await guestRepository.UpdateAsync(guest);
         await guestRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            guest.EventId,
+            approverLoginId,
+            "rejected",
+            "Guest",
+            guest.Id,
+            "Гость отклонён",
+            $"Гость: {guest.Name}");
     }
 
     public async Task InviteGuestAsync(long guestId, long inviterLoginId)
@@ -279,6 +340,15 @@ public sealed class GuestService(
 
         await guestRepository.UpdateAsync(guest);
         await guestRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            guest.EventId,
+            inviterLoginId,
+            "invited",
+            "Guest",
+            guest.Id,
+            "Гость приглашён",
+            $"Гость: {guest.Name}");
     }
 
     public async Task RestoreGuestToSavedAsync(long guestId, long loginId)
@@ -310,6 +380,15 @@ public sealed class GuestService(
 
         await guestRepository.UpdateAsync(guest);
         await guestRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            guest.EventId,
+            loginId,
+            "restored_to_saved",
+            "Guest",
+            guest.Id,
+            "Гость возвращён в сохранённые",
+            $"Гость: {guest.Name}");
     }
 
     private async Task EnsureGuestIsInApproverScopeAsync(Application.Entities.Guest guest, long approverLoginId)
@@ -334,7 +413,9 @@ public sealed class GuestService(
         string name,
         string? email,
         string? phone,
-        long groupId)
+        long groupId,
+        long? categoryId,
+        IReadOnlyCollection<long> tagIds)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
@@ -358,13 +439,27 @@ public sealed class GuestService(
         if (groupId != guest.GroupId && guest.Status != "rejected" && await GetAvailableQuotaInGroupAsync(groupId) <= 0)
             throw new InvalidOperationException("Target group quota is full");
 
+        await EnsureCategoryBelongsToEventAsync(guest.EventId, categoryId);
+        var normalizedTagIds = await EnsureTagsBelongToEventAsync(guest.EventId, tagIds);
+
         guest.Name = name;
         guest.Email = email;
         guest.Phone = phone;
         guest.GroupId = groupId;
         
         await guestRepository.UpdateAsync(guest);
+        await guestRepository.SetGuestCategoryAsync(guest.Id, categoryId);
+        await guestRepository.SetGuestTagsAsync(guest.Id, normalizedTagIds);
         await guestRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            guest.EventId,
+            loginId,
+            "updated",
+            "Guest",
+            guest.Id,
+            "Изменён гость",
+            BuildGuestDescription(guest.Name, guest.Email, guest.Phone));
     }
     
     public async Task DeleteGuestAsync(long guestId, long loginId)
@@ -376,8 +471,21 @@ public sealed class GuestService(
         await eventStateGuard.EnsureActiveAsync(guest.EventId);
 
         await EnsureCanManageGuestAsync(guest, loginId);
+        var guestName = guest.Name;
+        var guestEmail = guest.Email;
+        var guestPhone = guest.Phone;
+
         await guestRepository.DeleteAsync(guestId);
         await guestRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            guest.EventId,
+            loginId,
+            "deleted",
+            "Guest",
+            guestId,
+            "Удалён гость",
+            BuildGuestDescription(guestName, guestEmail, guestPhone));
     }
 
     private async Task EnsureCanManageGuestAsync(Application.Entities.Guest guest, long loginId)
@@ -399,9 +507,58 @@ public sealed class GuestService(
             ?? throw new InvalidOperationException("Employee was not found in the event");
     }
 
+    private async Task EnsureCategoryBelongsToEventAsync(long eventId, long? categoryId)
+    {
+        if (!categoryId.HasValue)
+            return;
+
+        var category = await categoryRepository.GetByIdAsync(categoryId.Value);
+        if (category == null || category.EventId != eventId)
+            throw new InvalidOperationException("Category does not belong to the guest event");
+    }
+
+    private async Task<List<long>> EnsureTagsBelongToEventAsync(long eventId, IReadOnlyCollection<long>? tagIds)
+    {
+        var normalizedTagIds = tagIds?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList() ?? [];
+
+        if (normalizedTagIds.Count == 0)
+            return normalizedTagIds;
+
+        var tags = await tagRepository.GetByIdsAsync(normalizedTagIds);
+        if (tags.Count != normalizedTagIds.Count || tags.Any(tag => tag.EventId != eventId))
+            throw new InvalidOperationException("All tags must belong to the guest event");
+
+        return normalizedTagIds;
+    }
+
     private static string FormatUserName(Application.Entities.User user) =>
         string.Join(" ", new[] { user.Surname, user.Name, user.AdditionalName }
             .Where(value => !string.IsNullOrWhiteSpace(value)));
+
+    private static string BuildGuestDescription(string name, string? email, string? phone)
+    {
+        var details = new List<string> { $"Гость: {name}" };
+        if (!string.IsNullOrWhiteSpace(email))
+            details.Add($"email: {email}");
+        if (!string.IsNullOrWhiteSpace(phone))
+            details.Add($"телефон: {phone}");
+
+        return string.Join(", ", details);
+    }
+
+    private static string GetStatusLabel(string status) => status switch
+    {
+        "saved" => "Сохранён",
+        "on_review" => "На согласовании",
+        "admin_review" => "На согласовании администратора",
+        "approved" => "Согласован",
+        "invited" => "Приглашён",
+        "rejected" => "Отклонён",
+        _ => status
+    };
     
     private async Task<int> GetAvailableQuotaInGroupAsync(long groupId)
     {

@@ -5,6 +5,10 @@ public sealed record GuestDto(
     long EventId,
     long GroupId,
     string? GroupName,
+    long? CategoryId,
+    string? CategoryName,
+    string? CategoryColor,
+    List<GuestTagDto> Tags,
     string Name,
     string? Email,
     string? Phone,
@@ -42,7 +46,9 @@ public sealed record CreateGuestRequest(
     string Name,
     string? Email,
     string? Phone,
-    long GroupId);
+    long GroupId,
+    long? CategoryId,
+    List<long>? TagIds);
 
 public sealed record ApproveGuestRequest(
     long GuestId,
@@ -52,4 +58,6 @@ public sealed record UpdateGuestRequest(
     string Name,
     string? Email,
     string? Phone,
-    long GroupId);
+    long GroupId,
+    long? CategoryId,
+    List<long>? TagIds);

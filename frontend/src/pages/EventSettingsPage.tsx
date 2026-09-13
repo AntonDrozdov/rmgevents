@@ -64,6 +64,19 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
         </NavLink>
       )}
       {canOpenSettings && (
+        <NavLink className={tabClassName} to={`/events/${eventId}/categories`} onClick={() => setIsMobileMenuOpen(false)}>
+          Категории
+        </NavLink>
+      )}
+      {canOpenSettings && (
+        <NavLink className={tabClassName} to={`/events/${eventId}/tags`} onClick={() => setIsMobileMenuOpen(false)}>
+          Метки
+        </NavLink>
+      )}
+      <NavLink className={tabClassName} to={`/events/${eventId}/logs`} onClick={() => setIsMobileMenuOpen(false)}>
+        Логи
+      </NavLink>
+      {canOpenSettings && (
         <NavLink className={tabClassName} to={`/events/${eventId}/settings`} onClick={() => setIsMobileMenuOpen(false)}>
           Настройки
         </NavLink>

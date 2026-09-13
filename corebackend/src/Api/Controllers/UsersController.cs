@@ -124,6 +124,8 @@ public sealed class UsersController(
         long userId,
         UpdateUserRequest request)
     {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
         try
         {
             var user = await userService.GetUserInEventAsync(userId, eventId);
@@ -133,6 +135,7 @@ public sealed class UsersController(
             await userService.UpdateUserAsync(
                 userId,
                 eventId,
+                loginId,
                 request.Login,
                 request.Name,
                 request.Surname,
@@ -153,9 +156,11 @@ public sealed class UsersController(
     [HttpPost("{userId:long}/reset-password")]
     public async Task<ActionResult<ResetPasswordResponse>> ResetPassword(long eventId, long userId)
     {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
         try
         {
-            var temporaryPassword = await userService.ResetUserPasswordAsync(userId, eventId);
+            var temporaryPassword = await userService.ResetUserPasswordAsync(userId, eventId, loginId);
             return Ok(new ResetPasswordResponse(temporaryPassword));
         }
         catch (InvalidOperationException ex)
@@ -168,13 +173,15 @@ public sealed class UsersController(
     [HttpDelete("{userId:long}")]
     public async Task<IActionResult> DeleteUser(long eventId, long userId)
     {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
         try
         {
             var user = await userService.GetUserInEventAsync(userId, eventId);
             if (user == null)
                 return NotFound();
 
-            await userService.DeleteUserAsync(userId);
+            await userService.DeleteUserAsync(userId, loginId);
             return NoContent();
         }
         catch (InvalidOperationException ex)

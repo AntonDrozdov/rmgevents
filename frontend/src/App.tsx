@@ -5,10 +5,13 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { EventSettingsPage } from "./pages/EventSettingsPage";
 import { GroupsPage } from "./pages/GroupsPage";
 import { GuestsPage } from "./pages/GuestsPage";
+import { CategoriesPage } from "./pages/CategoriesPage";
 import { LoginPage } from "./pages/LoginPage";
 import { UsersPage } from "./pages/UsersPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { EventInformationPage } from "./pages/EventInformationPage";
+import { EventLogsPage } from "./pages/EventLogsPage";
+import { TagsPage } from "./pages/TagsPage";
 
 function App() {
   return (
@@ -58,11 +61,41 @@ function App() {
             }
           />
           <Route
+            path="/events/:eventId/categories"
+            element={
+              <ProtectedRoute requiredPermission="create_event">
+                <EventSettingsPage>
+                  <CategoriesPage />
+                </EventSettingsPage>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/events/:eventId/tags"
+            element={
+              <ProtectedRoute requiredPermission="create_event">
+                <EventSettingsPage>
+                  <TagsPage />
+                </EventSettingsPage>
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/events/:eventId/users"
             element={
               <ProtectedRoute requiredPermission="create_user">
                 <EventSettingsPage>
                   <UsersPage />
+                </EventSettingsPage>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/events/:eventId/logs"
+            element={
+              <ProtectedRoute>
+                <EventSettingsPage>
+                  <EventLogsPage />
                 </EventSettingsPage>
               </ProtectedRoute>
             }

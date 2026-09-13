@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
-import { GroupTreeDto, GuestDto, GuestSearchResultDto } from "../types";
+import { CategoryDto, GroupTreeDto, GuestDto, GuestSearchResultDto, TagDto } from "../types";
 import { flattenGroups } from "../utils/groups";
 
 const statusLabel: Record<string, string> = {
@@ -23,8 +23,8 @@ const guestStatusFilterOptions = [
 
 const EditIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.5-16.5 4 4 1-1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1 1Z" /></svg>;
 const DeleteIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 0 1-2-2V6h14v13a2 2 0 0 1-2 2H7Zm1-3h2V9H8v9Zm6 0h2V9h-2v9ZM4 5V3h5l1-1h4l1 1h5v2H4Z" /></svg>;
-const RejectIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4 6.4 5Z" /></svg>;
-const emptyForm = (groupId = "") => ({ name: "", email: "", phone: "", groupId });
+const RejectIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V3h10v2H6v14h8v2H4Zm11.6-5.4-1.4-1.4 2.2-2.2H10v-2h6.4l-2.2-2.2 1.4-1.4L20.4 12l-4.8 4.6Z" /></svg>;
+const emptyForm = (groupId = "", categoryId = "", tagIds: string[] = []) => ({ name: "", email: "", phone: "", groupId, categoryId, tagIds });
 const formatDateTime = (value: string) => new Date(value).toLocaleString("ru-RU");
 
 const collectScopeIds = (groups: GroupTreeDto[], userGroupId?: number) => {
@@ -43,16 +43,24 @@ export const GuestsPage: React.FC = () => {
   const { currentUser, currentEvent, events } = useAuth();
   const [guests, setGuests] = useState<GuestDto[]>([]);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
+  const [categories, setCategories] = useState<CategoryDto[]>([]);
+  const [tags, setTags] = useState<TagDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [editingGuest, setEditingGuest] = useState<GuestDto | null>(null);
   const [deleteGuest, setDeleteGuest] = useState<GuestDto | null>(null);
   const [formData, setFormData] = useState(emptyForm());
   const [guestSearch, setGuestSearch] = useState("");
   const [debouncedGuestSearch, setDebouncedGuestSearch] = useState("");
   const [guestStatusFilter, setGuestStatusFilter] = useState("");
+  const [guestCategoryFilter, setGuestCategoryFilter] = useState("");
+  const [guestTagFilters, setGuestTagFilters] = useState<string[]>([]);
+  const [draftStatusFilter, setDraftStatusFilter] = useState("");
+  const [draftCategoryFilter, setDraftCategoryFilter] = useState("");
+  const [draftTagFilters, setDraftTagFilters] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalGuestCount, setTotalGuestCount] = useState(0);
@@ -72,7 +80,10 @@ export const GuestsPage: React.FC = () => {
     formData.name.trim() !== editingGuest.name ||
     formData.email.trim() !== (editingGuest.email ?? "") ||
     formData.phone.trim() !== (editingGuest.phone ?? "") ||
-    Number(formData.groupId) !== editingGuest.groupId
+    Number(formData.groupId) !== editingGuest.groupId ||
+    (formData.categoryId ? Number(formData.categoryId) : null) !== (editingGuest.categoryId ?? null) ||
+    formData.tagIds.map(Number).sort((left, right) => left - right).join(",") !==
+      editingGuest.tags.map((tag) => tag.id).sort((left, right) => left - right).join(",")
   );
   const guestSearchValue = guestSearch.trim();
   const isGuestSearchActive = guestSearchValue.length >= 2;
@@ -81,33 +92,50 @@ export const GuestsPage: React.FC = () => {
   const pageEnd = Math.min(currentPage * pageSize, totalGuestCount);
   const canGoPreviousPage = currentPage > 1;
   const canGoNextPage = currentPage < totalPages;
+  const selectedCategory = categories.find((category) => String(category.id) === formData.categoryId) ?? null;
+  const selectedTags = tags.filter((tag) => formData.tagIds.includes(String(tag.id)));
+  const selectedFilterCategory = categories.find((category) => String(category.id) === draftCategoryFilter) ?? null;
+  const selectedFilterTags = tags.filter((tag) => draftTagFilters.includes(String(tag.id)));
+  const activeFiltersCount = Number(Boolean(guestStatusFilter)) + Number(Boolean(guestCategoryFilter)) + Number(guestTagFilters.length > 0);
 
   const loadData = async () => {
     if (!eventId) return;
     setLoading(true);
     setError("");
     try {
-      const [guestPage, groupTree] = await Promise.all([
-        apiClient.getGuests(eventId, {
-          page: currentPage,
-          pageSize,
-          search: debouncedGuestSearch || undefined,
-          status: guestStatusFilter || undefined,
-        }),
-        apiClient.getGroupTree(eventId),
-      ]);
+      const guestPage = await apiClient.getGuests(eventId, {
+        page: currentPage,
+        pageSize,
+        search: debouncedGuestSearch || undefined,
+        status: guestStatusFilter || undefined,
+        categoryId: guestCategoryFilter ? Number(guestCategoryFilter) : undefined,
+        tagIds: guestTagFilters.map(Number),
+      });
       setGuests(guestPage.items);
       setTotalGuestCount(guestPage.totalCount);
       setCurrentPage(guestPage.page);
       setPageSize(guestPage.pageSize);
-      setGroups(groupTree);
     } catch (err) {
       setError("Не удалось загрузить гостей.");
       console.error(err);
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadData(); }, [eventId, currentPage, pageSize, debouncedGuestSearch, guestStatusFilter]);
+  useEffect(() => { loadData(); }, [eventId, currentPage, pageSize, debouncedGuestSearch, guestStatusFilter, guestCategoryFilter, guestTagFilters]);
+
+  useEffect(() => {
+    if (!eventId) return;
+
+    void Promise.all([
+      apiClient.getCategories(eventId),
+      apiClient.getTags(eventId),
+    ]).then(([categoryList, tagList]) => {
+      setCategories(categoryList);
+      setTags(tagList);
+    }).catch((err) => {
+      console.error(err);
+    });
+  }, [eventId]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -185,19 +213,98 @@ export const GuestsPage: React.FC = () => {
       current?.id === updatedGuest.id ? updatedGuest : current);
   };
 
-  const openCreateModal = () => {
-    setError("");
-    setFormData(emptyForm(String([...scopeIds][0] ?? flatGroups[0]?.id ?? "")));
-    setSimilarGuests([]);
-    setSimilarGuestsError("");
-    setSimilarGuestsLoading(false);
-    setIsCreateModalOpen(true);
+  const loadFormLookups = async () => {
+    if (!eventId) return { groupTree: groups, categoryList: categories, tagList: tags };
+
+    const [groupTree, categoryList, tagList] = await Promise.all([
+      apiClient.getGroupTree(eventId),
+      apiClient.getCategories(eventId),
+      apiClient.getTags(eventId),
+    ]);
+    setGroups(groupTree);
+    setCategories(categoryList);
+    setTags(tagList);
+    return { groupTree, categoryList, tagList };
   };
 
-  const openEditModal = (guest: GuestDto) => {
+  const toggleFormTag = (tagId: number) => {
+    const value = String(tagId);
+    setFormData((current) => ({
+      ...current,
+      tagIds: current.tagIds.includes(value)
+        ? current.tagIds.filter((id) => id !== value)
+        : [...current.tagIds, value],
+    }));
+  };
+
+  const toggleDraftTagFilter = (tagId: number) => {
+    const value = String(tagId);
+    setDraftTagFilters((current) =>
+      current.includes(value)
+        ? current.filter((id) => id !== value)
+        : [...current, value]);
+  };
+
+  const openFiltersModal = () => {
+    setDraftStatusFilter(guestStatusFilter);
+    setDraftCategoryFilter(guestCategoryFilter);
+    setDraftTagFilters(guestTagFilters);
+    setIsFiltersModalOpen(true);
+  };
+
+  const applyFilters = () => {
+    setGuestStatusFilter(draftStatusFilter);
+    setGuestCategoryFilter(draftCategoryFilter);
+    setGuestTagFilters(draftTagFilters);
+    setCurrentPage(1);
+    setIsFiltersModalOpen(false);
+  };
+
+  const resetFilters = () => {
+    setDraftStatusFilter("");
+    setDraftCategoryFilter("");
+    setDraftTagFilters([]);
+    setGuestStatusFilter("");
+    setGuestCategoryFilter("");
+    setGuestTagFilters([]);
+    setCurrentPage(1);
+    setIsFiltersModalOpen(false);
+  };
+
+  const openCreateModal = async () => {
     setError("");
-    setEditingGuest(guest);
-    setFormData({ name: guest.name, email: guest.email ?? "", phone: guest.phone ?? "", groupId: String(guest.groupId) });
+    try {
+      const { groupTree } = await loadFormLookups();
+      const nextFlatGroups = flattenGroups(groupTree);
+      const nextScopeIds = collectScopeIds(groupTree, currentUser?.groupId);
+      setFormData(emptyForm(String([...nextScopeIds][0] ?? nextFlatGroups[0]?.id ?? "")));
+      setSimilarGuests([]);
+      setSimilarGuestsError("");
+      setSimilarGuestsLoading(false);
+      setIsCreateModalOpen(true);
+    } catch (err) {
+      setError("Не удалось загрузить данные формы гостя.");
+      console.error(err);
+    }
+  };
+
+  const openEditModal = async (guest: GuestDto) => {
+    setError("");
+    try {
+      await loadFormLookups();
+      setEditingGuest(guest);
+      setFormData({
+        name: guest.name,
+        email: guest.email ?? "",
+        phone: guest.phone ?? "",
+        groupId: String(guest.groupId),
+        categoryId: guest.categoryId ? String(guest.categoryId) : "",
+        tagIds: guest.tags.map((tag) => String(tag.id)),
+      });
+    } catch (err) {
+      setError("Не удалось загрузить данные формы гостя.");
+      console.error(err);
+    }
   };
 
   const closeForm = () => {
@@ -223,6 +330,8 @@ export const GuestsPage: React.FC = () => {
       email: guest.email ?? "",
       phone: guest.phone ?? "",
       groupId: String(group?.id ?? formData.groupId),
+      categoryId: formData.categoryId,
+      tagIds: formData.tagIds,
     });
     setSimilarGuests([]);
     setSimilarGuestsError("");
@@ -233,7 +342,14 @@ export const GuestsPage: React.FC = () => {
     if (editingGuest && !isGuestEditDirty) return;
     setSaving(true);
     setError("");
-    const request = { name: formData.name.trim(), email: formData.email.trim() || undefined, phone: formData.phone.trim() || undefined, groupId: Number(formData.groupId) };
+    const request = {
+      name: formData.name.trim(),
+      email: formData.email.trim() || undefined,
+      phone: formData.phone.trim() || undefined,
+      groupId: Number(formData.groupId),
+      categoryId: formData.categoryId ? Number(formData.categoryId) : null,
+      tagIds: formData.tagIds.map(Number),
+    };
     try {
       const isCreatingGuest = !editingGuest;
       if (editingGuest) await apiClient.updateGuest(eventId, editingGuest.id, request);
@@ -318,15 +434,15 @@ export const GuestsPage: React.FC = () => {
   };
 
   const canApproveGuest = (guest: GuestDto) => {
-    if (!canApprove || !scopeIds.has(guest.groupId)) return false;
+    if (!canApprove) return false;
     return guest.status === "on_review" ||
       (guest.status === "admin_review" && isAdministrator);
   };
-  const canRejectGuest = (guest: GuestDto) => canApprove && scopeIds.has(guest.groupId) && guest.status !== "saved" && guest.status !== "rejected";
-  const canSubmitGuest = (guest: GuestDto) => canCreate && scopeIds.has(guest.groupId) && guest.status === "saved";
-  const canInviteGuest = (guest: GuestDto) => canCreate && scopeIds.has(guest.groupId) && guest.status === "approved";
-  const canReturnGuest = (guest: GuestDto) => canApprove && scopeIds.has(guest.groupId) && guest.status === "rejected";
-  const canManageGuest = (guest: GuestDto) => canCreate && scopeIds.has(guest.groupId);
+  const canRejectGuest = (guest: GuestDto) => canApprove && guest.status !== "saved" && guest.status !== "rejected";
+  const canSubmitGuest = (guest: GuestDto) => canCreate && guest.status === "saved";
+  const canInviteGuest = (guest: GuestDto) => canCreate && guest.status === "approved";
+  const canReturnGuest = (guest: GuestDto) => canApprove && guest.status === "rejected";
+  const canManageGuest = (_guest: GuestDto) => canCreate;
 
   const renderWorkflow = (guest: GuestDto) => {
     const stages: Array<{ key: string; title: string; state: string; info: React.ReactNode }> = [
@@ -394,28 +510,19 @@ export const GuestsPage: React.FC = () => {
             placeholder="Имя, email или телефон"
           />
         </label>
-        <label className="field guest-status-filter-field">
-          <span>Статус</span>
-          <select
-            value={guestStatusFilter}
-            onChange={(event) => {
-              setGuestStatusFilter(event.target.value);
-              setCurrentPage(1);
-            }}
-            disabled={loading}
-          >
-            {guestStatusFilterOptions.map((option) => (
-              <option key={option.value || "all"} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        {(isGuestSearchActive || guestStatusFilter) && (
+        <button
+          className={`secondary-button filter-modal-button${activeFiltersCount > 0 ? " active" : ""}`}
+          type="button"
+          onClick={openFiltersModal}
+          disabled={loading}
+        >
+          Фильтровать{activeFiltersCount > 0 ? ` (${activeFiltersCount})` : ""}
+        </button>
+        {(isGuestSearchActive || activeFiltersCount > 0) && (
           <span className="guest-search-count">Найдено: {totalGuestCount}</span>
         )}
       </div>
-      {loading ? <div className="empty-state compact">Загрузка...</div> : totalGuestCount === 0 && !debouncedGuestSearch && !guestStatusFilter ? <div className="empty-state compact">Гостей пока нет.</div> : totalGuestCount === 0 ? <div className="empty-state compact">По фильтрам ничего не найдено.</div> : <><div className="table-wrap guests-table-wrap"><table><thead><tr><th>Имя</th><th>Email</th><th>Группа</th><th>Статус</th><th>Кем создан</th><th>Создан</th><th className="actions-column" aria-label="Действия" /></tr></thead><tbody>{guests.map((guest) => {
+      {loading ? <div className="empty-state compact">Загрузка...</div> : totalGuestCount === 0 && !debouncedGuestSearch && !guestStatusFilter && !guestCategoryFilter && guestTagFilters.length === 0 ? <div className="empty-state compact">Гостей пока нет.</div> : totalGuestCount === 0 ? <div className="empty-state compact">По фильтрам ничего не найдено.</div> : <><div className="table-wrap guests-table-wrap"><table><thead><tr><th>Имя</th><th>Email</th><th>Группа</th><th>Категория</th><th>Метки</th><th>Статус</th><th>Кем создан</th><th>Создан</th><th className="actions-column" aria-label="Действия" /></tr></thead><tbody>{guests.map((guest) => {
       const showApprove = canApproveGuest(guest);
       const showReject = canRejectGuest(guest);
       const showSubmit = canSubmitGuest(guest);
@@ -438,16 +545,217 @@ export const GuestsPage: React.FC = () => {
             ? "Отправить на согласование"
             : "Согласовать";
       const canEdit = canManageGuest(guest);
-      return <tr className={`table-hover-row${canEdit ? " table-editable-row" : ""}`} key={guest.id} tabIndex={canEdit ? 0 : undefined} onClick={canEdit ? (event) => { if (!(event.target as HTMLElement).closest("button, a, input, select, textarea")) openEditModal(guest); } : undefined} onKeyDown={canEdit ? (event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openEditModal(guest); } } : undefined}><td>{guest.name}</td><td>{guest.email || "-"}</td><td>{guest.groupName || guest.groupId}</td><td><div className="guest-status-actions">{nextAction ? <button className={`status status-action-button ${guest.status}`} type="button" onClick={nextAction} title={nextActionLabel}><span className="status-current">{statusLabel[guest.status] ?? guest.status}</span><span className="status-next">{nextActionLabel}</span></button> : <span className={`status ${guest.status}`}>{statusLabel[guest.status] ?? guest.status}</span>}{showReject && <button className="icon-button icon-button-danger guest-reject-button" onClick={() => updateGuestStatus(guest.id, false)} title="Отклонить" aria-label={`Отклонить ${guest.name}`}><RejectIcon /></button>}</div></td><td><div>{guest.createdByName || "-"}</div>{guest.createdByRoleName && <small>{guest.createdByRoleName}</small>}</td><td>{formatDateTime(guest.createdAt)}</td>
+      return <tr className={`table-hover-row${canEdit ? " table-editable-row" : ""}`} key={guest.id} tabIndex={canEdit ? 0 : undefined} onClick={canEdit ? (event) => { if (!(event.target as HTMLElement).closest("button, a, input, select, textarea")) openEditModal(guest); } : undefined} onKeyDown={canEdit ? (event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openEditModal(guest); } } : undefined}><td>{guest.name}</td><td>{guest.email || "-"}</td><td>{guest.groupName || guest.groupId}</td><td>{guest.categoryName ? <span className="category-arrow" style={{ backgroundColor: guest.categoryColor ?? "#2f6f87", color: "#ffffff" }}>{guest.categoryName}</span> : "-"}</td><td>{guest.tags.length > 0 ? <div className="guest-tags-cell">{guest.tags.map((tag) => <span className="tag-badge" key={tag.id} style={{ backgroundColor: tag.color, color: "#ffffff" }}>{tag.name}</span>)}</div> : "-"}</td><td><div className="guest-status-actions">{nextAction ? <button className={`status status-action-button ${guest.status}`} type="button" onClick={nextAction} title={nextActionLabel}><span className="status-current">{statusLabel[guest.status] ?? guest.status}</span><span className="status-next">{nextActionLabel}</span></button> : <span className={`status ${guest.status}`}>{statusLabel[guest.status] ?? guest.status}</span>}{showReject && <button className="icon-button icon-button-warning guest-reject-button" onClick={() => updateGuestStatus(guest.id, false)} title="Отклонить" aria-label={`Отклонить ${guest.name}`}><RejectIcon /></button>}</div></td><td><div>{guest.createdByName || "-"}</div>{guest.createdByRoleName && <small>{guest.createdByRoleName}</small>}</td><td>{formatDateTime(guest.createdAt)}</td>
         <td className="actions-column">{canManageGuest(guest) ? <div className="table-icon-actions"><button className="icon-button" onClick={() => openEditModal(guest)} title="Редактировать" aria-label={`Редактировать ${guest.name}`}><EditIcon /></button><button className="icon-button icon-button-danger" onClick={() => setDeleteGuest(guest)} title="Удалить" aria-label={`Удалить ${guest.name}`}><DeleteIcon /></button></div> : "-"}</td></tr>;
     })}</tbody></table></div><div className="pagination-row"><div className="pagination-summary">Показаны {pageStart}-{pageEnd} из {totalGuestCount}</div><label className="pagination-size"><span>На странице</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setCurrentPage(1); }} disabled={loading}><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option></select></label><div className="pagination-actions"><button className="secondary-button pagination-button" type="button" onClick={() => setCurrentPage((value) => Math.max(1, value - 1))} disabled={loading || !canGoPreviousPage}>Назад</button><span className="pagination-current">Страница {currentPage} из {totalPages}</span><button className="secondary-button pagination-button" type="button" onClick={() => setCurrentPage((value) => Math.min(totalPages, value + 1))} disabled={loading || !canGoNextPage}>Вперёд</button></div></div></>}
     </section>
+
+    {isFiltersModalOpen && <Modal className="filters-modal" title="Фильтры гостей" description="Выберите статус, категорию и метки для списка гостей." onClose={() => setIsFiltersModalOpen(false)}>
+      <div className="filters-form">
+        <section className="filter-section">
+          <div className="selected-filter-row">
+            <span>Статус</span>
+            {draftStatusFilter ? (
+              <span className={`status ${draftStatusFilter}`}>{statusLabel[draftStatusFilter] ?? draftStatusFilter}</span>
+            ) : (
+              <span className="selected-category-empty">Все статусы</span>
+            )}
+          </div>
+          <div className="filter-choice-list" role="radiogroup" aria-label="Статус гостя">
+            {guestStatusFilterOptions.map((option) => (
+              <button
+                className={`filter-choice status-filter-choice${draftStatusFilter === option.value ? " selected" : ""}`}
+                type="button"
+                role="radio"
+                aria-checked={draftStatusFilter === option.value}
+                key={option.value || "all"}
+                onClick={() => setDraftStatusFilter(option.value)}
+              >
+                {option.value ? (
+                  <span className={`status ${option.value}`}>{option.label}</span>
+                ) : (
+                  option.label
+                )}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="filter-section">
+          <div className="selected-filter-row">
+            <span>Категория</span>
+            {selectedFilterCategory ? (
+              <span className="category-arrow selected-category-arrow" style={{ backgroundColor: selectedFilterCategory.color, color: "#ffffff" }}>
+                {selectedFilterCategory.name}
+              </span>
+            ) : (
+              <span className="selected-category-empty">Все категории</span>
+            )}
+          </div>
+          <div className="category-choice-list" role="radiogroup" aria-label="Категория гостя">
+            <button
+              className={`category-choice${draftCategoryFilter === "" ? " selected" : ""}`}
+              type="button"
+              role="radio"
+              aria-checked={draftCategoryFilter === ""}
+              onClick={() => setDraftCategoryFilter("")}
+            >
+              Все категории
+            </button>
+            {categories.map((category) => {
+              const value = String(category.id);
+              return (
+                <button
+                  className={`category-choice category-choice-arrow${draftCategoryFilter === value ? " selected" : ""}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={draftCategoryFilter === value}
+                  key={category.id}
+                  onClick={() => setDraftCategoryFilter(value)}
+                >
+                  <span className="category-arrow" style={{ backgroundColor: category.color, color: "#ffffff" }}>
+                    {category.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="filter-section">
+          <div className="selected-filter-row selected-tags-row">
+            <span>Метки</span>
+            {selectedFilterTags.length === 0 ? (
+              <span className="selected-category-empty">Все метки</span>
+            ) : selectedFilterTags.map((tag) => (
+              <span className="tag-badge selected-tag-badge" key={tag.id} style={{ backgroundColor: tag.color, color: "#ffffff" }}>
+                {tag.name}
+              </span>
+            ))}
+          </div>
+          <div className="tag-choice-list" role="group" aria-label="Метки гостя">
+            <button
+              className={`category-choice${draftTagFilters.length === 0 ? " selected" : ""}`}
+              type="button"
+              onClick={() => setDraftTagFilters([])}
+            >
+              Все метки
+            </button>
+            {tags.length === 0 ? (
+              <span className="tag-filter-empty">Меток пока нет.</span>
+            ) : tags.map((tag) => {
+              const selected = draftTagFilters.includes(String(tag.id));
+              return (
+                <button
+                  className={`tag-choice${selected ? " selected" : ""}`}
+                  type="button"
+                  key={tag.id}
+                  onClick={() => toggleDraftTagFilter(tag.id)}
+                >
+                  <span className="tag-badge" style={{ backgroundColor: tag.color, color: "#ffffff" }}>
+                    {tag.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <div className="modal-actions filters-modal-actions">
+          <button className="secondary-button" type="button" onClick={() => setIsFiltersModalOpen(false)}>Отмена</button>
+          <button className="secondary-button" type="button" onClick={resetFilters}>Сбросить</button>
+          <button className="primary-button" type="button" onClick={applyFilters}>Применить</button>
+        </div>
+      </div>
+    </Modal>}
 
     {(isCreateModalOpen || editingGuest) && <Modal className="guest-form-modal" title={editingGuest ? "Редактировать гостя" : "Добавить гостя"} description={editingGuest ? "Измените данные гостя и просмотрите цепочку согласования." : "Гость будет сохранён в выбранной группе."} onClose={closeForm}>{error && <div className="alert alert-error">{error}</div>}<form className="form guest-edit-form" onSubmit={submitGuest}>
       <label className="field"><span>Имя</span><input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={saving} required /></label>
       <label className="field"><span>Email</span><input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} disabled={saving} /></label>
       <label className="field"><span>Телефон</span><input type="tel" value={formData.phone} onChange={(event) => setFormData({ ...formData, phone: event.target.value })} disabled={saving} /></label>
       <label className="field"><span>Группа</span><select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} disabled={saving} required>{flatGroups.filter((group) => scopeIds.has(group.id)).map((group) => <option key={group.id} value={group.id}>{"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}</option>)}</select></label>
+      <div className="field guest-category-field">
+        <div className="selected-category-row">
+          <span>Категория</span>
+          {selectedCategory ? (
+            <span className="category-arrow selected-category-arrow" style={{ backgroundColor: selectedCategory.color, color: "#ffffff" }}>
+              {selectedCategory.name}
+            </span>
+          ) : (
+            <span className="selected-category-empty">Без категории</span>
+          )}
+        </div>
+        <div className="category-choice-list" role="radiogroup" aria-label="Категория гостя">
+          <button
+            className={`category-choice${formData.categoryId === "" ? " selected" : ""}`}
+            type="button"
+            role="radio"
+            aria-checked={formData.categoryId === ""}
+            onClick={() => setFormData({ ...formData, categoryId: "" })}
+            disabled={saving}
+          >
+            Без категории
+          </button>
+          {categories.map((category) => {
+            const value = String(category.id);
+            return (
+              <button
+                className={`category-choice category-choice-arrow${formData.categoryId === value ? " selected" : ""}`}
+                type="button"
+                role="radio"
+                aria-checked={formData.categoryId === value}
+                key={category.id}
+                onClick={() => setFormData({ ...formData, categoryId: value })}
+                disabled={saving}
+              >
+                <span className="category-arrow" style={{ backgroundColor: category.color, color: "#ffffff" }}>
+                  {category.name}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="field guest-category-field">
+        <div className="selected-tags-row">
+          <span>Метки</span>
+          {selectedTags.length === 0 ? (
+            <span className="selected-category-empty">Без меток</span>
+          ) : selectedTags.map((tag) => (
+            <span className="tag-badge selected-tag-badge" key={tag.id} style={{ backgroundColor: tag.color, color: "#ffffff" }}>
+              {tag.name}
+            </span>
+          ))}
+        </div>
+        <div className="tag-choice-list" role="group" aria-label="Метки гостя">
+          <button
+            className={`category-choice${formData.tagIds.length === 0 ? " selected" : ""}`}
+            type="button"
+            onClick={() => setFormData({ ...formData, tagIds: [] })}
+            disabled={saving}
+          >
+            Без меток
+          </button>
+          {tags.length === 0 ? (
+            <span className="tag-filter-empty">Меток пока нет.</span>
+          ) : tags.map((tag) => {
+            const selected = formData.tagIds.includes(String(tag.id));
+            return (
+              <button
+                className={`tag-choice${selected ? " selected" : ""}`}
+                type="button"
+                key={tag.id}
+                onClick={() => toggleFormTag(tag.id)}
+                disabled={saving}
+              >
+                <span className="tag-badge" style={{ backgroundColor: tag.color, color: "#ffffff" }}>
+                  {tag.name}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       {isCreateModalOpen && !editingGuest && <div className="similar-employees similar-guests" aria-live="polite">
         <div className="similar-employees-heading">
           <strong>Похожие гости</strong>

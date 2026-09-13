@@ -3,6 +3,7 @@ using Api.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace Api.Controllers;
 
@@ -10,7 +11,8 @@ namespace Api.Controllers;
 [Route("api/images")]
 public sealed class ImagesController(
     IImageService imageService,
-    IEventStateGuard eventStateGuard) : ControllerBase
+    IEventStateGuard eventStateGuard,
+    IEventLogService eventLogService) : ControllerBase
 {
     [HttpGet("{id:long}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -51,6 +53,16 @@ public sealed class ImagesController(
                 file.ContentType,
                 stream.ToArray(),
                 cancellationToken);
+
+            var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            await eventLogService.AddAsync(
+                eventId,
+                loginId,
+                "cover_uploaded",
+                "Event",
+                eventId,
+                "Загружена обложка мероприятия",
+                $"Файл: {image.FileName}");
 
             return Created($"/api/images/{image.Id}", new ImageUploadResponse(image.Id));
         }

@@ -8,6 +8,8 @@ public interface IGuestRepository
         long eventId,
         string? search,
         string? status,
+        long? categoryId,
+        IReadOnlyCollection<long> tagIds,
         int page,
         int pageSize);
     Task<List<Entities.Guest>> GetByGroupIdAsync(long groupId);
@@ -22,6 +24,8 @@ public interface IGuestRepository
     Task<int> GetGuestCountByGroupAsync(long groupId);
     Task AddAsync(Entities.Guest guest);
     Task UpdateAsync(Entities.Guest guest);
+    Task SetGuestCategoryAsync(long guestId, long? categoryId);
+    Task SetGuestTagsAsync(long guestId, IReadOnlyCollection<long> tagIds);
     Task DeleteAsync(long id);
     Task SaveChangesAsync();
 }

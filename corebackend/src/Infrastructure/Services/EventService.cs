@@ -12,6 +12,7 @@ public sealed class EventService(
     IUserRepository userRepository,
     IImageRepository imageRepository,
     IEventStateGuard eventStateGuard,
+    IEventLogService eventLogService,
     ApplicationDbContext db) : IEventService
 {
     public async Task<Application.Entities.Event> CreateEventAsync(
@@ -86,6 +87,15 @@ public sealed class EventService(
             await eventRepository.UpdateAsync(@event);
             await eventRepository.SaveChangesAsync();
 
+            await eventLogService.AddAsync(
+                @event.Id,
+                creatorLoginId,
+                "created",
+                "Event",
+                @event.Id,
+                "Создано мероприятие",
+                $"Мероприятие: {@event.Name}");
+
             await transaction.CommitAsync();
             return @event;
         });
@@ -108,6 +118,7 @@ public sealed class EventService(
     
     public async Task<Application.Entities.Event> UpdateEventAsync(
         long eventId,
+        long actorLoginId,
         string name,
         string? description,
         DateOnly eventDate,
@@ -141,10 +152,20 @@ public sealed class EventService(
         
         await eventRepository.UpdateAsync(@event);
         await eventRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            eventId,
+            actorLoginId,
+            "updated",
+            "Event",
+            @event.Id,
+            "Изменены настройки мероприятия",
+            $"Мероприятие: {@event.Name}");
+
         return @event;
     }
 
-    public async Task<Application.Entities.Event> UpdateEventArchiveStatusAsync(long eventId, bool isArchived)
+    public async Task<Application.Entities.Event> UpdateEventArchiveStatusAsync(long eventId, long actorLoginId, bool isArchived)
     {
         var @event = await eventRepository.GetByIdAsync(eventId);
         if (@event == null)
@@ -154,6 +175,16 @@ public sealed class EventService(
 
         await eventRepository.UpdateAsync(@event);
         await eventRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            eventId,
+            actorLoginId,
+            isArchived ? "archived" : "restored",
+            "Event",
+            @event.Id,
+            isArchived ? "Мероприятие завершено" : "Мероприятие возвращено в активные",
+            $"Мероприятие: {@event.Name}");
+
         return @event;
     }
     

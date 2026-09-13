@@ -1,6 +1,7 @@
 using Api.Contracts;
 using Application.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
@@ -10,7 +11,8 @@ namespace Api.Controllers;
 [Route("api/events/{eventId}/groups")]
 [Authorize]
 public sealed class GroupsController(
-    IGroupService groupService) : ControllerBase
+    IGroupService groupService,
+    IOrganizationStructureService organizationStructureService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<GroupTreeDto>>> GetGroupTree(long eventId)
@@ -92,6 +94,103 @@ public sealed class GroupsController(
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateEvent")]
+    [HttpPost("import-original-structure")]
+    public async Task<ActionResult<OrganizationImportResultDto>> ImportOriginalStructure(
+        long eventId,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { message = "Выберите XLSX-файл со структурой." });
+
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var result = await organizationStructureService.ImportRmgStructureAsync(
+                eventId,
+                loginId,
+                file.FileName,
+                stream,
+                cancellationToken);
+
+            return Ok(new OrganizationImportResultDto(
+                result.DepartmentsCreated,
+                result.EmployeesCreated,
+                result.GeneratedParentsCreated,
+                result.RowsProcessed,
+                result.Warnings));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "CanCreateEvent")]
+    [HttpPost("apply-original-structure")]
+    public async Task<ActionResult<ApplyOriginalStructureResultDto>> ApplyOriginalStructure(
+        long eventId,
+        CancellationToken cancellationToken)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            var result = await organizationStructureService.ApplyOriginalStructureAsync(
+                eventId,
+                loginId,
+                cancellationToken);
+
+            return Ok(new ApplyOriginalStructureResultDto(
+                result.GroupsCreated,
+                result.GroupsReused,
+                result.GroupsRenamed,
+                result.GroupsQuotaUpdated,
+                result.DepartmentsProcessed,
+                result.Warnings));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "CanCreateEvent")]
+    [HttpPost("reset")]
+    public async Task<ActionResult<ResetGroupsResultDto>> ResetGroups(long eventId)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            var result = await groupService.ResetGroupsAsync(eventId, loginId);
+            return Ok(new ResetGroupsResultDto(
+                result.GroupsDeleted,
+                result.GuestsMoved,
+                result.UsersMoved,
+                result.RootQuota));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
     }
     

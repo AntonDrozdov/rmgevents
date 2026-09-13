@@ -17,4 +17,7 @@ public sealed class Event
     public ICollection<Group> Groups { get; set; } = [];
     public ICollection<User> Users { get; set; } = [];
     public ICollection<Guest> Guests { get; set; } = [];
+    public ICollection<Category> Categories { get; set; } = [];
+    public ICollection<Tag> Tags { get; set; } = [];
+    public ICollection<EventLog> Logs { get; set; } = [];
 }

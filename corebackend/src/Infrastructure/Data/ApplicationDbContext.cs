@@ -15,7 +15,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Guest> Guests => Set<Guest>();
+    public DbSet<Category> Categories => Set<Category>();
+    public DbSet<GuestCategory> GuestCategories => Set<GuestCategory>();
+    public DbSet<Tag> Tags => Set<Tag>();
+    public DbSet<GuestTag> GuestTags => Set<GuestTag>();
     public DbSet<GuestDecision> GuestDecisions => Set<GuestDecision>();
+    public DbSet<EventLog> EventLogs => Set<EventLog>();
+    public DbSet<OrganizationDepartment> OrganizationDepartments => Set<OrganizationDepartment>();
+    public DbSet<OrganizationEmployee> OrganizationEmployees => Set<OrganizationEmployee>();
 
     [DbFunction("regexp_replace", IsBuiltIn = true)]
     public static string RegexpReplace(string input, string pattern, string replacement, string flags)

@@ -18,5 +18,7 @@ public sealed class Guest
     public Event? Event { get; set; }
     public Group? Group { get; set; }
     public User? CreatedByUser { get; set; }
+    public GuestCategory? GuestCategory { get; set; }
+    public ICollection<GuestTag> GuestTags { get; set; } = [];
     public ICollection<GuestDecision> Decisions { get; set; } = [];
 }

@@ -114,6 +114,91 @@ export interface GroupTreeDto {
   children: GroupTreeDto[];
 }
 
+export interface OrganizationImportResultDto {
+  departmentsCreated: number;
+  employeesCreated: number;
+  generatedParentsCreated: number;
+  rowsProcessed: number;
+  warnings: string[];
+}
+
+export interface ApplyOriginalStructureResultDto {
+  groupsCreated: number;
+  groupsReused: number;
+  groupsRenamed: number;
+  groupsQuotaUpdated: number;
+  departmentsProcessed: number;
+  warnings: string[];
+}
+
+export interface ResetGroupsResultDto {
+  groupsDeleted: number;
+  guestsMoved: number;
+  usersMoved: number;
+  rootQuota: number;
+}
+
+export interface CategoryDto {
+  id: number;
+  eventId: number;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
+export interface CreateCategoryRequest {
+  name: string;
+  color: string;
+}
+
+export interface UpdateCategoryRequest extends CreateCategoryRequest {}
+
+export interface TagDto {
+  id: number;
+  eventId: number;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
+export interface EventLogDto {
+  id: number;
+  eventId: number;
+  userId?: number | null;
+  actorName: string;
+  actorRoleName?: string | null;
+  action: string;
+  entityType: string;
+  entityId?: number | null;
+  title: string;
+  description?: string | null;
+  createdAt: string;
+}
+
+export interface EventLogUserFilterOptionDto {
+  userId: number;
+  name: string;
+}
+
+export interface EventLogFilterOptionsDto {
+  users: EventLogUserFilterOptionDto[];
+  actions: string[];
+  entityTypes: string[];
+}
+
+export interface GuestTagDto {
+  id: number;
+  name: string;
+  color: string;
+}
+
+export interface CreateTagRequest {
+  name: string;
+  color: string;
+}
+
+export interface UpdateTagRequest extends CreateTagRequest {}
+
 export interface RoleDto {
   id: number;
   name: string;
@@ -177,6 +262,10 @@ export interface GuestDto {
   eventId: number;
   groupId: number;
   groupName?: string | null;
+  categoryId?: number | null;
+  categoryName?: string | null;
+  categoryColor?: string | null;
+  tags: GuestTagDto[];
   name: string;
   email?: string | null;
   phone?: string | null;
@@ -219,6 +308,8 @@ export interface CreateGuestRequest {
   email?: string;
   phone?: string;
   groupId: number;
+  categoryId?: number | null;
+  tagIds?: number[];
 }
 
 export interface ApproveGuestRequest {

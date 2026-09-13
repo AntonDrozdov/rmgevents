@@ -15,6 +15,10 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .Include(x => x.Group)
             .Include(x => x.CreatedByUser)
             .ThenInclude(x => x!.Role)
+            .Include(x => x.GuestCategory)
+            .ThenInclude(x => x!.Category)
+            .Include(x => x.GuestTags)
+            .ThenInclude(x => x.Tag)
             .Include(x => x.Decisions)
             .FirstOrDefaultAsync(x => x.Id == id);
     }
@@ -26,6 +30,10 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .Include(x => x.Group)
             .Include(x => x.CreatedByUser)
             .ThenInclude(x => x!.Role)
+            .Include(x => x.GuestCategory)
+            .ThenInclude(x => x!.Category)
+            .Include(x => x.GuestTags)
+            .ThenInclude(x => x.Tag)
             .Include(x => x.Decisions)
             .ToListAsync();
     }
@@ -34,6 +42,8 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         long eventId,
         string? search,
         string? status,
+        long? categoryId,
+        IReadOnlyCollection<long> tagIds,
         int page,
         int pageSize)
     {
@@ -44,6 +54,21 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         if (!string.IsNullOrWhiteSpace(status))
         {
             query = query.Where(guest => guest.Status == status);
+        }
+
+        if (categoryId.HasValue)
+        {
+            query = query.Where(guest =>
+                guest.GuestCategory != null &&
+                guest.GuestCategory.CategoryId == categoryId.Value);
+        }
+
+        if (tagIds.Count > 0)
+        {
+            foreach (var tagId in tagIds)
+            {
+                query = query.Where(guest => guest.GuestTags.Any(guestTag => guestTag.TagId == tagId));
+            }
         }
 
         var trimmedSearch = search?.Trim();
@@ -101,6 +126,10 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .Include(guest => guest.Group)
             .Include(guest => guest.CreatedByUser)
             .ThenInclude(user => user!.Role)
+            .Include(guest => guest.GuestCategory)
+            .ThenInclude(guestCategory => guestCategory!.Category)
+            .Include(guest => guest.GuestTags)
+            .ThenInclude(guestTag => guestTag.Tag)
             .Include(guest => guest.Decisions)
             .AsSplitQuery()
             .ToListAsync();
@@ -204,6 +233,53 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
     {
         db.Guests.Update(guest);
         await Task.CompletedTask;
+    }
+
+    public async Task SetGuestCategoryAsync(long guestId, long? categoryId)
+    {
+        var current = await db.GuestCategories.FindAsync(guestId);
+
+        if (categoryId.HasValue)
+        {
+            if (current == null)
+            {
+                await db.GuestCategories.AddAsync(new Application.Entities.GuestCategory
+                {
+                    GuestId = guestId,
+                    CategoryId = categoryId.Value
+                });
+            }
+            else
+            {
+                current.CategoryId = categoryId.Value;
+                db.GuestCategories.Update(current);
+            }
+
+            return;
+        }
+
+        if (current != null)
+        {
+            db.GuestCategories.Remove(current);
+        }
+    }
+
+    public async Task SetGuestTagsAsync(long guestId, IReadOnlyCollection<long> tagIds)
+    {
+        var current = await db.GuestTags
+            .Where(x => x.GuestId == guestId)
+            .ToListAsync();
+        db.GuestTags.RemoveRange(current);
+
+        if (tagIds.Count == 0)
+            return;
+
+        var distinctIds = tagIds.Distinct().ToList();
+        await db.GuestTags.AddRangeAsync(distinctIds.Select(tagId => new Application.Entities.GuestTag
+        {
+            GuestId = guestId,
+            TagId = tagId
+        }));
     }
     
     public async Task DeleteAsync(long id)

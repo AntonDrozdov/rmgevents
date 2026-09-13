@@ -139,10 +139,13 @@ public sealed class EventsController(
     [HttpPut("{eventId:long}")]
     public async Task<ActionResult<EventDto>> UpdateEvent(long eventId, UpdateEventRequest request)
     {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
         try
         {
             var @event = await eventService.UpdateEventAsync(
                 eventId,
+                loginId,
                 request.Name,
                 request.Description,
                 request.EventDate,
@@ -168,9 +171,11 @@ public sealed class EventsController(
         long eventId,
         UpdateEventArchiveStatusRequest request)
     {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
         try
         {
-            var @event = await eventService.UpdateEventArchiveStatusAsync(eventId, request.IsArchived);
+            var @event = await eventService.UpdateEventArchiveStatusAsync(eventId, loginId, request.IsArchived);
             return Ok(MapEvent(@event));
         }
         catch (InvalidOperationException ex)

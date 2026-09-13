@@ -13,7 +13,8 @@ public sealed class UserService(
     IAuthService authService,
     IRoleRepository roleRepository,
     IGroupRepository groupRepository,
-    IEventStateGuard eventStateGuard) : IUserService
+    IEventStateGuard eventStateGuard,
+    IEventLogService eventLogService) : IUserService
 {
     public async Task<Application.Entities.User> CreateUserAsync(
         long eventId,
@@ -64,7 +65,17 @@ public sealed class UserService(
             await userRepository.AddAsync(user);
             await userRepository.SaveChangesAsync();
 
-            return await userRepository.GetByIdAsync(user.Id) ?? user;
+            var createdUser = await userRepository.GetByIdAsync(user.Id) ?? user;
+            await eventLogService.AddAsync(
+                eventId,
+                creatorLoginId,
+                "created",
+                "User",
+                createdUser.Id,
+                "Создан сотрудник",
+                $"Сотрудник: {FormatUserName(createdUser)}");
+
+            return createdUser;
         }
         catch (DbUpdateException ex) when (
             ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
@@ -123,6 +134,7 @@ public sealed class UserService(
     public async Task UpdateUserAsync(
         long userId,
         long eventId,
+        long actorLoginId,
         string loginValue,
         string name,
         string surname,
@@ -194,6 +206,15 @@ public sealed class UserService(
         {
             await userRepository.UpdateAsync(user);
             await userRepository.SaveChangesAsync();
+
+            await eventLogService.AddAsync(
+                eventId,
+                actorLoginId,
+                "updated",
+                "User",
+                user.Id,
+                "Изменён сотрудник",
+                $"Сотрудник: {FormatUserName(user)}");
         }
         catch (DbUpdateException ex) when (
             ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
@@ -222,7 +243,7 @@ public sealed class UserService(
         await userRepository.SaveChangesAsync();
     }
     
-    public async Task DeleteUserAsync(long userId)
+    public async Task DeleteUserAsync(long userId, long actorLoginId)
     {
         var user = await userRepository.GetByIdAsync(userId);
         if (user == null)
@@ -241,11 +262,23 @@ public sealed class UserService(
                     "Нельзя удалить единственного сотрудника с ролью Administrator.");
         }
 
+        var eventId = user.EventId;
+        var userName = FormatUserName(user);
+
         await userRepository.DeleteAsync(userId);
         await userRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            eventId,
+            actorLoginId,
+            "deleted",
+            "User",
+            userId,
+            "Удалён сотрудник",
+            $"Сотрудник: {userName}");
     }
 
-    public async Task<string> ResetUserPasswordAsync(long userId, long eventId)
+    public async Task<string> ResetUserPasswordAsync(long userId, long eventId, long actorLoginId)
     {
         var user = await userRepository.GetByIdAsync(userId);
         if (user == null || user.EventId != eventId)
@@ -254,6 +287,15 @@ public sealed class UserService(
         await eventStateGuard.EnsureActiveAsync(eventId);
 
         await authService.ResetPasswordAsync(user.LoginId);
+        await eventLogService.AddAsync(
+            eventId,
+            actorLoginId,
+            "password_reset",
+            "User",
+            user.Id,
+            "Сброшен пароль сотрудника",
+            $"Сотрудник: {FormatUserName(user)}");
+
         return user.Login?.LoginValue
             ?? throw new InvalidOperationException($"Login {user.LoginId} not found");
     }
@@ -284,5 +326,13 @@ public sealed class UserService(
     {
         var hashedBytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
         return Convert.ToBase64String(hashedBytes);
+    }
+
+    private static string FormatUserName(Application.Entities.User user)
+    {
+        var fullName = string.Join(" ", new[] { user.Surname, user.Name, user.AdditionalName }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
+
+        return string.IsNullOrWhiteSpace(fullName) ? user.Login?.LoginValue ?? $"#{user.Id}" : fullName;
     }
 }

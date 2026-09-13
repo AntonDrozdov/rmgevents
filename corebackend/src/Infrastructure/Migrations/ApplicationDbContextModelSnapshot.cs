@@ -23,6 +23,44 @@ namespace Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Application.Entities.Category", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("color");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("event_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("IX_categories_event_id_name");
+
+                    b.ToTable("categories", "corebackend");
+                });
+
             modelBuilder.Entity("Application.Entities.Event", b =>
                 {
                     b.Property<long>("Id")
@@ -72,6 +110,84 @@ namespace Infrastructure.Migrations
                     b.HasIndex("OwnerId");
 
                     b.ToTable("events", "corebackend");
+                });
+
+            modelBuilder.Entity("Application.Entities.EventLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("action");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<string>("ActorRoleName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("actor_role_name");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("description");
+
+                    b.Property<long?>("EntityId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("entity_id");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("entity_type");
+
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("event_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("title");
+
+                    b.Property<long?>("UserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("EventId", "CreatedAt")
+                        .HasDatabaseName("IX_event_logs_event_id_created_at");
+
+                    b.HasIndex("EventId", "Action", "CreatedAt")
+                        .HasDatabaseName("IX_event_logs_event_id_action_created_at");
+
+                    b.HasIndex("EventId", "EntityType", "CreatedAt")
+                        .HasDatabaseName("IX_event_logs_event_id_entity_type_created_at");
+
+                    b.HasIndex("EventId", "UserId", "CreatedAt")
+                        .HasDatabaseName("IX_event_logs_event_id_user_id_created_at");
+
+                    b.ToTable("event_logs", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.Group", b =>
@@ -176,7 +292,7 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("CreatedByUserId");
 
-                    b.HasIndex("EventId");
+                    b.HasIndex("GroupId");
 
                     b.HasIndex("EventId", "CreatedAt")
                         .HasDatabaseName("IX_guests_event_id_created_at");
@@ -184,9 +300,25 @@ namespace Infrastructure.Migrations
                     b.HasIndex("EventId", "Status", "CreatedAt")
                         .HasDatabaseName("IX_guests_event_id_status_created_at");
 
-                    b.HasIndex("GroupId");
-
                     b.ToTable("guests", "corebackend");
+                });
+
+            modelBuilder.Entity("Application.Entities.GuestCategory", b =>
+                {
+                    b.Property<long>("GuestId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("guest_id");
+
+                    b.Property<long>("CategoryId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("category_id");
+
+                    b.HasKey("GuestId");
+
+                    b.HasIndex("CategoryId")
+                        .HasDatabaseName("IX_guest_categories_category_id");
+
+                    b.ToTable("guest_categories", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.GuestDecision", b =>
@@ -229,6 +361,24 @@ namespace Infrastructure.Migrations
                     b.HasIndex("GuestId", "CreatedAt");
 
                     b.ToTable("guest_decisions", "corebackend");
+                });
+
+            modelBuilder.Entity("Application.Entities.GuestTag", b =>
+                {
+                    b.Property<long>("GuestId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("guest_id");
+
+                    b.Property<long>("TagId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tag_id");
+
+                    b.HasKey("GuestId", "TagId");
+
+                    b.HasIndex("TagId")
+                        .HasDatabaseName("IX_guest_tags_tag_id");
+
+                    b.ToTable("guest_tags", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.ImageEntity", b =>
@@ -303,6 +453,118 @@ namespace Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("logins", "corebackend");
+                });
+
+            modelBuilder.Entity("Application.Entities.OrganizationDepartment", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsGeneratedFromParentName")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_generated_from_parent_name");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("normalized_name");
+
+                    b.Property<long?>("ParentId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("parent_id");
+
+                    b.Property<string>("SourceParentName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("source_parent_name");
+
+                    b.Property<int?>("SourceRowNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("source_row_number");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedName")
+                        .HasDatabaseName("IX_organization_departments_normalized_name");
+
+                    b.HasIndex("ParentId")
+                        .HasDatabaseName("IX_organization_departments_parent_id");
+
+                    b.ToTable("organization_departments", "corebackend");
+                });
+
+            modelBuilder.Entity("Application.Entities.OrganizationEmployee", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AdditionalName")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("additional_name");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("DepartmentId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("department_id");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("full_name");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Position")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("position");
+
+                    b.Property<int>("SourceRowNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("source_row_number");
+
+                    b.Property<string>("Surname")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("surname");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DepartmentId")
+                        .HasDatabaseName("IX_organization_employees_department_id");
+
+                    b.HasIndex("FullName")
+                        .HasDatabaseName("IX_organization_employees_full_name");
+
+                    b.ToTable("organization_employees", "corebackend");
                 });
 
             modelBuilder.Entity("Application.Entities.Permission", b =>
@@ -382,6 +644,44 @@ namespace Infrastructure.Migrations
                     b.ToTable("role_permissions", "corebackend");
                 });
 
+            modelBuilder.Entity("Application.Entities.Tag", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("color");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("event_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("IX_tags_event_id_name");
+
+                    b.ToTable("tags", "corebackend");
+                });
+
             modelBuilder.Entity("Application.Entities.User", b =>
                 {
                     b.Property<long>("Id")
@@ -450,19 +750,28 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("CreatedByUserId");
 
-                    b.HasIndex("EventId");
-
-                    b.HasIndex("EventId", "CreatedAt")
-                        .HasDatabaseName("IX_users_event_id_created_at");
-
                     b.HasIndex("GroupId");
 
                     b.HasIndex("RoleId");
+
+                    b.HasIndex("EventId", "CreatedAt")
+                        .HasDatabaseName("IX_users_event_id_created_at");
 
                     b.HasIndex("LoginId", "EventId")
                         .IsUnique();
 
                     b.ToTable("users", "corebackend");
+                });
+
+            modelBuilder.Entity("Application.Entities.Category", b =>
+                {
+                    b.HasOne("Application.Entities.Event", "Event")
+                        .WithMany("Categories")
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Event");
                 });
 
             modelBuilder.Entity("Application.Entities.Event", b =>
@@ -481,6 +790,24 @@ namespace Infrastructure.Migrations
                     b.Navigation("LogoImage");
 
                     b.Navigation("Owner");
+                });
+
+            modelBuilder.Entity("Application.Entities.EventLog", b =>
+                {
+                    b.HasOne("Application.Entities.Event", "Event")
+                        .WithMany("Logs")
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Application.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Event");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Application.Entities.Group", b =>
@@ -528,6 +855,25 @@ namespace Infrastructure.Migrations
                     b.Navigation("Group");
                 });
 
+            modelBuilder.Entity("Application.Entities.GuestCategory", b =>
+                {
+                    b.HasOne("Application.Entities.Category", "Category")
+                        .WithMany("GuestCategories")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Application.Entities.Guest", "Guest")
+                        .WithOne("GuestCategory")
+                        .HasForeignKey("Application.Entities.GuestCategory", "GuestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Category");
+
+                    b.Navigation("Guest");
+                });
+
             modelBuilder.Entity("Application.Entities.GuestDecision", b =>
                 {
                     b.HasOne("Application.Entities.User", "ActorUser")
@@ -544,6 +890,46 @@ namespace Infrastructure.Migrations
                     b.Navigation("ActorUser");
 
                     b.Navigation("Guest");
+                });
+
+            modelBuilder.Entity("Application.Entities.GuestTag", b =>
+                {
+                    b.HasOne("Application.Entities.Guest", "Guest")
+                        .WithMany("GuestTags")
+                        .HasForeignKey("GuestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Application.Entities.Tag", "Tag")
+                        .WithMany("GuestTags")
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Guest");
+
+                    b.Navigation("Tag");
+                });
+
+            modelBuilder.Entity("Application.Entities.OrganizationDepartment", b =>
+                {
+                    b.HasOne("Application.Entities.OrganizationDepartment", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("Application.Entities.OrganizationEmployee", b =>
+                {
+                    b.HasOne("Application.Entities.OrganizationDepartment", "Department")
+                        .WithMany("Employees")
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Department");
                 });
 
             modelBuilder.Entity("Application.Entities.RolePermission", b =>
@@ -563,6 +949,17 @@ namespace Infrastructure.Migrations
                     b.Navigation("Permission");
 
                     b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("Application.Entities.Tag", b =>
+                {
+                    b.HasOne("Application.Entities.Event", "Event")
+                        .WithMany("Tags")
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Event");
                 });
 
             modelBuilder.Entity("Application.Entities.User", b =>
@@ -607,11 +1004,22 @@ namespace Infrastructure.Migrations
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("Application.Entities.Category", b =>
+                {
+                    b.Navigation("GuestCategories");
+                });
+
             modelBuilder.Entity("Application.Entities.Event", b =>
                 {
+                    b.Navigation("Categories");
+
                     b.Navigation("Groups");
 
                     b.Navigation("Guests");
+
+                    b.Navigation("Logs");
+
+                    b.Navigation("Tags");
 
                     b.Navigation("Users");
                 });
@@ -628,6 +1036,10 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("Application.Entities.Guest", b =>
                 {
                     b.Navigation("Decisions");
+
+                    b.Navigation("GuestCategory");
+
+                    b.Navigation("GuestTags");
                 });
 
             modelBuilder.Entity("Application.Entities.ImageEntity", b =>
@@ -640,6 +1052,13 @@ namespace Infrastructure.Migrations
                     b.Navigation("Users");
                 });
 
+            modelBuilder.Entity("Application.Entities.OrganizationDepartment", b =>
+                {
+                    b.Navigation("Children");
+
+                    b.Navigation("Employees");
+                });
+
             modelBuilder.Entity("Application.Entities.Permission", b =>
                 {
                     b.Navigation("RolePermissions");
@@ -650,6 +1069,11 @@ namespace Infrastructure.Migrations
                     b.Navigation("RolePermissions");
 
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("Application.Entities.Tag", b =>
+                {
+                    b.Navigation("GuestTags");
                 });
 
             modelBuilder.Entity("Application.Entities.User", b =>

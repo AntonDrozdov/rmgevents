@@ -30,6 +30,17 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
             guest.EventId,
             guest.GroupId,
             guest.Group?.Name,
+            guest.GuestCategory?.CategoryId,
+            guest.GuestCategory?.Category?.Name,
+            guest.GuestCategory?.Category?.Color,
+            guest.GuestTags
+                .Where(item => item.Tag != null)
+                .OrderBy(item => item.Tag!.Name)
+                .Select(item => new GuestTagDto(
+                    item.TagId,
+                    item.Tag!.Name,
+                    item.Tag.Color))
+                .ToList(),
             guest.Name,
             guest.Email,
             guest.Phone,
@@ -54,9 +65,11 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null,
-        [FromQuery] string? status = null)
+        [FromQuery] string? status = null,
+        [FromQuery] long? categoryId = null,
+        [FromQuery(Name = "tagIds")] List<long>? tagIds = null)
     {
-        var guests = await guestService.GetGuestsPageByEventAsync(eventId, page, pageSize, search, status);
+        var guests = await guestService.GetGuestsPageByEventAsync(eventId, page, pageSize, search, status, categoryId, tagIds);
         var result = guests.Items.Select(MapGuest).ToList();
 
         return Ok(new PagedResultDto<GuestDto>(
@@ -103,7 +116,9 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
                 request.Name,
                 request.Email,
                 request.Phone,
-                request.GroupId);
+                request.GroupId,
+                request.CategoryId,
+                request.TagIds ?? []);
             
             return Created(
                 $"/guests/{guest.Id}",
@@ -238,7 +253,9 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
                 request.Name,
                 request.Email,
                 request.Phone,
-                request.GroupId);
+                request.GroupId,
+                request.CategoryId,
+                request.TagIds ?? []);
 
             var guest = await guestService.GetGuestAsync(guestId);
             return guest == null ? NotFound() : Ok(MapGuest(guest));

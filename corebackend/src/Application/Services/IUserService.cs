@@ -26,6 +26,7 @@ public interface IUserService
     Task UpdateUserAsync(
         long userId,
         long eventId,
+        long actorLoginId,
         string login,
         string name,
         string surname,
@@ -35,6 +36,6 @@ public interface IUserService
         long roleId,
         long groupId);
     Task AssignRoleAsync(long userId, long eventId, long roleId, long groupId);
-    Task<string> ResetUserPasswordAsync(long userId, long eventId);
-    Task DeleteUserAsync(long userId);
+    Task<string> ResetUserPasswordAsync(long userId, long eventId, long actorLoginId);
+    Task DeleteUserAsync(long userId, long actorLoginId);
 }

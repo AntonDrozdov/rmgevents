@@ -8,8 +8,11 @@ public sealed class GroupService(
     IUserRepository userRepository,
     IGuestRepository guestRepository,
     IPermissionService permissionService,
-    IEventStateGuard eventStateGuard) : IGroupService
+    IEventStateGuard eventStateGuard,
+    IEventLogService eventLogService) : IGroupService
 {
+    private const int DefaultRootQuota = 10000;
+
     public async Task<Application.Entities.Group> CreateGroupAsync(
         long eventId,
         long userId,
@@ -49,6 +52,15 @@ public sealed class GroupService(
         
         await groupRepository.AddAsync(group);
         await groupRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            eventId,
+            userId,
+            "created",
+            "Group",
+            group.Id,
+            "Создана группа",
+            $"Группа: {group.Name}, квота: {group.Quota}");
         
         return group;
     }
@@ -153,6 +165,15 @@ public sealed class GroupService(
         
         await groupRepository.UpdateAsync(group);
         await groupRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            eventId,
+            userId,
+            "updated",
+            "Group",
+            group.Id,
+            "Изменена группа",
+            $"Группа: {group.Name}, квота: {group.Quota}");
     }
     
     public async Task DeleteGroupAsync(long eventId, long userId, long groupId)
@@ -178,11 +199,83 @@ public sealed class GroupService(
         if (await guestRepository.ExistsByGroupIdsAsync(branchGroupIds))
             throw new InvalidOperationException("Cannot delete a group branch that contains guests");
 
+        var groupName = group.Name;
+
         foreach (var descendant in descendants.AsEnumerable().Reverse())
             await groupRepository.DeleteAsync(descendant.Id);
 
         await groupRepository.DeleteAsync(groupId);
         await groupRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            eventId,
+            userId,
+            "deleted",
+            "Group",
+            groupId,
+            "Удалена группа",
+            $"Группа: {groupName}");
+    }
+
+    public async Task<ResetGroupsResult> ResetGroupsAsync(long eventId, long userId)
+    {
+        await eventStateGuard.EnsureActiveAsync(eventId);
+
+        if (!await permissionService.HasPermissionAsync(userId, eventId, "create_event"))
+            throw new UnauthorizedAccessException("No permission to reset groups");
+
+        var groups = await groupRepository.GetByEventIdAsync(eventId);
+        var rootGroups = groups.Where(group => group.ParentGroupId == null).ToList();
+        if (rootGroups.Count != 1)
+            throw new InvalidOperationException("У мероприятия должна быть одна корневая группа.");
+
+        var rootGroup = rootGroups[0];
+        var groupsToDelete = groups
+            .Where(group => group.Id != rootGroup.Id)
+            .OrderByDescending(group => GetDepth(group, groups))
+            .ToList();
+
+        var users = await userRepository.GetByEventIdAsync(eventId);
+        var usersMoved = 0;
+        foreach (var user in users.Where(user => user.GroupId != rootGroup.Id))
+        {
+            user.GroupId = rootGroup.Id;
+            await userRepository.UpdateAsync(user);
+            usersMoved++;
+        }
+
+        var guests = await guestRepository.GetByEventIdAsync(eventId);
+        var guestsMoved = 0;
+        foreach (var guest in guests.Where(guest => guest.GroupId != rootGroup.Id))
+        {
+            guest.GroupId = rootGroup.Id;
+            await guestRepository.UpdateAsync(guest);
+            guestsMoved++;
+        }
+
+        rootGroup.Quota = DefaultRootQuota;
+        await groupRepository.UpdateAsync(rootGroup);
+        await groupRepository.SaveChangesAsync();
+
+        foreach (var group in groupsToDelete)
+            await groupRepository.DeleteAsync(group.Id);
+
+        await groupRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            eventId,
+            userId,
+            "groups_reset",
+            "Group",
+            rootGroup.Id,
+            "Группы сброшены",
+            $"Удалено групп: {groupsToDelete.Count}, гостей перенесено: {guestsMoved}, сотрудников перенесено: {usersMoved}, квота корня: {DefaultRootQuota}");
+
+        return new ResetGroupsResult(
+            groupsToDelete.Count,
+            guestsMoved,
+            usersMoved,
+            DefaultRootQuota);
     }
 
     private async Task EnsureCanManageGroupAsync(long eventId, long userId, long groupId)
@@ -196,5 +289,22 @@ public sealed class GroupService(
         {
             throw new UnauthorizedAccessException("Cannot manage this group");
         }
+    }
+
+    private static int GetDepth(Application.Entities.Group group, List<Application.Entities.Group> groups)
+    {
+        var depth = 0;
+        var parentId = group.ParentGroupId;
+        while (parentId.HasValue)
+        {
+            var parent = groups.FirstOrDefault(item => item.Id == parentId.Value);
+            if (parent == null)
+                break;
+
+            depth++;
+            parentId = parent.ParentGroupId;
+        }
+
+        return depth;
     }
 }
