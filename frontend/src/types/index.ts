@@ -103,6 +103,8 @@ export interface CreateGroupRequest {
 export interface UpdateGroupRequest {
   name: string;
   quota: number;
+  parentGroupId?: number | null;
+  moveToParent?: boolean;
 }
 
 export interface GroupTreeDto {
@@ -136,6 +138,30 @@ export interface ResetGroupsResultDto {
   guestsMoved: number;
   usersMoved: number;
   rootQuota: number;
+}
+
+export interface GroupTemplateDto {
+  id: number;
+  name: string;
+  description?: string | null;
+  groupsCount: number;
+  createdByLogin: string;
+  createdAt: string;
+}
+
+export interface CreateGroupTemplateRequest {
+  name: string;
+  description?: string | null;
+}
+
+export interface ApplyGroupTemplateResultDto {
+  templateId: number;
+  templateName: string;
+  groupsDeleted: number;
+  groupsCreated: number;
+  rootGroupId: number;
+  rootQuota: number;
+  warnings: string[];
 }
 
 export interface CategoryDto {

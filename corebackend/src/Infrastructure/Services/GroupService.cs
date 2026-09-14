@@ -147,8 +147,51 @@ public sealed class GroupService(
                 $"Child groups quotas sum would exceed parent quota. Available quota: {availableQuota}");
         }
     }
+
+    private async Task ValidateGroupChildrenQuotaAsync(long groupId, int newQuota)
+    {
+        if (newQuota < 0)
+            throw new InvalidOperationException("Group quota cannot be negative");
+
+        var children = await groupRepository.GetChildrenAsync(groupId);
+        var childrenQuotaSum = children.Sum(group => (long)group.Quota);
+
+        if (childrenQuotaSum > newQuota)
+            throw new InvalidOperationException(
+                $"New quota {newQuota} is less than sum of children quotas {childrenQuotaSum}");
+    }
+
+    private async Task ValidateNewParentQuotaAsync(long parentGroupId, long movingGroupId, int movingGroupQuota)
+    {
+        if (movingGroupQuota < 0)
+            throw new InvalidOperationException("Group quota cannot be negative");
+
+        var parent = await groupRepository.GetByIdAsync(parentGroupId);
+        if (parent == null)
+            throw new InvalidOperationException($"Parent group {parentGroupId} not found");
+
+        var children = await groupRepository.GetChildrenAsync(parentGroupId);
+        var allocatedQuota = children
+            .Where(group => group.Id != movingGroupId)
+            .Sum(group => (long)group.Quota);
+        var quotaAfterMove = allocatedQuota + movingGroupQuota;
+
+        if (quotaAfterMove > parent.Quota)
+        {
+            var availableQuota = Math.Max(0L, parent.Quota - allocatedQuota);
+            throw new InvalidOperationException(
+                $"Child groups quotas sum would exceed parent quota. Available quota: {availableQuota}");
+        }
+    }
     
-    public async Task UpdateGroupAsync(long eventId, long userId, long groupId, string name, int quota)
+    public async Task UpdateGroupAsync(
+        long eventId,
+        long userId,
+        long groupId,
+        string name,
+        int quota,
+        long? parentGroupId = null,
+        bool moveToParent = false)
     {
         var group = await groupRepository.GetByIdAsync(groupId);
         if (group == null || group.EventId != eventId)
@@ -157,11 +200,54 @@ public sealed class GroupService(
         await eventStateGuard.EnsureActiveAsync(eventId);
 
         await EnsureCanManageGroupAsync(eventId, userId, groupId);
-        
-        await ValidateQuotaHierarchyAsync(groupId, quota);
-        
+
+        var oldParentGroupId = group.ParentGroupId;
+        var oldQuota = group.Quota;
+        var moved = moveToParent && parentGroupId.HasValue && parentGroupId.Value != oldParentGroupId;
+        var descendants = new List<Application.Entities.Group>();
+
+        if (moveToParent)
+        {
+            if (!group.ParentGroupId.HasValue)
+                throw new InvalidOperationException("The root group cannot be moved");
+
+            if (!parentGroupId.HasValue)
+                throw new InvalidOperationException("Target parent group is required");
+
+            var newParent = await groupRepository.GetByIdAsync(parentGroupId.Value);
+            if (newParent == null || newParent.EventId != eventId)
+                throw new InvalidOperationException($"Parent group {parentGroupId.Value} not found");
+
+            await EnsureCanManageGroupAsync(eventId, userId, parentGroupId.Value);
+
+            if (newParent.Id == group.Id)
+                throw new InvalidOperationException("Group cannot be moved into itself");
+
+            descendants = await groupRepository.GetAllDescendantsAsync(group.Id);
+            if (descendants.Any(descendant => descendant.Id == newParent.Id))
+                throw new InvalidOperationException("Group cannot be moved into its child branch");
+        }
+
+        if (moved)
+        {
+            quota = 0;
+        }
+        else
+        {
+            await ValidateQuotaHierarchyAsync(groupId, quota);
+        }
+
         group.Name = name;
         group.Quota = quota;
+        if (moved)
+        {
+            group.ParentGroupId = parentGroupId;
+            foreach (var descendant in descendants)
+            {
+                descendant.Quota = 0;
+                await groupRepository.UpdateAsync(descendant);
+            }
+        }
         
         await groupRepository.UpdateAsync(group);
         await groupRepository.SaveChangesAsync();
@@ -173,7 +259,9 @@ public sealed class GroupService(
             "Group",
             group.Id,
             "Изменена группа",
-            $"Группа: {group.Name}, квота: {group.Quota}");
+            moved
+                ? $"Группа: {group.Name}, перенесена из родителя {oldParentGroupId} в родителя {group.ParentGroupId}, квоты ветки сброшены в 0, затронуто групп: {descendants.Count + 1}, прежняя квота группы: {oldQuota}"
+                : $"Группа: {group.Name}, квота: {group.Quota}");
     }
     
     public async Task DeleteGroupAsync(long eventId, long userId, long groupId)

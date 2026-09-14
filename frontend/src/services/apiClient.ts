@@ -1,11 +1,13 @@
 import axios, { AxiosInstance } from "axios";
 import {
   ApproveGuestRequest,
+  ApplyGroupTemplateResultDto,
   ApplyOriginalStructureResultDto,
   CategoryDto,
   CreateCategoryRequest,
   CreateEventRequest,
   CreateGroupRequest,
+  CreateGroupTemplateRequest,
   CreateGuestRequest,
   CreateTagRequest,
   CreateUserRequest,
@@ -13,6 +15,7 @@ import {
   EventDto,
   EventLogDto,
   EventLogFilterOptionsDto,
+  GroupTemplateDto,
   GroupTreeDto,
   GuestDto,
   GuestSearchResultDto,
@@ -188,6 +191,30 @@ class ApiClient {
 
   async resetGroups(eventId: string | number): Promise<ResetGroupsResultDto> {
     const response = await this.client.post<ResetGroupsResultDto>(`/events/${eventId}/groups/reset`);
+    return response.data;
+  }
+
+  async getGroupTemplates(eventId: string | number): Promise<GroupTemplateDto[]> {
+    const response = await this.client.get<GroupTemplateDto[]>(`/events/${eventId}/groups/templates`);
+    return response.data;
+  }
+
+  async createGroupTemplate(
+    eventId: string | number,
+    request: CreateGroupTemplateRequest
+  ): Promise<GroupTemplateDto> {
+    const response = await this.client.post<GroupTemplateDto>(`/events/${eventId}/groups/templates`, request);
+    return response.data;
+  }
+
+  async applyGroupTemplate(
+    eventId: string | number,
+    templateId: number
+  ): Promise<ApplyGroupTemplateResultDto> {
+    const response = await this.client.post<ApplyGroupTemplateResultDto>(
+      `/events/${eventId}/groups/apply-template`,
+      { templateId }
+    );
     return response.data;
   }
 

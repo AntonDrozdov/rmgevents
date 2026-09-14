@@ -23,6 +23,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<EventLog> EventLogs => Set<EventLog>();
     public DbSet<OrganizationDepartment> OrganizationDepartments => Set<OrganizationDepartment>();
     public DbSet<OrganizationEmployee> OrganizationEmployees => Set<OrganizationEmployee>();
+    public DbSet<GroupTemplate> GroupTemplates => Set<GroupTemplate>();
+    public DbSet<GroupTemplateItem> GroupTemplateItems => Set<GroupTemplateItem>();
 
     [DbFunction("regexp_replace", IsBuiltIn = true)]
     public static string RegexpReplace(string input, string pattern, string replacement, string flags)

@@ -18,7 +18,9 @@ public sealed record CreateGroupRequest(
 
 public sealed record UpdateGroupRequest(
     string Name,
-    int Quota);
+    int Quota,
+    long? ParentGroupId = null,
+    bool MoveToParent = false);
 
 public sealed record GroupTreeDto(
     long Id,
@@ -33,3 +35,27 @@ public sealed record ResetGroupsResultDto(
     int GuestsMoved,
     int UsersMoved,
     int RootQuota);
+
+public sealed record GroupTemplateDto(
+    long Id,
+    string Name,
+    string? Description,
+    int GroupsCount,
+    string CreatedByLogin,
+    DateTimeOffset CreatedAt);
+
+public sealed record CreateGroupTemplateRequest(
+    string Name,
+    string? Description);
+
+public sealed record ApplyGroupTemplateRequest(
+    long TemplateId);
+
+public sealed record ApplyGroupTemplateResultDto(
+    long TemplateId,
+    string TemplateName,
+    int GroupsDeleted,
+    int GroupsCreated,
+    long RootGroupId,
+    int RootQuota,
+    List<string> Warnings);

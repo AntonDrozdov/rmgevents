@@ -12,7 +12,8 @@ namespace Api.Controllers;
 [Authorize]
 public sealed class GroupsController(
     IGroupService groupService,
-    IOrganizationStructureService organizationStructureService) : ControllerBase
+    IOrganizationStructureService organizationStructureService,
+    IGroupTemplateService groupTemplateService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<List<GroupTreeDto>>> GetGroupTree(long eventId)
@@ -63,7 +64,14 @@ public sealed class GroupsController(
 
         try
         {
-            await groupService.UpdateGroupAsync(eventId, userId, groupId, request.Name, request.Quota);
+            await groupService.UpdateGroupAsync(
+                eventId,
+                userId,
+                groupId,
+                request.Name,
+                request.Quota,
+                request.ParentGroupId,
+                request.MoveToParent);
             return NoContent();
         }
         catch (UnauthorizedAccessException ex)
@@ -94,6 +102,91 @@ public sealed class GroupsController(
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateEvent")]
+    [HttpGet("templates")]
+    public async Task<ActionResult<List<GroupTemplateDto>>> GetTemplates(
+        long eventId,
+        CancellationToken cancellationToken)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            var templates = await groupTemplateService.GetTemplatesAsync(eventId, loginId, cancellationToken);
+            return Ok(templates.Select(MapTemplate).ToList());
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+    }
+
+    [Authorize(Policy = "CanCreateEvent")]
+    [HttpPost("templates")]
+    public async Task<ActionResult<GroupTemplateDto>> CreateTemplate(
+        long eventId,
+        CreateGroupTemplateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            var template = await groupTemplateService.SaveFromEventAsync(
+                eventId,
+                loginId,
+                request.Name,
+                request.Description,
+                cancellationToken);
+
+            return Ok(MapTemplate(template));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [Authorize(Policy = "CanCreateEvent")]
+    [HttpPost("apply-template")]
+    public async Task<ActionResult<ApplyGroupTemplateResultDto>> ApplyTemplate(
+        long eventId,
+        ApplyGroupTemplateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            var result = await groupTemplateService.ApplyToEventAsync(
+                eventId,
+                loginId,
+                request.TemplateId,
+                cancellationToken);
+
+            return Ok(new ApplyGroupTemplateResultDto(
+                result.TemplateId,
+                result.TemplateName,
+                result.GroupsDeleted,
+                result.GroupsCreated,
+                result.RootGroupId,
+                result.RootQuota,
+                result.Warnings));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
     }
 
@@ -219,4 +312,13 @@ public sealed class GroupsController(
             g.ChildGroups.Any() ? MapToTreeDtos(g.ChildGroups.ToList()) : []))
             .ToList();
     }
+
+    private static GroupTemplateDto MapTemplate(GroupTemplateSummary template) =>
+        new(
+            template.Id,
+            template.Name,
+            template.Description,
+            template.GroupsCount,
+            template.CreatedByLogin,
+            template.CreatedAt);
 }

@@ -51,6 +51,7 @@ public static class DependencyInjection
         services.AddScoped<IEventStateGuard, EventStateGuard>();
         services.AddScoped<IEventLogService, EventLogService>();
         services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
+        services.AddScoped<IGroupTemplateService, GroupTemplateService>();
 
         return services;
     }

@@ -47,12 +47,16 @@ button:disabled {
 .app-loading,
 .login-page {
   display: grid;
-  min-height: 100vh;
   place-items: center;
   padding: 24px;
 }
 
+.app-loading {
+  min-height: 100vh;
+}
+
 .login-page {
+  min-height: calc(100vh / var(--app-ui-scale));
   background:
     linear-gradient(135deg, rgba(22, 38, 68, 0.92), rgba(27, 83, 107, 0.82)),
     radial-gradient(circle at 20% 20%, #8dd6b7, transparent 28%),
@@ -1786,6 +1790,16 @@ code {
   font-size: 13px;
 }
 
+.group-move-field,
+.group-move-warning,
+.group-move-note {
+  grid-column: 1 / -1;
+}
+
+.group-move-dropdown {
+  max-height: 220px;
+}
+
 .groups-search-message {
   padding-bottom: 10px;
   color: #657086;
@@ -1797,9 +1811,95 @@ code {
   color: #2f6f87;
 }
 
+.group-template-actions {
+  display: inline-flex;
+  align-items: end;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.groups-tree-view {
+  position: relative;
+  height: max(300px, calc((100vh / var(--app-ui-scale)) - 470px));
+  min-height: 0;
+}
+
+.groups-tree-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 28px;
+  z-index: 8;
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid rgba(41, 41, 98, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.groups-tree-tool-button,
+.groups-tree-scroll-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(47, 111, 135, 0.18);
+  background: #ffffff;
+  color: #2f6f87;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.groups-tree-tool-button:hover,
+.groups-tree-scroll-button:hover {
+  border-color: rgba(47, 111, 135, 0.42);
+  background: #f4fbfd;
+  color: #25596d;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(47, 111, 135, 0.14);
+}
+
+.groups-tree-tool-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+}
+
+.groups-tree-tool-button svg,
+.groups-tree-scroll-button svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.groups-tree-scroll-actions {
+  position: absolute;
+  right: 30px;
+  bottom: 14px;
+  z-index: 8;
+  display: grid;
+  gap: 8px;
+}
+
+.groups-tree-scroll-button {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
 .groups-tree-scroll {
   overflow: auto;
-  padding: 8px 4px 16px;
+  height: 100%;
+  padding: 52px 58px 58px 4px;
   scrollbar-gutter: stable;
 }
 
@@ -1821,6 +1921,7 @@ code {
   position: relative;
   display: flex;
   align-items: center;
+  --group-node-width: 250px;
 }
 
 .group-tree-node {
@@ -1829,7 +1930,7 @@ code {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  width: 250px;
+  width: var(--group-node-width);
   min-height: 54px;
   padding: 9px 10px 9px 12px;
   border: 1px solid rgba(41, 41, 98, 0.16);
@@ -1837,32 +1938,104 @@ code {
   border-radius: 12px;
   background: rgba(248, 250, 252, 0.96);
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease,
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.group-tree-node-draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.group-tree-node-draggable:active,
+.group-tree-node-drag-source {
+  cursor: grabbing;
+}
+
+.group-tree-node-zero-quota:not(.group-tree-node-highlighted) {
+  border-color: rgba(190, 18, 60, 0.42);
+  border-left-color: #be123c;
+  background: #fff5f7;
+  box-shadow: 0 8px 22px rgba(190, 18, 60, 0.1);
+}
+
+.group-tree-node-zero-quota:not(.group-tree-node-highlighted) .group-tree-node-content span {
+  color: #be123c;
 }
 
 .group-tree-node-highlighted {
-  border-color: rgba(47, 111, 135, 0.72);
-  border-left-color: #2f6f87;
-  background: #f4fbfd;
+  border-color: rgba(22, 163, 74, 0.72);
+  border-left-color: #16a34a;
+  background: #f0fdf4;
   box-shadow:
-    0 0 0 4px rgba(47, 111, 135, 0.16),
-    0 14px 32px rgba(47, 111, 135, 0.16);
+    0 0 0 4px rgba(22, 163, 74, 0.16),
+    0 14px 32px rgba(22, 163, 74, 0.16);
+}
+
+.group-tree-node-drag-branch {
+  border-color: rgba(47, 111, 135, 0.58);
+  border-left-color: #2f6f87;
+  background: #eef9fd;
+  box-shadow:
+    0 0 0 3px rgba(47, 111, 135, 0.12),
+    0 12px 26px rgba(47, 111, 135, 0.14);
+}
+
+.group-tree-node-drag-source {
+  opacity: 0.76;
+  transform: scale(0.985);
+}
+
+.group-tree-node-drop-target {
+  border-color: rgba(22, 163, 74, 0.78);
+  border-left-color: #16a34a;
+  background: #ecfdf5;
+  box-shadow:
+    0 0 0 4px rgba(22, 163, 74, 0.18),
+    0 16px 34px rgba(22, 163, 74, 0.18);
+}
+
+.group-tree-node-zero-quota.group-tree-node-drop-target:not(.group-tree-node-highlighted) {
+  border-color: rgba(22, 163, 74, 0.82);
+  border-left-color: #16a34a;
+  background: #ecfdf5;
+  box-shadow:
+    0 0 0 4px rgba(22, 163, 74, 0.2),
+    0 16px 34px rgba(22, 163, 74, 0.2);
+}
+
+.group-tree-node-zero-quota.group-tree-node-drop-target:not(.group-tree-node-highlighted) .group-tree-node-content span {
+  color: #166534;
+}
+
+.group-tree-node-drop-disabled {
+  cursor: no-drop;
+  border-color: rgba(190, 18, 60, 0.58);
+  border-left-color: #be123c;
+  background: #fff5f7;
+  box-shadow:
+    0 0 0 4px rgba(190, 18, 60, 0.13),
+    0 12px 26px rgba(190, 18, 60, 0.12);
 }
 
 .group-tree-collapse-toggle {
   display: inline-flex;
-  flex: 0 0 24px;
+  flex: 0 0 28px;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border: 1px solid rgba(47, 111, 135, 0.22);
   border-radius: 999px;
   background: #ffffff;
   color: #2f6f87;
   cursor: pointer;
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1;
+  padding: 0;
+  line-height: 0;
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
@@ -1875,6 +2048,13 @@ code {
   background: #f4fbfd;
   color: #25596d;
   transform: translateY(-1px);
+}
+
+.group-tree-collapse-toggle svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
 }
 
 .group-tree-node-content {
@@ -1900,8 +2080,17 @@ code {
 .group-tree-node-actions {
   display: inline-flex;
   align-items: center;
+  align-self: center;
   gap: 4px;
   margin-left: auto;
+}
+
+.group-tree-node-actions .group-tree-collapse-toggle {
+  margin-left: 8px;
+}
+
+.group-tree-node-actions .icon-button + .group-tree-collapse-toggle {
+  padding: 0;
 }
 
 .group-tree-node-actions .icon-button {
@@ -1910,32 +2099,17 @@ code {
   height: 26px;
 }
 
-.group-tree-add {
-  display: inline-grid;
-  flex: 0 0 32px;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--brand-color);
-  color: white;
-  font: inherit;
-  font-size: 22px;
+.group-tree-node-actions .group-tree-add-inline {
+  color: #2f6f87;
+  font-size: 17px;
+  font-weight: 700;
   line-height: 1;
-  cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
-.group-tree-add:hover {
-  transform: translateY(-1px);
-  background: var(--brand-color-hover);
-  box-shadow: 0 7px 16px rgba(41, 41, 98, 0.22);
-}
-
-.group-tree-add:focus-visible {
-  outline: 3px solid rgba(41, 41, 98, 0.2);
-  outline-offset: 2px;
+.group-tree-node-actions .group-tree-add-inline:hover:not(:disabled) {
+  border-color: rgba(47, 111, 135, 0.35);
+  background: #f4fbfd;
+  color: #25596d;
 }
 
 .group-tree-children {
@@ -2023,6 +2197,27 @@ code {
   color: #8a5a00;
   font-size: 12px;
   font-weight: 700;
+}
+
+.group-template-preview {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid rgba(47, 111, 135, 0.16);
+  border-radius: 10px;
+  background: #f8fbfd;
+  color: #34405a;
+  font-size: 13px;
+}
+
+.group-template-preview strong {
+  color: #172033;
+}
+
+.group-template-preview p {
+  margin: 4px 0 0;
+  color: #657086;
 }
 
 .employee-form-message {
@@ -2959,13 +3154,21 @@ code {
     padding-bottom: 0;
   }
 
+  .groups-tree-view {
+    height: max(280px, calc((100vh / var(--app-ui-scale)) - 410px));
+  }
+
   .groups-tree-scroll {
     margin-right: -4px;
-    padding-bottom: 12px;
+    padding: 48px 52px 54px 4px;
+  }
+
+  .group-tree-item {
+    --group-node-width: 230px;
   }
 
   .group-tree-node {
-    width: 230px;
+    width: var(--group-node-width);
     min-height: 52px;
     padding: 8px 9px 8px 11px;
   }

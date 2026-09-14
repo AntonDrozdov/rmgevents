@@ -39,13 +39,11 @@ public sealed class GroupRepository(ApplicationDbContext db) : IGroupRepository
     public async Task<List<Application.Entities.Group>> GetAllDescendantsAsync(long groupId)
     {
         var root = await db.Groups
-            .AsNoTracking()
             .FirstOrDefaultAsync(group => group.Id == groupId);
         if (root == null)
             return [];
 
         var groups = await db.Groups
-            .AsNoTracking()
             .Where(group => group.EventId == root.EventId)
             .ToListAsync();
         var childrenByParentId = groups
