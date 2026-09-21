@@ -5,7 +5,7 @@ services:
     build:
       context: ../corebackend
       dockerfile: Dockerfile
-    image: rmgevents-corebackend:latest
+    image: rmgevents-corebackend:${APP_VERSION:?Set APP_VERSION in deploy/.env}
     container_name: rmgevents-corebackend
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -23,7 +23,7 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
-    image: rmgevents-frontend:latest
+    image: rmgevents-frontend:${APP_VERSION:?Set APP_VERSION in deploy/.env}
     container_name: rmgevents-frontend
     depends_on:
       - corebackend

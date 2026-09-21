@@ -22,6 +22,7 @@ import {
   LoginRequest,
   LoginResponse,
   OrganizationImportResultDto,
+  OrganizationStructureTreeDto,
   PagedResultDto,
   ResetGroupsResultDto,
   RoleDto,
@@ -185,6 +186,13 @@ class ApiClient {
   async applyOriginalStructure(eventId: string | number): Promise<ApplyOriginalStructureResultDto> {
     const response = await this.client.post<ApplyOriginalStructureResultDto>(
       `/events/${eventId}/groups/apply-original-structure`
+    );
+    return response.data;
+  }
+
+  async getOrganizationStructureTree(eventId: string | number): Promise<OrganizationStructureTreeDto> {
+    const response = await this.client.get<OrganizationStructureTreeDto>(
+      `/events/${eventId}/organization-structure/tree`
     );
     return response.data;
   }

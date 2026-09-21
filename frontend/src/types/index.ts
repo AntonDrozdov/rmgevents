@@ -133,6 +133,33 @@ export interface ApplyOriginalStructureResultDto {
   warnings: string[];
 }
 
+export interface OrganizationEmployeeTreeItemDto {
+  id: number;
+  departmentId: number;
+  fullName: string;
+  surname?: string | null;
+  name?: string | null;
+  additionalName?: string | null;
+  position: string;
+  sourceRowNumber: number;
+}
+
+export interface OrganizationDepartmentTreeItemDto {
+  id: number;
+  parentId?: number | null;
+  name: string;
+  isGeneratedFromParentName: boolean;
+  employees: OrganizationEmployeeTreeItemDto[];
+  children: OrganizationDepartmentTreeItemDto[];
+}
+
+export interface OrganizationStructureTreeDto {
+  departments: OrganizationDepartmentTreeItemDto[];
+  departmentsCount: number;
+  employeesCount: number;
+  loadedAt?: string | null;
+}
+
 export interface ResetGroupsResultDto {
   groupsDeleted: number;
   guestsMoved: number;
@@ -238,6 +265,9 @@ export interface UserDto {
   roleName?: string | null;
   groupId: number;
   groupName?: string | null;
+  organizationEmployeeId?: number | null;
+  position?: string | null;
+  departmentName?: string | null;
   name: string;
   surname: string;
   additionalName?: string | null;
@@ -270,6 +300,7 @@ export interface CreateUserRequest {
   tel?: string;
   roleId: number;
   groupId: number;
+  organizationEmployeeId?: number | null;
 }
 
 export interface UpdateUserRequest {

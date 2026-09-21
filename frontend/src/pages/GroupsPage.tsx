@@ -1,4 +1,4 @@
-import { ChangeEvent, DragEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import React, { ChangeEvent, DragEvent, MouseEvent, WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
@@ -8,8 +8,14 @@ import type {
   ApplyOriginalStructureResultDto,
   GroupTemplateDto,
   GroupTreeDto,
+  OrganizationDepartmentTreeItemDto,
+  OrganizationEmployeeTreeItemDto,
   OrganizationImportResultDto,
+  OrganizationStructureTreeDto,
   ResetGroupsResultDto,
+  RoleDto,
+  UserDto,
+  UserSearchResultDto,
 } from "../types";
 
 type GroupNodeProps = {
@@ -40,6 +46,18 @@ type GroupSearchOption = {
   path: string;
   depth: number;
 };
+
+type GroupEditTab = "settings" | "create-user" | "users";
+
+type OrganizationDepartmentPathOption = {
+  department: OrganizationDepartmentTreeItemDto;
+  pathParts: string[];
+  normalizedPath: string;
+};
+
+const GROUP_TREE_MIN_ZOOM = 0.5;
+const GROUP_TREE_MAX_ZOOM = 1.8;
+const GROUP_TREE_ZOOM_STEP = 0.1;
 
 const EditIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -92,10 +110,126 @@ const ChevronDownIcon = () => (
 const countGroups = (groups: GroupTreeDto[]): number =>
   groups.reduce((total, group) => total + 1 + countGroups(group.children ?? []), 0);
 
+const getMaxGroupDepth = (groups: GroupTreeDto[], depth = 1): number =>
+  groups.reduce(
+    (maxDepth, group) => Math.max(maxDepth, depth, getMaxGroupDepth(group.children ?? [], depth + 1)),
+    0
+  );
+
+const getCollapsedGroupIdsForVisibleDepth = (
+  groups: GroupTreeDto[],
+  visibleDepth: number,
+  depth = 1
+): number[] =>
+  groups.flatMap((group) => {
+    const children = group.children ?? [];
+    if (children.length === 0) return [];
+
+    if (depth >= visibleDepth) return [group.id];
+
+    return getCollapsedGroupIdsForVisibleDepth(children, visibleDepth, depth + 1);
+  });
+
 const getAvailableChildQuota = (group: GroupTreeDto): number =>
   Math.max(0, group.quota - (group.children ?? []).reduce((total, child) => total + child.quota, 0));
 
+const clampGroupTreeZoom = (value: number) =>
+  Math.min(GROUP_TREE_MAX_ZOOM, Math.max(GROUP_TREE_MIN_ZOOM, Math.round(value * 10) / 10));
+
 const normalizeGroupSearch = (value: string) => value.trim().toLocaleLowerCase("ru-RU");
+
+const normalizeSearch = (value: string) => value.trim().toLocaleLowerCase("ru-RU");
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const formatUserName = (user: Pick<UserDto, "surname" | "name" | "additionalName">) =>
+  [user.surname, user.name, user.additionalName].filter(Boolean).join(" ");
+
+const isAdministratorRoleName = (roleName?: string | null) => roleName?.toLowerCase() === "administrator";
+
+const emptyEmployeeForm = (groupId = "", roleId = "") => ({
+  surname: "",
+  name: "",
+  additionalName: "",
+  email: "",
+  login: "",
+  tel: "",
+  roleId,
+  groupId,
+});
+
+const HighlightedText: React.FC<{ value: string; query: string }> = ({ value, query }) => {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return <>{value}</>;
+
+  const parts = value.split(new RegExp(`(${escapeRegExp(trimmedQuery)})`, "ig"));
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.toLocaleLowerCase("ru-RU") === trimmedQuery.toLocaleLowerCase("ru-RU") ? (
+          <mark className="org-tree-search-highlight" key={`${part}-${index}`}>
+            {part}
+          </mark>
+        ) : (
+          <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
+        )
+      )}
+    </>
+  );
+};
+
+const departmentMatchesSearch = (department: OrganizationDepartmentTreeItemDto, query: string): boolean => {
+  if (!query) return true;
+
+  const ownMatch = normalizeSearch(department.name).includes(query);
+  const employeeMatch = department.employees.some((employee) =>
+    normalizeSearch(`${employee.fullName} ${employee.position}`).includes(query)
+  );
+  const childMatch = department.children.some((child) => departmentMatchesSearch(child, query));
+
+  return ownMatch || employeeMatch || childMatch;
+};
+
+const buildOrganizationDepartmentPathOptions = (
+  departments: OrganizationDepartmentTreeItemDto[],
+  parentNames: string[] = []
+): OrganizationDepartmentPathOption[] =>
+  departments.flatMap((department) => {
+    const pathParts = [...parentNames, department.name];
+    return [
+      {
+        department,
+        pathParts,
+        normalizedPath: pathParts.map(normalizeSearch).join(" / "),
+      },
+      ...buildOrganizationDepartmentPathOptions(department.children ?? [], pathParts),
+    ];
+  });
+
+const getGroupDepartmentPath = (groupOption: GroupSearchOption | null) =>
+  groupOption?.path
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(1) ?? [];
+
+const findMatchingOrganizationDepartment = (
+  departments: OrganizationDepartmentTreeItemDto[],
+  groupDepartmentPath: string[]
+) => {
+  if (groupDepartmentPath.length === 0) return null;
+
+  const normalizedGroupPath = groupDepartmentPath.map(normalizeSearch).join(" / ");
+  const options = buildOrganizationDepartmentPathOptions(departments);
+
+  return (
+    options.find((option) => option.normalizedPath === normalizedGroupPath)?.department ??
+    options.find((option) =>
+      normalizeSearch(option.department.name) === normalizeSearch(groupDepartmentPath[groupDepartmentPath.length - 1])
+    )?.department ??
+    null
+  );
+};
 
 const flattenGroups = (groups: GroupTreeDto[]): GroupTreeDto[] =>
   groups.flatMap((group) => [group, ...flattenGroups(group.children ?? [])]);
@@ -272,7 +406,7 @@ const GroupNode = ({
     >
       <div className="group-tree-node-content">
         <strong>{group.name}</strong>
-        <span>Квота: {group.quota} · Прямых: {children.length}</span>
+        <span>Квота: {group.quota}</span>
       </div>
       {(canCreate || hasChildren) && (
         <div className="group-tree-node-actions">
@@ -357,11 +491,92 @@ const GroupNode = ({
   );
 };
 
+const OrganizationDepartmentNode: React.FC<{
+  department: OrganizationDepartmentTreeItemDto;
+  query: string;
+  depth: number;
+  selectedEmployeeId: number | null;
+  onSelectEmployee: (employee: OrganizationEmployeeTreeItemDto) => void;
+}> = ({ department, query, depth, selectedEmployeeId, onSelectEmployee }) => {
+  const [isOpen, setIsOpen] = useState(depth < 1);
+  const normalizedQuery = normalizeSearch(query);
+  const visibleEmployees = normalizedQuery
+    ? department.employees.filter((employee) =>
+        normalizeSearch(`${employee.fullName} ${employee.position}`).includes(normalizedQuery)
+      )
+    : department.employees;
+  const visibleChildren = department.children.filter((child) => departmentMatchesSearch(child, normalizedQuery));
+  const hasContent = visibleEmployees.length > 0 || visibleChildren.length > 0;
+
+  useEffect(() => {
+    if (normalizedQuery && hasContent) setIsOpen(true);
+  }, [normalizedQuery, hasContent]);
+
+  if (!hasContent && normalizedQuery) return null;
+
+  return (
+    <li className="org-tree-department">
+      <button
+        className="org-tree-department-button"
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        style={{ paddingLeft: 10 + depth * 12 }}
+      >
+        <span aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
+        <strong>
+          <HighlightedText value={department.name} query={query} />
+        </strong>
+        <small>{department.employees.length}</small>
+      </button>
+      {isOpen && (
+        <div className="org-tree-department-content">
+          {visibleEmployees.map((employee) => (
+            <button
+              className={`org-tree-employee${selectedEmployeeId === employee.id ? " selected" : ""}`}
+              key={employee.id}
+              type="button"
+              onClick={() => onSelectEmployee(employee)}
+              style={{ paddingLeft: 30 + depth * 12 }}
+            >
+              <span>
+                <HighlightedText value={employee.fullName} query={query} />
+              </span>
+              <small>
+                <HighlightedText value={employee.position} query={query} />
+              </small>
+            </button>
+          ))}
+          {visibleChildren.length > 0 && (
+            <ul className="org-tree-list">
+              {visibleChildren.map((child) => (
+                <OrganizationDepartmentNode
+                  key={child.id}
+                  department={child}
+                  query={query}
+                  depth={depth + 1}
+                  selectedEmployeeId={selectedEmployeeId}
+                  onSelectEmployee={onSelectEmployee}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </li>
+  );
+};
+
 export const GroupsPage = () => {
   const { eventId = "" } = useParams<{ eventId: string }>();
   const { currentUser, currentEvent, events } = useAuth();
   const originalStructureInputRef = useRef<HTMLInputElement | null>(null);
   const groupsTreeScrollRef = useRef<HTMLDivElement | null>(null);
+  const groupsTreePanRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -391,18 +606,44 @@ export const GroupsPage = () => {
   const [draggedGroupId, setDraggedGroupId] = useState<number | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<number | null>(null);
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<number>>(() => new Set());
+  const [groupTreeZoom, setGroupTreeZoom] = useState(1);
+  const [isGroupTreePanning, setIsGroupTreePanning] = useState(false);
   const [moveParentSearch, setMoveParentSearch] = useState("");
   const [isMoveParentSearchOpen, setIsMoveParentSearchOpen] = useState(false);
   const [activeMoveParentOptionIndex, setActiveMoveParentOptionIndex] = useState(0);
   const [form, setForm] = useState({ name: "", quota: 1 });
   const [editForm, setEditForm] = useState({ name: "", quota: 0, parentGroupId: null as number | null });
+  const [activeEditTab, setActiveEditTab] = useState<GroupEditTab>("settings");
+  const [roles, setRoles] = useState<RoleDto[]>([]);
+  const [referencesLoading, setReferencesLoading] = useState(false);
+  const [employeeFormData, setEmployeeFormData] = useState(emptyEmployeeForm());
+  const [employeeLoginManuallyEdited, setEmployeeLoginManuallyEdited] = useState(false);
+  const [organizationTree, setOrganizationTree] = useState<OrganizationStructureTreeDto | null>(null);
+  const [organizationTreeLoading, setOrganizationTreeLoading] = useState(false);
+  const [organizationTreeError, setOrganizationTreeError] = useState<string | null>(null);
+  const [organizationTreeSearch, setOrganizationTreeSearch] = useState("");
+  const [showOnlyCurrentDepartmentEmployees, setShowOnlyCurrentDepartmentEmployees] = useState(true);
+  const [selectedOrganizationEmployeeId, setSelectedOrganizationEmployeeId] = useState<number | null>(null);
+  const [selectedOrganizationEmployeePosition, setSelectedOrganizationEmployeePosition] = useState<string | null>(null);
+  const [similarUsers, setSimilarUsers] = useState<UserSearchResultDto[]>([]);
+  const [similarUsersLoading, setSimilarUsersLoading] = useState(false);
+  const [similarUsersError, setSimilarUsersError] = useState<string | null>(null);
+  const [groupUsers, setGroupUsers] = useState<UserDto[]>([]);
+  const [groupUsersLoading, setGroupUsersLoading] = useState(false);
+  const [groupUsersError, setGroupUsersError] = useState<string | null>(null);
 
   const selectedEvent = useMemo(() => events.find((event) => String(event.id) === eventId) ?? currentEvent, [events, eventId, currentEvent]);
   const hasCreatePermission = currentUser?.permissions.includes("create_group") ?? false;
+  const hasCreateUserPermission = currentUser?.permissions.includes("create_user") ?? false;
   const isArchived = selectedEvent?.isArchived ?? false;
   const canManageOriginalStructure = (currentUser?.permissions.includes("create_event") ?? false) && !isArchived;
   const canCreate = hasCreatePermission && !isArchived;
   const groupsCount = useMemo(() => countGroups(groups), [groups]);
+  const maxGroupDepth = useMemo(() => Math.max(1, getMaxGroupDepth(groups)), [groups]);
+  const groupDepthLevels = useMemo(
+    () => Array.from({ length: maxGroupDepth }, (_, index) => index + 1),
+    [maxGroupDepth]
+  );
   const groupSearchOptions = useMemo(() => buildGroupSearchOptions(groups), [groups]);
   const parentGroupIdByGroupId = useMemo(() => buildParentGroupIdMap(groups), [groups]);
   const activeBranchSourceGroup = useMemo(
@@ -449,6 +690,32 @@ export const GroupsPage = () => {
   const selectedTemplate = selectedTemplateId
     ? templates.find((template) => template.id === selectedTemplateId) ?? null
     : null;
+  const editingGroupSearchOption = editingGroup
+    ? groupSearchOptions.find((option) => option.group.id === editingGroup.group.id) ?? null
+    : null;
+  const editingGroupDepartmentPath = useMemo(
+    () => getGroupDepartmentPath(editingGroupSearchOption),
+    [editingGroupSearchOption]
+  );
+  const matchingOrganizationDepartment = useMemo(
+    () =>
+      organizationTree
+        ? findMatchingOrganizationDepartment(organizationTree.departments, editingGroupDepartmentPath)
+        : null,
+    [editingGroupDepartmentPath, organizationTree]
+  );
+  const displayedOrganizationDepartments = useMemo(
+    () =>
+      showOnlyCurrentDepartmentEmployees && matchingOrganizationDepartment
+        ? [matchingOrganizationDepartment]
+        : organizationTree?.departments ?? [],
+    [matchingOrganizationDepartment, organizationTree, showOnlyCurrentDepartmentEmployees]
+  );
+  const isOrganizationDepartmentFilterEmpty =
+    showOnlyCurrentDepartmentEmployees &&
+    Boolean(organizationTree) &&
+    editingGroupDepartmentPath.length > 0 &&
+    !matchingOrganizationDepartment;
   const isMovingGroup = editingGroup !== null && editForm.parentGroupId !== initialEditParentGroupId;
   const parentAvailableQuota = parentGroup ? getAvailableChildQuota(parentGroup) : 0;
   const editMinimumQuota = editingGroup
@@ -466,6 +733,19 @@ export const GroupsPage = () => {
     editForm.name.trim() !== editingGroup.group.name ||
     editForm.quota !== editingGroup.group.quota ||
     isMovingGroup
+  );
+  const isEmployeeRoleAdministrator = (roleId: string) => {
+    const role = roles.find((item) => String(item.id) === roleId);
+    return isAdministratorRoleName(role?.name);
+  };
+  const visibleGroupUsers = useMemo(
+    () =>
+      editingGroup
+        ? groupUsers
+            .filter((user) => user.groupId === editingGroup.group.id)
+            .sort((left, right) => formatUserName(left).localeCompare(formatUserName(right), "ru-RU"))
+        : [],
+    [editingGroup, groupUsers]
   );
 
   const loadGroups = async () => {
@@ -510,6 +790,152 @@ export const GroupsPage = () => {
     window.addEventListener("mouseup", clearPressedGroup);
     return () => window.removeEventListener("mouseup", clearPressedGroup);
   }, [pressedGroupId]);
+
+  useEffect(() => {
+    if (!isGroupTreePanning) return;
+
+    const handleMouseMove = (event: globalThis.MouseEvent) => {
+      const panState = groupsTreePanRef.current;
+      const container = groupsTreeScrollRef.current;
+      if (!panState || !container) return;
+
+      event.preventDefault();
+      container.scrollLeft = panState.scrollLeft - (event.clientX - panState.startX);
+      container.scrollTop = panState.scrollTop - (event.clientY - panState.startY);
+    };
+
+    const stopPanning = () => {
+      groupsTreePanRef.current = null;
+      setIsGroupTreePanning(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", stopPanning);
+    window.addEventListener("blur", stopPanning);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", stopPanning);
+      window.removeEventListener("blur", stopPanning);
+    };
+  }, [isGroupTreePanning]);
+
+  useEffect(() => {
+    if (!editingGroup || activeEditTab !== "create-user" || roles.length > 0 || referencesLoading) return;
+
+    const loadReferences = async () => {
+      if (!eventId) return;
+
+      setReferencesLoading(true);
+      setError(null);
+      try {
+        const loadedRoles = await apiClient.getRoles(eventId);
+        setRoles(loadedRoles);
+        setEmployeeFormData((current) => ({
+          ...current,
+          roleId: current.roleId || String(loadedRoles[0]?.id ?? ""),
+          groupId: String(editingGroup.group.id),
+        }));
+      } catch (loadError) {
+        console.error(loadError);
+        setError("Не удалось загрузить роли для создания сотрудника.");
+      } finally {
+        setReferencesLoading(false);
+      }
+    };
+
+    void loadReferences();
+  }, [activeEditTab, editingGroup, eventId, referencesLoading, roles.length]);
+
+  useEffect(() => {
+    if (!editingGroup || activeEditTab !== "create-user" || organizationTree || organizationTreeLoading) return;
+
+    const loadOrganizationTree = async () => {
+      if (!eventId) return;
+
+      setOrganizationTreeLoading(true);
+      setOrganizationTreeError(null);
+      try {
+        setOrganizationTree(await apiClient.getOrganizationStructureTree(eventId));
+      } catch (loadError) {
+        console.error(loadError);
+        setOrganizationTreeError("Не удалось загрузить оригинальную структуру.");
+      } finally {
+        setOrganizationTreeLoading(false);
+      }
+    };
+
+    void loadOrganizationTree();
+  }, [activeEditTab, editingGroup, eventId, organizationTree, organizationTreeLoading]);
+
+  useEffect(() => {
+    if (!editingGroup || activeEditTab !== "users") return;
+
+    const loadGroupUsers = async () => {
+      if (!eventId) return;
+
+      setGroupUsersLoading(true);
+      setGroupUsersError(null);
+      try {
+        setGroupUsers(await apiClient.getUsers(eventId));
+      } catch (loadError) {
+        console.error(loadError);
+        setGroupUsersError("Не удалось загрузить сотрудников группы.");
+      } finally {
+        setGroupUsersLoading(false);
+      }
+    };
+
+    void loadGroupUsers();
+  }, [activeEditTab, editingGroup, eventId]);
+
+  useEffect(() => {
+    if (!editingGroup || activeEditTab !== "create-user") return;
+
+    const searchValue = {
+      login: employeeFormData.login.trim(),
+      surname: employeeFormData.surname.trim(),
+      name: employeeFormData.name.trim(),
+      email: employeeFormData.email.trim(),
+    };
+    const hasQuery = Object.values(searchValue).some((value) => value.length >= 2);
+    if (!hasQuery) {
+      setSimilarUsers([]);
+      setSimilarUsersLoading(false);
+      setSimilarUsersError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setSimilarUsersLoading(true);
+      setSimilarUsersError(null);
+      try {
+        setSimilarUsers(await apiClient.searchUsers(eventId, searchValue, controller.signal));
+      } catch (searchError) {
+        if (controller.signal.aborted) return;
+
+        console.error(searchError);
+        setSimilarUsers([]);
+        setSimilarUsersError("Не удалось найти похожих сотрудников.");
+      } finally {
+        if (!controller.signal.aborted) setSimilarUsersLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [
+    activeEditTab,
+    editingGroup,
+    employeeFormData.email,
+    employeeFormData.login,
+    employeeFormData.name,
+    employeeFormData.surname,
+    eventId,
+  ]);
 
   const clearGroupDragState = () => {
     setPressedGroupId(null);
@@ -635,6 +1061,85 @@ export const GroupsPage = () => {
     setCollapsedGroupIds(new Set());
   };
 
+  const collapseGroupsToDepth = (depth: number) => {
+    if (depth >= maxGroupDepth) {
+      expandAllGroups();
+      return;
+    }
+
+    setCollapsedGroupIds(new Set(getCollapsedGroupIdsForVisibleDepth(groups, depth)));
+  };
+
+  const updateGroupTreeZoom = (nextZoomValue: number, anchor?: { clientX: number; clientY: number }) => {
+    const container = groupsTreeScrollRef.current;
+    const currentZoom = groupTreeZoom;
+    const nextZoom = clampGroupTreeZoom(nextZoomValue);
+    if (nextZoom === currentZoom) return;
+
+    if (container && anchor) {
+      const rect = container.getBoundingClientRect();
+      const anchorX = anchor.clientX - rect.left;
+      const anchorY = anchor.clientY - rect.top;
+      const contentX = container.scrollLeft + anchorX;
+      const contentY = container.scrollTop + anchorY;
+      const zoomRatio = nextZoom / currentZoom;
+
+      window.requestAnimationFrame(() => {
+        container.scrollLeft = contentX * zoomRatio - anchorX;
+        container.scrollTop = contentY * zoomRatio - anchorY;
+      });
+    }
+
+    setGroupTreeZoom(nextZoom);
+  };
+
+  const zoomGroupTree = (direction: 1 | -1, anchor?: { clientX: number; clientY: number }) => {
+    updateGroupTreeZoom(groupTreeZoom + direction * GROUP_TREE_ZOOM_STEP, anchor);
+  };
+
+  const zoomGroupTreeFromCenter = (direction: 1 | -1) => {
+    const container = groupsTreeScrollRef.current;
+    if (!container) {
+      zoomGroupTree(direction);
+      return;
+    }
+
+    const rect = container.getBoundingClientRect();
+    zoomGroupTree(direction, {
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
+  };
+
+  const handleGroupTreeWheel = (event: WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    zoomGroupTree(event.deltaY < 0 ? 1 : -1, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+  };
+
+  const handleGroupTreePanStart = (event: MouseEvent<HTMLDivElement>) => {
+    if (
+      event.button !== 0 ||
+      isInteractiveElement(event.target) ||
+      (event.target instanceof HTMLElement && event.target.closest(".group-tree-node"))
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    groupsTreePanRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: event.currentTarget.scrollLeft,
+      scrollTop: event.currentTarget.scrollTop,
+    };
+    setIsGroupTreePanning(true);
+  };
+
   const scrollGroupsTree = (direction: "top" | "bottom") => {
     const container = groupsTreeScrollRef.current;
     if (!container) return;
@@ -701,6 +1206,84 @@ export const GroupsPage = () => {
     navigateToGroup(foundGroup);
   };
 
+  const useOrganizationEmployee = (employee: OrganizationEmployeeTreeItemDto) => {
+    setSelectedOrganizationEmployeeId(employee.id);
+    setSelectedOrganizationEmployeePosition(employee.position);
+    setEmployeeFormData((current) => {
+      const nextEmail = current.email;
+      return {
+        ...current,
+        surname: employee.surname ?? current.surname,
+        name: employee.name ?? current.name,
+        additionalName: employee.additionalName ?? "",
+        email: nextEmail,
+        login: employeeLoginManuallyEdited ? current.login : nextEmail || current.login,
+      };
+    });
+  };
+
+  const useSimilarUser = (user: UserSearchResultDto) => {
+    const role = roles.find((item) =>
+      item.name.localeCompare(user.roleName ?? "", undefined, { sensitivity: "accent" }) === 0
+    );
+
+    setSelectedOrganizationEmployeeId(null);
+    setSelectedOrganizationEmployeePosition(null);
+    setEmployeeLoginManuallyEdited(true);
+    setEmployeeFormData((current) => ({
+      ...current,
+      login: user.login,
+      surname: user.surname,
+      name: user.name,
+      additionalName: user.additionalName ?? "",
+      email: user.email ?? "",
+      tel: user.tel ?? "",
+      roleId: String(role?.id ?? current.roleId),
+      groupId: editingGroup ? String(editingGroup.group.id) : current.groupId,
+    }));
+  };
+
+  const createEmployeeInEditingGroup = async () => {
+    if (
+      !eventId ||
+      !editingGroup ||
+      !employeeFormData.login.trim() ||
+      !employeeFormData.name.trim() ||
+      !employeeFormData.surname.trim() ||
+      !employeeFormData.email.trim() ||
+      !employeeFormData.roleId
+    ) return;
+
+    setSaving(true);
+    setError(null);
+    try {
+      await apiClient.createUser(eventId, {
+        login: employeeFormData.login.trim(),
+        name: employeeFormData.name.trim(),
+        surname: employeeFormData.surname.trim(),
+        additionalName: employeeFormData.additionalName.trim() || undefined,
+        email: employeeFormData.email.trim(),
+        tel: employeeFormData.tel.trim() || undefined,
+        roleId: Number(employeeFormData.roleId),
+        groupId: editingGroup.group.id,
+        organizationEmployeeId: selectedOrganizationEmployeeId ?? undefined,
+      });
+
+      setEmployeeFormData(emptyEmployeeForm(String(editingGroup.group.id), employeeFormData.roleId));
+      setEmployeeLoginManuallyEdited(false);
+      setSelectedOrganizationEmployeeId(null);
+      setSelectedOrganizationEmployeePosition(null);
+      setSimilarUsers([]);
+      setActiveEditTab("users");
+      setGroupUsers(await apiClient.getUsers(eventId));
+    } catch (createError) {
+      console.error(createError);
+      setError(getApiErrorMessage(createError, "Не удалось создать сотрудника. Проверьте логин, роль и группу."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const openCreateModal = (group: GroupTreeDto) => {
     const availableQuota = getAvailableChildQuota(group);
     setParentGroup(group);
@@ -746,6 +1329,17 @@ export const GroupsPage = () => {
   const openEditModal = (group: GroupTreeDto, groupParent?: GroupTreeDto) => {
     setEditingGroup({ group, parentGroup: groupParent });
     setEditForm({ name: group.name, quota: group.quota, parentGroupId: groupParent?.id ?? null });
+    setActiveEditTab("settings");
+    setEmployeeFormData(emptyEmployeeForm(String(group.id), String(roles[0]?.id ?? "")));
+    setEmployeeLoginManuallyEdited(false);
+    setSelectedOrganizationEmployeeId(null);
+    setSelectedOrganizationEmployeePosition(null);
+    setSimilarUsers([]);
+    setSimilarUsersError(null);
+    setGroupUsers([]);
+    setGroupUsersError(null);
+    setOrganizationTreeSearch("");
+    setShowOnlyCurrentDepartmentEmployees(true);
     setMoveParentSearch("");
     setIsMoveParentSearchOpen(false);
     setActiveMoveParentOptionIndex(0);
@@ -755,6 +1349,17 @@ export const GroupsPage = () => {
   const closeEditModal = () => {
     if (saving) return;
     setEditingGroup(null);
+    setActiveEditTab("settings");
+    setEmployeeFormData(emptyEmployeeForm());
+    setEmployeeLoginManuallyEdited(false);
+    setSelectedOrganizationEmployeeId(null);
+    setSelectedOrganizationEmployeePosition(null);
+    setSimilarUsers([]);
+    setSimilarUsersError(null);
+    setGroupUsers([]);
+    setGroupUsersError(null);
+    setOrganizationTreeSearch("");
+    setShowOnlyCurrentDepartmentEmployees(true);
     setMoveParentSearch("");
     setIsMoveParentSearchOpen(false);
     setError(null);
@@ -1125,8 +1730,33 @@ export const GroupsPage = () => {
                   <ExpandAllIcon />
                 </button>
               </div>
-              <div className="groups-tree-scroll" ref={groupsTreeScrollRef}>
-                <ul className="groups-tree">
+              <div className="groups-tree-depth-actions" aria-label="Свернуть дерево до уровня">
+                {groupDepthLevels.map((level) => (
+                  <button
+                    className="groups-tree-depth-button"
+                    type="button"
+                    key={level}
+                    title={`Показать уровни до ${level}`}
+                    aria-label={`Показать дерево до уровня ${level}`}
+                    onClick={() => collapseGroupsToDepth(level)}
+                  >
+                    {level}
+                  </button>
+                ))}
+              </div>
+              <div
+                className={`groups-tree-scroll${isGroupTreePanning ? " groups-tree-scroll-panning" : ""}`}
+                ref={groupsTreeScrollRef}
+                onWheel={handleGroupTreeWheel}
+                onMouseDown={handleGroupTreePanStart}
+                onAuxClick={(event) => {
+                  if (event.button === 1) event.preventDefault();
+                }}
+              >
+                <ul
+                  className="groups-tree"
+                  style={{ "--groups-tree-zoom": groupTreeZoom } as React.CSSProperties}
+                >
                   {groups.map((group) => (
                     <GroupNode
                       key={group.id}
@@ -1152,6 +1782,28 @@ export const GroupsPage = () => {
                     />
                   ))}
                 </ul>
+              </div>
+              <div className="groups-tree-zoom-actions" aria-label="Масштаб дерева групп">
+                <button
+                  className="groups-tree-scroll-button"
+                  type="button"
+                  title="Увеличить масштаб"
+                  aria-label="Увеличить масштаб дерева групп"
+                  disabled={groupTreeZoom >= GROUP_TREE_MAX_ZOOM}
+                  onClick={() => zoomGroupTreeFromCenter(1)}
+                >
+                  +
+                </button>
+                <button
+                  className="groups-tree-scroll-button"
+                  type="button"
+                  title="Уменьшить масштаб"
+                  aria-label="Уменьшить масштаб дерева групп"
+                  disabled={groupTreeZoom <= GROUP_TREE_MIN_ZOOM}
+                  onClick={() => zoomGroupTreeFromCenter(-1)}
+                >
+                  −
+                </button>
               </div>
               <div className="groups-tree-scroll-actions" aria-label="Быстрая прокрутка дерева групп">
                 <button
@@ -1431,166 +2083,444 @@ export const GroupsPage = () => {
         <Modal
           title="Редактирование группы"
           onClose={closeEditModal}
-          className="employee-form-modal"
+          className="employee-form-modal group-edit-modal"
         >
-          <form
-            className="form employee-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void updateGroup();
-            }}
-          >
-            <p className="group-create-context">
-              Минимальная квота по дочерним группам: <strong>{editMinimumQuota}</strong>
-              {!isMovingGroup && editMaximumQuota !== undefined && (
-                <>. Максимально доступно в родительской группе: <strong>{editMaximumQuota}</strong></>
-              )}
-            </p>
+          <div className="group-edit-tabs" role="tablist" aria-label="Разделы редактирования группы">
+            <button
+              className={`group-edit-tab${activeEditTab === "settings" ? " active" : ""}`}
+              type="button"
+              onClick={() => setActiveEditTab("settings")}
+            >
+              Группа
+            </button>
+            <button
+              className={`group-edit-tab${activeEditTab === "create-user" ? " active" : ""}`}
+              type="button"
+              onClick={() => setActiveEditTab("create-user")}
+              disabled={!hasCreateUserPermission}
+            >
+              Создать сотрудника
+            </button>
+            <button
+              className={`group-edit-tab${activeEditTab === "users" ? " active" : ""}`}
+              type="button"
+              onClick={() => setActiveEditTab("users")}
+            >
+              Сотрудники
+            </button>
+          </div>
 
-            <label className="field">
-              <span>Название *</span>
-              <input
-                disabled={saving}
-                required
-                value={editForm.name}
-                onChange={(event) =>
-                  setEditForm((current) => ({ ...current, name: event.target.value }))
-                }
-              />
-            </label>
+          {activeEditTab === "settings" && (
+            <form
+              className="form employee-form group-edit-settings-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void updateGroup();
+              }}
+            >
+              <p className="group-create-context">
+                Минимальная квота по дочерним группам: <strong>{editMinimumQuota}</strong>
+                {!isMovingGroup && editMaximumQuota !== undefined && (
+                  <>. Максимально доступно в родительской группе: <strong>{editMaximumQuota}</strong></>
+                )}
+              </p>
 
-            {editingGroup.parentGroup ? (
-              <div className="field group-move-field groups-search-combobox">
-                <span>Переместить в</span>
-                <div className="groups-search-input-wrap">
-                  <input
-                    disabled={saving}
-                    value={moveParentSearch}
-                    onChange={(event) => {
-                      setMoveParentSearch(event.target.value);
-                      setEditForm((current) => ({ ...current, parentGroupId: null }));
-                      setIsMoveParentSearchOpen(true);
-                    }}
-                    onFocus={() => setIsMoveParentSearchOpen(true)}
-                    onBlur={() => window.setTimeout(() => setIsMoveParentSearchOpen(false), 120)}
-                    onKeyDown={(event) => {
-                      if (event.key === "ArrowDown") {
-                        event.preventDefault();
+              <label className="field">
+                <span>Название *</span>
+                <input
+                  disabled={saving}
+                  required
+                  value={editForm.name}
+                  onChange={(event) =>
+                    setEditForm((current) => ({ ...current, name: event.target.value }))
+                  }
+                />
+              </label>
+
+              {editingGroup.parentGroup ? (
+                <div className="field group-move-field groups-search-combobox">
+                  <span>Переместить в</span>
+                  <div className="groups-search-input-wrap">
+                    <input
+                      disabled={saving}
+                      value={moveParentSearch}
+                      onChange={(event) => {
+                        setMoveParentSearch(event.target.value);
+                        setEditForm((current) => ({ ...current, parentGroupId: null }));
                         setIsMoveParentSearchOpen(true);
-                        setActiveMoveParentOptionIndex((current) =>
-                          filteredMoveParentOptions.length === 0
-                            ? -1
-                            : current < 0
-                              ? 0
-                              : (current + 1) % filteredMoveParentOptions.length
-                        );
-                      }
-
-                      if (event.key === "ArrowUp") {
-                        event.preventDefault();
-                        setIsMoveParentSearchOpen(true);
-                        setActiveMoveParentOptionIndex((current) =>
-                          filteredMoveParentOptions.length === 0
-                            ? -1
-                            : current <= 0
-                              ? filteredMoveParentOptions.length - 1
-                              : current - 1
-                        );
-                      }
-
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        setIsMoveParentSearchOpen(false);
-                      }
-
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        if (activeMoveParentOption) {
-                          selectMoveParentOption(activeMoveParentOption);
+                      }}
+                      onFocus={() => setIsMoveParentSearchOpen(true)}
+                      onBlur={() => window.setTimeout(() => setIsMoveParentSearchOpen(false), 120)}
+                      onKeyDown={(event) => {
+                        if (event.key === "ArrowDown") {
+                          event.preventDefault();
+                          setIsMoveParentSearchOpen(true);
+                          setActiveMoveParentOptionIndex((current) =>
+                            filteredMoveParentOptions.length === 0
+                              ? -1
+                              : current < 0
+                                ? 0
+                                : (current + 1) % filteredMoveParentOptions.length
+                          );
                         }
-                      }
-                    }}
-                    placeholder="Выберите группу для переноса"
-                    autoComplete="off"
-                    role="combobox"
-                    aria-expanded={isMoveParentSearchOpen}
-                    aria-controls="group-move-parent-options"
-                    aria-activedescendant={activeMoveParentOption ? `group-move-parent-option-${activeMoveParentOption.group.id}` : undefined}
+
+                        if (event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setIsMoveParentSearchOpen(true);
+                          setActiveMoveParentOptionIndex((current) =>
+                            filteredMoveParentOptions.length === 0
+                              ? -1
+                              : current <= 0
+                                ? filteredMoveParentOptions.length - 1
+                                : current - 1
+                          );
+                        }
+
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setIsMoveParentSearchOpen(false);
+                        }
+
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          if (activeMoveParentOption) {
+                            selectMoveParentOption(activeMoveParentOption);
+                          }
+                        }
+                      }}
+                      placeholder="Выберите группу для переноса"
+                      autoComplete="off"
+                      role="combobox"
+                      aria-expanded={isMoveParentSearchOpen}
+                      aria-controls="group-move-parent-options"
+                      aria-activedescendant={activeMoveParentOption ? `group-move-parent-option-${activeMoveParentOption.group.id}` : undefined}
+                    />
+                    {isMoveParentSearchOpen && (
+                      <div className="groups-search-dropdown group-move-dropdown" id="group-move-parent-options" role="listbox">
+                        {filteredMoveParentOptions.length === 0 ? (
+                          <div className="groups-search-empty">Подходящих групп нет</div>
+                        ) : (
+                          filteredMoveParentOptions.map((option, index) => (
+                            <button
+                              key={option.group.id}
+                              id={`group-move-parent-option-${option.group.id}`}
+                              className={`groups-search-option${index === activeMoveParentOptionIndex ? " active" : ""}`}
+                              type="button"
+                              role="option"
+                              aria-selected={index === activeMoveParentOptionIndex}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                selectMoveParentOption(option);
+                              }}
+                            >
+                              <span>{option.group.name}</span>
+                              <small>{option.path}</small>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="muted group-move-note">Корневую группу нельзя перемещать.</p>
+              )}
+
+              {isMovingGroup && (
+                <div className="alert alert-info group-move-warning">
+                  При перемещении квоты этой группы и всех её дочерних групп будут сброшены в 0. Проставьте нужные значения самостоятельно после переноса.
+                </div>
+              )}
+
+              <label className="field">
+                <span>Квота *</span>
+                <input
+                  disabled={saving || isMovingGroup}
+                  required
+                  min={editMinimumQuota}
+                  max={isMovingGroup ? 0 : editMaximumQuota}
+                  type="number"
+                  value={editForm.quota}
+                  onChange={(event) =>
+                    setEditForm((current) => ({ ...current, quota: Number(event.target.value) }))
+                  }
+                />
+              </label>
+
+              {error && <div className="alert alert-error employee-form-message">{error}</div>}
+
+              <div className="modal-actions">
+                <button className="secondary-button" type="button" disabled={saving} onClick={closeEditModal}>
+                  Закрыть
+                </button>
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={
+                    saving ||
+                    !isEditDirty ||
+                    !editForm.name.trim() ||
+                    (isMovingGroup && !editForm.parentGroupId) ||
+                    editForm.quota < editMinimumQuota ||
+                    (!isMovingGroup && editMaximumQuota !== undefined && editForm.quota > editMaximumQuota)
+                  }
+                >
+                  {saving ? "Сохраняем..." : "Сохранить"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {activeEditTab === "create-user" && (
+            hasCreateUserPermission ? (
+              <div className="employee-create-layout group-employee-create-layout">
+                <aside className="organization-picker" aria-label="Оригинальная структура">
+                  <div className="organization-picker-header">
+                    <strong>Оригинальная структура</strong>
+                    {organizationTree && (
+                      <span>{organizationTree.departmentsCount} отделов · {organizationTree.employeesCount} сотрудников</span>
+                    )}
+                  </div>
+                  <label className="organization-picker-filter">
+                    <input
+                      type="checkbox"
+                      checked={showOnlyCurrentDepartmentEmployees}
+                      onChange={(event) => setShowOnlyCurrentDepartmentEmployees(event.target.checked)}
+                      disabled={organizationTreeLoading}
+                    />
+                    <span>Отобразить сотрудников отдела</span>
+                  </label>
+                  <input
+                    className="organization-picker-search"
+                    value={organizationTreeSearch}
+                    onChange={(event) => setOrganizationTreeSearch(event.target.value)}
+                    placeholder="Поиск отдела или сотрудника"
+                    disabled={organizationTreeLoading}
                   />
-                  {isMoveParentSearchOpen && (
-                    <div className="groups-search-dropdown group-move-dropdown" id="group-move-parent-options" role="listbox">
-                      {filteredMoveParentOptions.length === 0 ? (
-                        <div className="groups-search-empty">Подходящих групп нет</div>
-                      ) : (
-                        filteredMoveParentOptions.map((option, index) => (
-                          <button
-                            key={option.group.id}
-                            id={`group-move-parent-option-${option.group.id}`}
-                            className={`groups-search-option${index === activeMoveParentOptionIndex ? " active" : ""}`}
-                            type="button"
-                            role="option"
-                            aria-selected={index === activeMoveParentOptionIndex}
-                            onMouseDown={(event) => {
-                              event.preventDefault();
-                              selectMoveParentOption(option);
-                            }}
-                          >
-                            <span>{option.group.name}</span>
-                            <small>{option.path}</small>
-                          </button>
-                        ))
-                      )}
+                  {organizationTreeLoading ? (
+                    <div className="organization-picker-message">Загружаем структуру...</div>
+                  ) : organizationTreeError ? (
+                    <div className="organization-picker-message error-text">{organizationTreeError}</div>
+                  ) : !organizationTree || organizationTree.employeesCount === 0 ? (
+                    <div className="organization-picker-message">Оригинальная структура пока не загружена.</div>
+                  ) : isOrganizationDepartmentFilterEmpty ? (
+                    <div className="organization-picker-message">
+                      Для группы «{editingGroup.group.name}» не найден соответствующий отдел в оригинальной структуре. Снимите галочку, чтобы искать по всей структуре.
                     </div>
+                  ) : (
+                    <ul className="org-tree-list org-tree-root">
+                      {displayedOrganizationDepartments
+                        .filter((department) => departmentMatchesSearch(department, normalizeSearch(organizationTreeSearch)))
+                        .map((department) => (
+                          <OrganizationDepartmentNode
+                            key={department.id}
+                            department={department}
+                            query={organizationTreeSearch}
+                            depth={0}
+                            selectedEmployeeId={selectedOrganizationEmployeeId}
+                            onSelectEmployee={useOrganizationEmployee}
+                          />
+                        ))}
+                    </ul>
                   )}
+                </aside>
+
+                <div className="employee-create-form-side">
+                  <div className="alert alert-info employee-source-message">
+                    Сотрудник будет создан в группе: <strong>{editingGroup.group.name}</strong>.
+                    {selectedOrganizationEmployeePosition && (
+                      <> Должность из оригинальной структуры: <strong>{selectedOrganizationEmployeePosition}</strong>.</>
+                    )}
+                  </div>
+                  {error && <div className="alert alert-error">{error}</div>}
+
+                  <form
+                    className="form employee-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void createEmployeeInEditingGroup();
+                    }}
+                  >
+                    <div className="employee-form-fields">
+                      <label className="field">
+                        <span>Фамилия *</span>
+                        <input value={employeeFormData.surname} onChange={(event) => setEmployeeFormData({ ...employeeFormData, surname: event.target.value })} disabled={saving} required />
+                      </label>
+                      <label className="field">
+                        <span>Имя *</span>
+                        <input value={employeeFormData.name} onChange={(event) => setEmployeeFormData({ ...employeeFormData, name: event.target.value })} disabled={saving} required />
+                      </label>
+                      <label className="field">
+                        <span>Отчество</span>
+                        <input value={employeeFormData.additionalName} onChange={(event) => setEmployeeFormData({ ...employeeFormData, additionalName: event.target.value })} disabled={saving} />
+                      </label>
+                      <label className="field">
+                        <span>Email *</span>
+                        <input
+                          type="email"
+                          value={employeeFormData.email}
+                          onChange={(event) => {
+                            const email = event.target.value;
+                            setEmployeeFormData((value) => ({
+                              ...value,
+                              email,
+                              login: employeeLoginManuallyEdited ? value.login : email,
+                            }));
+                          }}
+                          disabled={saving}
+                          required
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Логин *</span>
+                        <input
+                          value={employeeFormData.login}
+                          onChange={(event) => {
+                            setEmployeeLoginManuallyEdited(true);
+                            setEmployeeFormData({ ...employeeFormData, login: event.target.value });
+                          }}
+                          disabled={saving}
+                          required
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Телефон</span>
+                        <input type="tel" value={employeeFormData.tel} onChange={(event) => setEmployeeFormData({ ...employeeFormData, tel: event.target.value })} disabled={saving} />
+                      </label>
+                      <label className="field">
+                        <span>Роль *</span>
+                        <select
+                          value={employeeFormData.roleId}
+                          className={isEmployeeRoleAdministrator(employeeFormData.roleId) ? "role-select-administrator" : undefined}
+                          onChange={(event) => setEmployeeFormData({ ...employeeFormData, roleId: event.target.value })}
+                          disabled={saving || referencesLoading}
+                          required
+                        >
+                          {referencesLoading ? (
+                            <option value="">Загрузка ролей...</option>
+                          ) : roles.length === 0 ? (
+                            <option value="">Роли не найдены</option>
+                          ) : (
+                            roles.map((role) => (
+                              <option
+                                key={role.id}
+                                value={role.id}
+                                className={isAdministratorRoleName(role.name) ? "role-option-administrator" : undefined}
+                              >
+                                {role.name}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Группа</span>
+                        <input value={editingGroup.group.name} disabled readOnly />
+                      </label>
+                      <div className="similar-employees" aria-live="polite">
+                        <div className="similar-employees-heading">
+                          <strong>Похожие сотрудники</strong>
+                          {similarUsersLoading && <span>Ищем...</span>}
+                        </div>
+                        {similarUsersError ? (
+                          <div className="similar-employees-message error-text">{similarUsersError}</div>
+                        ) : similarUsers.length > 0 ? (
+                          <div className="similar-employees-list">
+                            <div className="similar-employee-row similar-employee-header" aria-hidden="true">
+                              <div className="similar-employee-data">
+                                <span>Логин</span>
+                                <span>ФИО</span>
+                                <span>Email</span>
+                                <span>Мероприятие</span>
+                                <span>Роль</span>
+                                <span>Группа</span>
+                              </div>
+                              <span className="similar-employee-header-action">Действие</span>
+                            </div>
+                            {similarUsers.map((user) => (
+                              <div className="similar-employee-row" key={user.id}>
+                                <div className="similar-employee-data">
+                                  <span>{user.login}</span>
+                                  <span>{[user.surname, user.name, user.additionalName].filter(Boolean).join(" ")}</span>
+                                  <span>{user.email || "—"}</span>
+                                  <span title={user.eventName || undefined}>{user.eventName || "—"}</span>
+                                  <span>{user.roleName || "—"}</span>
+                                  <span>{user.groupName || "—"}</span>
+                                </div>
+                                <button
+                                  className="secondary-button similar-employee-use"
+                                  type="button"
+                                  onClick={() => useSimilarUser(user)}
+                                  disabled={saving || referencesLoading}
+                                >
+                                  Использовать
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="similar-employees-message">
+                            {similarUsersLoading
+                              ? "Поиск по логину, ФИО и email..."
+                              : "Введите не менее двух символов в логине, фамилии, имени или email."}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="modal-actions">
+                      <button className="secondary-button" type="button" disabled={saving} onClick={closeEditModal}>
+                        Закрыть
+                      </button>
+                      <button className="primary-button" type="submit" disabled={saving || referencesLoading || roles.length === 0}>
+                        {saving ? "Создаём..." : "Создать"}
+                      </button>
+                    </div>
+                  </form>
                 </div>
               </div>
             ) : (
-              <p className="muted group-move-note">Корневую группу нельзя перемещать.</p>
-            )}
+              <div className="alert alert-info employee-form-message">У вас нет прав на создание сотрудников.</div>
+            )
+          )}
 
-            {isMovingGroup && (
-              <div className="alert alert-info group-move-warning">
-                При перемещении квоты этой группы и всех её дочерних групп будут сброшены в 0. Проставьте нужные значения самостоятельно после переноса.
+          {activeEditTab === "users" && (
+            <div className="group-users-panel">
+              {groupUsersLoading ? (
+                <div className="empty-state">Загружаем сотрудников группы...</div>
+              ) : groupUsersError ? (
+                <div className="alert alert-error">{groupUsersError}</div>
+              ) : visibleGroupUsers.length === 0 ? (
+                <div className="empty-state">В этой группе пока нет сотрудников.</div>
+              ) : (
+                <div className="table-wrap group-users-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ФИО</th>
+                        <th>Должность</th>
+                        <th>Отдел</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleGroupUsers.map((user) => (
+                        <tr key={user.id}>
+                          <td>{formatUserName(user)}</td>
+                          <td>{user.position || "—"}</td>
+                          <td>{user.departmentName || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="modal-actions">
+                <button className="secondary-button" type="button" disabled={saving} onClick={closeEditModal}>
+                  Закрыть
+                </button>
               </div>
-            )}
-
-            <label className="field">
-              <span>Квота *</span>
-              <input
-                disabled={saving || isMovingGroup}
-                required
-                min={editMinimumQuota}
-                max={isMovingGroup ? 0 : editMaximumQuota}
-                type="number"
-                value={editForm.quota}
-                onChange={(event) =>
-                  setEditForm((current) => ({ ...current, quota: Number(event.target.value) }))
-                }
-              />
-            </label>
-
-            {error && <div className="alert alert-error employee-form-message">{error}</div>}
-
-            <div className="modal-actions">
-              <button className="secondary-button" type="button" disabled={saving} onClick={closeEditModal}>
-                Закрыть
-              </button>
-              <button
-                className="primary-button"
-                type="submit"
-                disabled={
-                  saving ||
-                  !isEditDirty ||
-                  !editForm.name.trim() ||
-                  (isMovingGroup && !editForm.parentGroupId) ||
-                  editForm.quota < editMinimumQuota ||
-                  (!isMovingGroup && editMaximumQuota !== undefined && editForm.quota > editMaximumQuota)
-                }
-              >
-                {saving ? "Сохраняем..." : "Сохранить"}
-              </button>
             </div>
-          </form>
+          )}
         </Modal>
       )}
 

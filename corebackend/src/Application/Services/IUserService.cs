@@ -12,7 +12,8 @@ public interface IUserService
         string? email,
         string? tel,
         long roleId,
-        long groupId);
+        long groupId,
+        long? organizationEmployeeId);
     Task<Entities.User?> GetUserAsync(long userId);
     Task<Entities.User?> GetUserInEventAsync(long userId, long eventId);
     Task<Entities.User?> GetUserByLoginAndEventAsync(long loginId, long eventId);

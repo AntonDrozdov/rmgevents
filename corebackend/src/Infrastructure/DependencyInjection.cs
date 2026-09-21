@@ -20,6 +20,7 @@ public static class DependencyInjection
                 npgsqlOptions.EnableRetryOnFailure();
                 npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "corebackend");
             }));
+        services.AddMemoryCache();
         
         services.AddScoped<IImageRepository, ImageRepository>();
         services.AddScoped<IImageService, ImageService>();

@@ -15,6 +15,30 @@ public sealed record ApplyOriginalStructureResult(
     int DepartmentsProcessed,
     List<string> Warnings);
 
+public sealed record OrganizationEmployeeTreeItem(
+    long Id,
+    long DepartmentId,
+    string FullName,
+    string? Surname,
+    string? Name,
+    string? AdditionalName,
+    string Position,
+    int SourceRowNumber);
+
+public sealed record OrganizationDepartmentTreeItem(
+    long Id,
+    long? ParentId,
+    string Name,
+    bool IsGeneratedFromParentName,
+    List<OrganizationEmployeeTreeItem> Employees,
+    List<OrganizationDepartmentTreeItem> Children);
+
+public sealed record OrganizationStructureTree(
+    List<OrganizationDepartmentTreeItem> Departments,
+    int DepartmentsCount,
+    int EmployeesCount,
+    DateTimeOffset? LoadedAt);
+
 public interface IOrganizationStructureService
 {
     Task<OrganizationImportResult> ImportRmgStructureAsync(
@@ -25,6 +49,11 @@ public interface IOrganizationStructureService
         CancellationToken cancellationToken = default);
 
     Task<ApplyOriginalStructureResult> ApplyOriginalStructureAsync(
+        long eventId,
+        long loginId,
+        CancellationToken cancellationToken = default);
+
+    Task<OrganizationStructureTree> GetTreeAsync(
         long eventId,
         long loginId,
         CancellationToken cancellationToken = default);

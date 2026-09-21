@@ -69,6 +69,26 @@
 
 Пока пользователь не изменил логин вручную, изменение email автоматически обновляет логин. После первой ручной правки логин становится независимым от email.
 
+### Подстановка из оригинальной структуры
+
+В форме создания сотрудника слева отображается панель **«Оригинальная структура»**. Она строится по данным, ранее загруженным из Excel в отдельные таблицы оргструктуры:
+
+- `organization_departments`;
+- `organization_employees`.
+
+Панель занимает левую часть модального окна на всю доступную высоту, имеет собственную прокрутку и поиск по названию отдела, ФИО сотрудника и должности. Отделы можно раскрывать и сворачивать. Внутри отделов отображаются сотрудники с должностями.
+
+При клике на сотрудника:
+
+- выбранный сотрудник подсвечивается;
+- в правую часть формы переносятся фамилия, имя и отчество;
+- должность показывается информационным сообщением над формой;
+- связь с исходной записью оргструктуры сохраняется как `organizationEmployeeId`;
+- роль и группа не меняются автоматически;
+- текущая логика логина сохраняется: логин не перезаписывается, если пользователь уже редактировал его вручную.
+
+В текущей структуре таблица `organization_employees` хранит ФИО и должность, но не хранит email и телефон. Поэтому email и телефон остаются ручными полями до расширения импорта и схемы оргструктуры.
+
 ### Поиск существующего сотрудника
 
 При вводе логина, фамилии, имени или email форма с задержкой 450 мс ищет похожие профили сотрудников из других мероприятий. Поиск запускается, когда хотя бы одно из этих значений содержит не менее двух символов, и выполняется по частичному совпадению без учёта регистра. Точные совпадения выводятся выше совпадений по началу и прочих частичных совпадений.
@@ -282,21 +302,36 @@ stateDiagram-v2
 | `POST /events/{eventId}/users/{userId}/reset-password` | Сбросить пароль Login | `CanCreateUser` | `{ temporaryPassword }` |
 | `GET /events/{eventId}/roles` | Глобальный справочник ролей | `[Authorize]` | `RoleDto[]` |
 | `GET /events/{eventId}/groups` | Дерево групп | `[Authorize]` | `GroupTreeDto[]` |
+| `GET /events/{eventId}/organization-structure/tree` | Дерево оригинальной структуры для формы создания сотрудника | `[Authorize]`, пользователь должен состоять в мероприятии | `OrganizationStructureTreeDto` |
 | `GET /events/{eventId}/me` | Профиль, логин и permissions текущего пользователя | `[Authorize]` | `UserProfileDto` |
 | `POST /auth/login` | Вход | Анонимно | `{ sid, events, mustChangePassword }` |
 | `POST /auth/change-password` | Смена пароля | `[Authorize]`, разрешён при временном пароле | `{ sid }` |
 
 ### `UserDto`
 
-Содержит `id`, `eventId`, `login`, `roleId`, `roleName`, `groupId`, `groupName`, ФИО, email, телефон, `createdByName`, `createdByRoleName` и дату/время создания. Связи `Login`, `Role`, `Group`, `CreatedByUser` и роль создателя должны быть загружены репозиторием до маппинга.
+Содержит `id`, `eventId`, `login`, `roleId`, `roleName`, `groupId`, `groupName`, `organizationEmployeeId`, `position`, `departmentName`, ФИО, email, телефон, `createdByName`, `createdByRoleName` и дату/время создания. Связи `Login`, `Role`, `Group`, `OrganizationEmployee`, `OrganizationEmployee.Department`, `CreatedByUser` и роль создателя должны быть загружены репозиторием до маппинга.
 
 ### `UserSearchResultDto`
 
 Используется для блока похожих сотрудников при создании. Помимо логина, ФИО, email, телефона, роли и группы содержит `eventName` — название мероприятия, где найден профиль.
 
+### `OrganizationStructureTreeDto`
+
+Используется только как источник подсказок в форме создания сотрудника. Содержит:
+
+- `departments` — корневые отделы с рекурсивными `children`;
+- `employees` внутри каждого отдела;
+- `departmentsCount`;
+- `employeesCount`;
+- `loadedAt`.
+
+Сотрудник оргструктуры содержит `fullName`, разобранные `surname`, `name`, `additionalName`, `position`, `departmentId` и `sourceRowNumber`. Эти записи не являются сотрудниками приложения и не создают Login/User сами по себе.
+
 ### Создание
 
-`CreateUserRequest` принимает строковый `login`, данные профиля, `roleId` и `groupId`. Числовой `loginId` наружу больше не передаётся. Backend берёт `LoginId` текущего пользователя из claims, находит его `User`-профиль в текущем мероприятии и записывает `users.created_by_user_id = User.Id` найденного профиля.
+`CreateUserRequest` принимает строковый `login`, данные профиля, `roleId`, `groupId` и опциональный `organizationEmployeeId`. Числовой `loginId` наружу больше не передаётся. Backend берёт `LoginId` текущего пользователя из claims, находит его `User`-профиль в текущем мероприятии и записывает `users.created_by_user_id = User.Id` найденного профиля.
+
+`organizationEmployeeId` заполняется только когда пользователь выбрал сотрудника из оригинальной структуры. Это nullable-связь с таблицей `organization_employees`; она нужна для отображения должности и отдела в сценариях, где сотрудник создаётся из оргструктуры, например из вкладки создания сотрудника внутри модалки редактирования группы.
 
 ### Обновление
 
@@ -310,26 +345,26 @@ Backend возвращает `temporaryPassword`, который фактиче�
 
 | Файл | Компонент / класс | Ответственность |
 |---|---|---|
-| `frontend/src/pages/UsersPage.tsx` | `UsersPage` | Таблица, загрузка сотрудников, формы создания/редактирования, поиск похожих, иконки, удаление, модалка сброса |
+| `frontend/src/pages/UsersPage.tsx` | `UsersPage`, `OrganizationDepartmentNode` | Таблица, загрузка сотрудников, формы создания/редактирования, левая панель оригинальной структуры, поиск похожих, иконки, удаление, модалка сброса |
 | `frontend/src/pages/EventSettingsPage.tsx` | `EventSettingsPage` | Видимость вкладки по `create_user`, desktop/mobile-навигация |
 | `frontend/src/pages/LoginPage.tsx` | `LoginPage` | Вход и перенаправление на смену временного пароля |
 | `frontend/src/pages/ChangePasswordPage.tsx` | `ChangePasswordPage` | Проверка подтверждения, минимальной длины и вызов смены пароля |
 | `frontend/src/components/ProtectedRoute.tsx` | `ProtectedRoute` | Токен, обязательная смена пароля, проверка permission |
 | `frontend/src/components/Modal.tsx` | `Modal` | Общая модалка, Escape, backdrop, блокировка прокрутки; поддерживает дополнительный `className` |
 | `frontend/src/contexts/AuthContext.tsx` | `AuthProvider`, `useAuth` | SID, Login, события, текущий профиль, восстановление после F5, `mustChangePassword`, смена пароля |
-| `frontend/src/services/apiClient.ts` | `ApiClient` | Axios-клиент и все запросы сотрудников/ролей/auth; SID в `Authorization: Bearer` |
+| `frontend/src/services/apiClient.ts` | `ApiClient` | Axios-клиент и все запросы сотрудников/ролей/auth/оргструктуры; SID в `Authorization: Bearer` |
 | `frontend/src/types/index.ts` | DTO и `AuthContextType` | TypeScript-контракты API |
 | `frontend/src/utils/groups.ts` | `flattenGroups` | Преобразование дерева групп в список для `<select>` с уровнем вложенности |
 | `frontend/src/App.tsx` | маршруты | `/events/:eventId/users` и `/change-password` |
-| `frontend/src/index.css` | CSS-классы | `.employee-form-modal`, `.employee-form`, `.similar-employees`, `.table-icon-actions`, `.icon-button*`, мобильные media queries |
+| `frontend/src/index.css` | CSS-классы | `.employee-form-modal`, `.employee-create-modal`, `.employee-create-layout`, `.organization-picker`, `.org-tree-*`, `.employee-form`, `.similar-employees`, `.table-icon-actions`, `.icon-button*`, мобильные media queries |
 
 ### Состояние `UsersPage`
 
 Основные группы состояния:
 
-- данные: `users`, `groups`, `roles`;
+- данные: `users`, `groups`, `roles`, `organizationTree`;
 - загрузка: `loading`, `referencesLoading`, `saving`;
-- создание: `isCreateModalOpen`, `formData`, `loginManuallyEdited`, `similarUsers`, `similarUsersLoading`, `similarUsersError`, `similarUserSourceRoleName`, `isAdminPromotionWarningOpen`;
+- создание: `isCreateModalOpen`, `formData`, `loginManuallyEdited`, `organizationTreeLoading`, `organizationTreeError`, `organizationTreeSearch`, `selectedOrganizationEmployeeId`, `selectedOrganizationEmployeePosition`, `similarUsers`, `similarUsersLoading`, `similarUsersError`, `similarUserSourceRoleName`, `isAdminPromotionWarningOpen`;
 - редактирование: `editingUser`, `editFormData`;
 - удаление: `deleteUser`, `deleteError`, `deletingUserId`;
 - сброс: `resetPasswordUser`, `resettingPasswordUserId`, `temporaryPassword`, `resetPasswordError`.
@@ -355,10 +390,12 @@ Backend возвращает `temporaryPassword`, который фактиче�
 | Файл | Класс / контракт | Ответственность |
 |---|---|---|
 | `corebackend/src/Api/Controllers/UsersController.cs` | `UsersController` | CRUD сотрудников, сброс пароля, маппинг `UserDto` |
+| `corebackend/src/Api/Controllers/OrganizationStructureController.cs` | `OrganizationStructureController` | Дерево оригинальной структуры для формы создания сотрудника |
 | `corebackend/src/Api/Controllers/RolesController.cs` | `RolesController` | Список глобальных ролей |
 | `corebackend/src/Api/Controllers/AuthController.cs` | `AuthController` | Вход, регистрация, смена пароля |
 | `corebackend/src/Api/Controllers/EventsController.cs` | `EventsController` | `/me`, логин и permissions текущего пользователя |
 | `corebackend/src/Api/Contracts/UserContracts.cs` | `UserDto`, `UserSearchResultDto`, `CreateUserRequest`, `UpdateUserRequest`, `ResetPasswordResponse` | Контракты сотрудников |
+| `corebackend/src/Api/Contracts/OrganizationStructureContracts.cs` | `OrganizationStructureTreeDto`, `OrganizationDepartmentTreeItemDto`, `OrganizationEmployeeTreeItemDto` | Контракты дерева оригинальной структуры |
 | `corebackend/src/Api/Contracts/AuthContracts.cs` | auth DTO | Контракты входа и смены пароля |
 | `corebackend/src/Api/Contracts/EventContracts.cs` | `UserProfileDto` | Профиль `/me`, включая логин |
 | `corebackend/src/Api/Contracts/RoleContracts.cs` | `RoleDto`, `PermissionDto` | Справочник ролей |
@@ -371,9 +408,12 @@ Backend возвращает `temporaryPassword`, который фактиче�
 | `Application/Entities/Login.cs` | `Login` | Глобальный логин, хеш пароля, `MustChangePassword` |
 | `Application/Entities/Role.cs` | `Role` | Роль мероприятия |
 | `Application/Entities/Group.cs` | `Group` | Группа мероприятия |
+| `Application/Entities/OrganizationDepartment.cs` | `OrganizationDepartment` | Отдел исходной оргструктуры |
+| `Application/Entities/OrganizationEmployee.cs` | `OrganizationEmployee` | Сотрудник исходной оргструктуры с должностью |
 | `Application/Entities/Permission.cs` | `Permission` | Код разрешения |
 | `Application/Entities/RolePermission.cs` | `RolePermission` | Связь роли и разрешения |
 | `Application/Services/IUserService.cs` | `IUserService` | Контракт операций сотрудников |
+| `Application/Services/IOrganizationStructureService.cs` | `IOrganizationStructureService` | Импорт, применение и получение дерева оригинальной структуры |
 | `Application/Services/IAuthService.cs` | `IAuthService` | Контракт входа, временных паролей и смены пароля |
 | `Application/Services/IRoleService.cs` | `IRoleService` | Контракт справочника ролей |
 | `Application/Services/IPermissionService.cs` | `IPermissionService` | Контракт проверки разрешений |
@@ -385,6 +425,7 @@ Backend возвращает `temporaryPassword`, который фактиче�
 | Файл | Класс | Ответственность |
 |---|---|---|
 | `Infrastructure/Services/UserService.cs` | `UserService` | Создание/изменение/удаление User, назначение и проверка роли/группы, правило корневой группы и защита последнего Administrator, сброс пароля |
+| `Infrastructure/Services/OrganizationStructureService.cs` | `OrganizationStructureService` | Импорт Excel, применение структуры к группам, сборка кешированного дерева отделов/сотрудников |
 | `Infrastructure/Services/AuthService.cs` | `AuthService` | Хеширование, Login, временный пароль, SID/JWT, claim обязательной смены |
 | `Infrastructure/Services/RoleService.cs` | `RoleService` | Глобальный справочник ролей и permissions |
 | `Infrastructure/Services/PermissionService.cs` | `PermissionService` | Получение permissions и серверные проверки |
@@ -400,6 +441,31 @@ Backend возвращает `temporaryPassword`, который фактиче�
 | `Infrastructure/DependencyInjection.cs` | `AddInfrastructure` | Регистрация сервисов и репозиториев |
 | `WebApi/Program.cs` | конфигурация приложения | Authentication, policies, middleware HTTP 428, миграции при старте |
 | `Infrastructure/Migrations/20260901111221_InitialCreate.cs` | единая начальная миграция | Создаёт актуальную схему, `must_change_password`, bootstrap-admin, глобальные роли и permissions |
+
+### Кеш оригинальной структуры
+
+Дерево оргструктуры собирается лениво при первом запросе:
+
+```http
+GET /api/events/{eventId}/organization-structure/tree
+```
+
+Сервис `OrganizationStructureService.GetTreeAsync`:
+
+1. проверяет, что текущий Login имеет профиль User в мероприятии;
+2. пытается взять дерево из `IMemoryCache`;
+3. при промахе кеша читает `OrganizationDepartment` и `OrganizationEmployee`;
+4. собирает рекурсивное дерево отделов с сотрудниками;
+5. кладёт готовый DTO в память на 1 час;
+6. возвращает дерево на frontend.
+
+Ключ кеша:
+
+```text
+organization-structure-tree:{eventId}
+```
+
+После успешного импорта Excel метод `ImportRmgStructureAsync` удаляет этот ключ, чтобы следующее открытие формы получило свежие данные.
 
 ## 7. Пароли и SID
 

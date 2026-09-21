@@ -3,6 +3,7 @@ using Application.Repositories;
 using Application.Services;
 using Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using System.IO.Compression;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -15,10 +16,12 @@ public sealed partial class OrganizationStructureService(
     IGroupRepository groupRepository,
     IPermissionService permissionService,
     IEventStateGuard eventStateGuard,
-    IEventLogService eventLogService) : IOrganizationStructureService
+    IEventLogService eventLogService,
+    IMemoryCache cache) : IOrganizationStructureService
 {
     private const int RootQuota = 10000;
     private const int MaximumFileSize = 10 * 1024 * 1024;
+    private static readonly TimeSpan TreeCacheTtl = TimeSpan.FromHours(1);
     private static readonly XNamespace SpreadsheetNamespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
     public async Task<OrganizationImportResult> ImportRmgStructureAsync(
@@ -186,9 +189,13 @@ public sealed partial class OrganizationStructureService(
         await executionStrategy.ExecuteAsync(async () =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-            await db.Database.ExecuteSqlRawAsync(
-                "TRUNCATE TABLE corebackend.organization_employees, corebackend.organization_departments RESTART IDENTITY CASCADE;",
-                cancellationToken);
+            // DELETE honors ON DELETE SET NULL for users linked to old employees.
+            // TRUNCATE CASCADE would also truncate users and their related events.
+            await db.OrganizationEmployees.ExecuteDeleteAsync(cancellationToken);
+            await db.OrganizationDepartments
+                .Where(department => department.ParentId != null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(department => department.ParentId, (long?)null), cancellationToken);
+            await db.OrganizationDepartments.ExecuteDeleteAsync(cancellationToken);
 
             foreach (var node in rootNodes)
                 AddDepartment(node, null, now);
@@ -214,7 +221,79 @@ public sealed partial class OrganizationStructureService(
             await transaction.CommitAsync(cancellationToken);
         });
 
+        cache.Remove(BuildTreeCacheKey(eventId));
+
         return result;
+    }
+
+    public async Task<OrganizationStructureTree> GetTreeAsync(
+        long eventId,
+        long loginId,
+        CancellationToken cancellationToken = default)
+    {
+        var userGroupId = await permissionService.GetUserGroupInEventAsync(loginId, eventId);
+        if (!userGroupId.HasValue)
+            throw new UnauthorizedAccessException("User is not assigned to this event");
+
+        var cacheKey = BuildTreeCacheKey(eventId);
+        if (cache.TryGetValue(cacheKey, out OrganizationStructureTree? cachedTree) && cachedTree != null)
+            return cachedTree;
+
+        var departments = await db.OrganizationDepartments
+            .AsNoTracking()
+            .OrderBy(department => department.Name)
+            .ToListAsync(cancellationToken);
+        var employees = await db.OrganizationEmployees
+            .AsNoTracking()
+            .OrderBy(employee => employee.FullName)
+            .ToListAsync(cancellationToken);
+
+        var employeesByDepartmentId = employees
+            .GroupBy(employee => employee.DepartmentId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .Select(employee => new OrganizationEmployeeTreeItem(
+                        employee.Id,
+                        employee.DepartmentId,
+                        employee.FullName,
+                        employee.Surname,
+                        employee.Name,
+                        employee.AdditionalName,
+                        employee.Position,
+                        employee.SourceRowNumber))
+                    .ToList());
+        var childrenByParentId = departments
+            .Where(department => department.ParentId.HasValue)
+            .GroupBy(department => department.ParentId!.Value)
+            .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Name).ToList());
+
+        OrganizationDepartmentTreeItem MapDepartment(OrganizationDepartment department) =>
+            new(
+                department.Id,
+                department.ParentId,
+                department.Name,
+                department.IsGeneratedFromParentName,
+                employeesByDepartmentId.GetValueOrDefault(department.Id) ?? [],
+                (childrenByParentId.GetValueOrDefault(department.Id) ?? [])
+                    .Select(MapDepartment)
+                    .ToList());
+
+        var tree = new OrganizationStructureTree(
+            departments
+                .Where(department => department.ParentId == null)
+                .OrderBy(department => department.Name)
+                .Select(MapDepartment)
+                .ToList(),
+            departments.Count,
+            employees.Count,
+            departments
+                .Select(department => (DateTimeOffset?)department.CreatedAt)
+                .Concat(employees.Select(employee => (DateTimeOffset?)employee.CreatedAt))
+                .Max());
+
+        cache.Set(cacheKey, tree, TreeCacheTtl);
+        return tree;
     }
 
     public async Task<ApplyOriginalStructureResult> ApplyOriginalStructureAsync(
@@ -433,6 +512,8 @@ public sealed partial class OrganizationStructureService(
 
         return updated;
     }
+
+    private static string BuildTreeCacheKey(long eventId) => $"organization-structure-tree:{eventId}";
 
     private static int GetDepth(AppGroup group, List<AppGroup> groups)
     {

@@ -8,6 +8,9 @@ public sealed record UserDto(
     string? RoleName,
     long GroupId,
     string? GroupName,
+    long? OrganizationEmployeeId,
+    string? Position,
+    string? DepartmentName,
     string Name,
     string Surname,
     string? AdditionalName,
@@ -37,7 +40,8 @@ public sealed record CreateUserRequest(
     string? Email,
     string? Tel,
     long RoleId,
-    long GroupId);
+    long GroupId,
+    long? OrganizationEmployeeId);
 
 public sealed record UpdateUserRequest(
     string Login,

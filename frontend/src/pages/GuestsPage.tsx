@@ -4,7 +4,16 @@ import { useParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
-import { CategoryDto, GroupTreeDto, GuestDto, GuestSearchResultDto, TagDto } from "../types";
+import {
+  CategoryDto,
+  GroupTreeDto,
+  GuestDto,
+  GuestSearchResultDto,
+  OrganizationDepartmentTreeItemDto,
+  OrganizationEmployeeTreeItemDto,
+  OrganizationStructureTreeDto,
+  TagDto,
+} from "../types";
 import { flattenGroups } from "../utils/groups";
 
 const statusLabel: Record<string, string> = {
@@ -26,6 +35,40 @@ const DeleteIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7
 const RejectIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V3h10v2H6v14h8v2H4Zm11.6-5.4-1.4-1.4 2.2-2.2H10v-2h6.4l-2.2-2.2 1.4-1.4L20.4 12l-4.8 4.6Z" /></svg>;
 const emptyForm = (groupId = "", categoryId = "", tagIds: string[] = []) => ({ name: "", email: "", phone: "", groupId, categoryId, tagIds });
 const formatDateTime = (value: string) => new Date(value).toLocaleString("ru-RU");
+const normalizeSearch = (value: string) => value.trim().toLocaleLowerCase("ru-RU");
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const HighlightedText: React.FC<{ value: string; query: string }> = ({ value, query }) => {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return <>{value}</>;
+
+  const parts = value.split(new RegExp(`(${escapeRegExp(trimmedQuery)})`, "ig"));
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.toLocaleLowerCase("ru-RU") === trimmedQuery.toLocaleLowerCase("ru-RU") ? (
+          <mark className="org-tree-search-highlight" key={`${part}-${index}`}>
+            {part}
+          </mark>
+        ) : (
+          <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
+        )
+      )}
+    </>
+  );
+};
+
+const departmentMatchesSearch = (department: OrganizationDepartmentTreeItemDto, query: string): boolean => {
+  if (!query) return true;
+
+  const ownMatch = normalizeSearch(department.name).includes(query);
+  const employeeMatch = department.employees.some((employee) =>
+    normalizeSearch(`${employee.fullName} ${employee.position}`).includes(query)
+  );
+  const childMatch = department.children.some((child) => departmentMatchesSearch(child, query));
+
+  return ownMatch || employeeMatch || childMatch;
+};
 
 const collectScopeIds = (groups: GroupTreeDto[], userGroupId?: number) => {
   const result = new Set<number>();
@@ -36,6 +79,81 @@ const collectScopeIds = (groups: GroupTreeDto[], userGroupId?: number) => {
   };
   groups.forEach((group) => visit(group, false));
   return result;
+};
+
+const OrganizationDepartmentNode: React.FC<{
+  department: OrganizationDepartmentTreeItemDto;
+  query: string;
+  depth: number;
+  selectedEmployeeId: number | null;
+  onSelectEmployee: (employee: OrganizationEmployeeTreeItemDto) => void;
+}> = ({ department, query, depth, selectedEmployeeId, onSelectEmployee }) => {
+  const [isOpen, setIsOpen] = useState(depth < 1);
+  const normalizedQuery = normalizeSearch(query);
+  const visibleEmployees = normalizedQuery
+    ? department.employees.filter((employee) =>
+        normalizeSearch(`${employee.fullName} ${employee.position}`).includes(normalizedQuery)
+      )
+    : department.employees;
+  const visibleChildren = department.children.filter((child) => departmentMatchesSearch(child, normalizedQuery));
+  const hasContent = visibleEmployees.length > 0 || visibleChildren.length > 0;
+
+  useEffect(() => {
+    if (normalizedQuery && hasContent) setIsOpen(true);
+  }, [normalizedQuery, hasContent]);
+
+  if (!hasContent && normalizedQuery) return null;
+
+  return (
+    <li className="org-tree-department">
+      <button
+        className="org-tree-department-button"
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        style={{ paddingLeft: 10 + depth * 12 }}
+      >
+        <span aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
+        <strong>
+          <HighlightedText value={department.name} query={query} />
+        </strong>
+        <small>{department.employees.length}</small>
+      </button>
+      {isOpen && (
+        <div className="org-tree-department-content">
+          {visibleEmployees.map((employee) => (
+            <button
+              className={`org-tree-employee${selectedEmployeeId === employee.id ? " selected" : ""}`}
+              key={employee.id}
+              type="button"
+              onClick={() => onSelectEmployee(employee)}
+              style={{ paddingLeft: 30 + depth * 12 }}
+            >
+              <span>
+                <HighlightedText value={employee.fullName} query={query} />
+              </span>
+              <small>
+                <HighlightedText value={employee.position} query={query} />
+              </small>
+            </button>
+          ))}
+          {visibleChildren.length > 0 && (
+            <ul className="org-tree-list">
+              {visibleChildren.map((child) => (
+                <OrganizationDepartmentNode
+                  key={child.id}
+                  department={child}
+                  query={query}
+                  depth={depth + 1}
+                  selectedEmployeeId={selectedEmployeeId}
+                  onSelectEmployee={onSelectEmployee}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </li>
+  );
 };
 
 export const GuestsPage: React.FC = () => {
@@ -67,6 +185,12 @@ export const GuestsPage: React.FC = () => {
   const [similarGuests, setSimilarGuests] = useState<GuestSearchResultDto[]>([]);
   const [similarGuestsLoading, setSimilarGuestsLoading] = useState(false);
   const [similarGuestsError, setSimilarGuestsError] = useState("");
+  const [organizationTree, setOrganizationTree] = useState<OrganizationStructureTreeDto | null>(null);
+  const [organizationTreeLoading, setOrganizationTreeLoading] = useState(false);
+  const [organizationTreeError, setOrganizationTreeError] = useState("");
+  const [organizationTreeSearch, setOrganizationTreeSearch] = useState("");
+  const [selectedOrganizationEmployeeId, setSelectedOrganizationEmployeeId] = useState<number | null>(null);
+  const [selectedOrganizationEmployeePosition, setSelectedOrganizationEmployeePosition] = useState("");
   const skipNextSearch = useRef(false);
 
   const selectedEvent = useMemo(() => events.find((event) => String(event.id) === eventId) ?? currentEvent, [events, eventId, currentEvent]);
@@ -227,6 +351,21 @@ export const GuestsPage: React.FC = () => {
     return { groupTree, categoryList, tagList };
   };
 
+  const loadOrganizationTree = async () => {
+    if (!eventId) return;
+
+    setOrganizationTreeLoading(true);
+    setOrganizationTreeError("");
+    try {
+      setOrganizationTree(await apiClient.getOrganizationStructureTree(eventId));
+    } catch (err) {
+      setOrganizationTreeError("Не удалось загрузить оригинальную структуру.");
+      console.error(err);
+    } finally {
+      setOrganizationTreeLoading(false);
+    }
+  };
+
   const toggleFormTag = (tagId: number) => {
     const value = String(tagId);
     setFormData((current) => ({
@@ -281,7 +420,11 @@ export const GuestsPage: React.FC = () => {
       setSimilarGuests([]);
       setSimilarGuestsError("");
       setSimilarGuestsLoading(false);
+      setOrganizationTreeSearch("");
+      setSelectedOrganizationEmployeeId(null);
+      setSelectedOrganizationEmployeePosition("");
       setIsCreateModalOpen(true);
+      void loadOrganizationTree();
     } catch (err) {
       setError("Не удалось загрузить данные формы гостя.");
       console.error(err);
@@ -315,6 +458,9 @@ export const GuestsPage: React.FC = () => {
     setSimilarGuests([]);
     setSimilarGuestsError("");
     setSimilarGuestsLoading(false);
+    setOrganizationTreeSearch("");
+    setSelectedOrganizationEmployeeId(null);
+    setSelectedOrganizationEmployeePosition("");
     setError("");
   };
 
@@ -335,6 +481,15 @@ export const GuestsPage: React.FC = () => {
     });
     setSimilarGuests([]);
     setSimilarGuestsError("");
+  };
+
+  const useOrganizationPersonForGuest = (employee: OrganizationEmployeeTreeItemDto) => {
+    setSelectedOrganizationEmployeeId(employee.id);
+    setSelectedOrganizationEmployeePosition(employee.position);
+    setFormData((current) => ({
+      ...current,
+      name: employee.fullName,
+    }));
   };
 
   const submitGuest = async (event: React.FormEvent) => {
@@ -669,143 +824,197 @@ export const GuestsPage: React.FC = () => {
       </div>
     </Modal>}
 
-    {(isCreateModalOpen || editingGuest) && <Modal className="guest-form-modal" title={editingGuest ? "Редактировать гостя" : "Добавить гостя"} description={editingGuest ? "Измените данные гостя и просмотрите цепочку согласования." : "Гость будет сохранён в выбранной группе."} onClose={closeForm}>{error && <div className="alert alert-error">{error}</div>}<form className="form guest-edit-form" onSubmit={submitGuest}>
-      <label className="field"><span>Имя</span><input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={saving} required /></label>
-      <label className="field"><span>Email</span><input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} disabled={saving} /></label>
-      <label className="field"><span>Телефон</span><input type="tel" value={formData.phone} onChange={(event) => setFormData({ ...formData, phone: event.target.value })} disabled={saving} /></label>
-      <label className="field"><span>Группа</span><select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} disabled={saving} required>{flatGroups.filter((group) => scopeIds.has(group.id)).map((group) => <option key={group.id} value={group.id}>{"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}</option>)}</select></label>
-      <div className="field guest-category-field">
-        <div className="selected-category-row">
-          <span>Категория</span>
-          {selectedCategory ? (
-            <span className="category-arrow selected-category-arrow" style={{ backgroundColor: selectedCategory.color, color: "#ffffff" }}>
-              {selectedCategory.name}
-            </span>
-          ) : (
-            <span className="selected-category-empty">Без категории</span>
-          )}
-        </div>
-        <div className="category-choice-list" role="radiogroup" aria-label="Категория гостя">
-          <button
-            className={`category-choice${formData.categoryId === "" ? " selected" : ""}`}
-            type="button"
-            role="radio"
-            aria-checked={formData.categoryId === ""}
-            onClick={() => setFormData({ ...formData, categoryId: "" })}
-            disabled={saving}
-          >
-            Без категории
-          </button>
-          {categories.map((category) => {
-            const value = String(category.id);
-            return (
-              <button
-                className={`category-choice category-choice-arrow${formData.categoryId === value ? " selected" : ""}`}
-                type="button"
-                role="radio"
-                aria-checked={formData.categoryId === value}
-                key={category.id}
-                onClick={() => setFormData({ ...formData, categoryId: value })}
-                disabled={saving}
-              >
-                <span className="category-arrow" style={{ backgroundColor: category.color, color: "#ffffff" }}>
-                  {category.name}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="field guest-category-field">
-        <div className="selected-tags-row">
-          <span>Метки</span>
-          {selectedTags.length === 0 ? (
-            <span className="selected-category-empty">Без меток</span>
-          ) : selectedTags.map((tag) => (
-            <span className="tag-badge selected-tag-badge" key={tag.id} style={{ backgroundColor: tag.color, color: "#ffffff" }}>
-              {tag.name}
-            </span>
-          ))}
-        </div>
-        <div className="tag-choice-list" role="group" aria-label="Метки гостя">
-          <button
-            className={`category-choice${formData.tagIds.length === 0 ? " selected" : ""}`}
-            type="button"
-            onClick={() => setFormData({ ...formData, tagIds: [] })}
-            disabled={saving}
-          >
-            Без меток
-          </button>
-          {tags.length === 0 ? (
-            <span className="tag-filter-empty">Меток пока нет.</span>
-          ) : tags.map((tag) => {
-            const selected = formData.tagIds.includes(String(tag.id));
-            return (
-              <button
-                className={`tag-choice${selected ? " selected" : ""}`}
-                type="button"
-                key={tag.id}
-                onClick={() => toggleFormTag(tag.id)}
-                disabled={saving}
-              >
-                <span className="tag-badge" style={{ backgroundColor: tag.color, color: "#ffffff" }}>
-                  {tag.name}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      {isCreateModalOpen && !editingGuest && <div className="similar-employees similar-guests" aria-live="polite">
-        <div className="similar-employees-heading">
-          <strong>Похожие гости</strong>
-          {similarGuestsLoading && <span>Ищем...</span>}
-        </div>
-        {similarGuestsError ? (
-          <div className="similar-employees-message error-text">{similarGuestsError}</div>
-        ) : similarGuests.length > 0 ? (
-          <div className="similar-employees-list">
-            <div className="similar-employee-row similar-employee-header" aria-hidden="true">
-              <div className="similar-employee-data similar-guest-data">
-                <span>Имя</span>
-                <span>Email</span>
-                <span>Телефон</span>
-                <span>Мероприятие</span>
-                <span>Группа</span>
-                <span>Статус</span>
-              </div>
-              <span className="similar-employee-header-action">Действие</span>
-            </div>
-            {similarGuests.map((guest) => (
-              <div className="similar-employee-row" key={guest.id}>
-                <div className="similar-employee-data similar-guest-data">
-                  <span>{guest.name}</span>
-                  <span>{guest.email || "—"}</span>
-                  <span>{guest.phone || "—"}</span>
-                  <span title={guest.eventName || undefined}>{guest.eventName || "—"}</span>
-                  <span>{guest.groupName || "—"}</span>
-                  <span>{statusLabel[guest.status] ?? guest.status}</span>
-                </div>
-                <button
-                  className="secondary-button similar-employee-use"
-                  type="button"
-                  onClick={() => useSimilarGuest(guest)}
-                  disabled={saving}
-                >
-                  Использовать
-                </button>
-              </div>
-            ))}
+    {(isCreateModalOpen || editingGuest) && <Modal className={`guest-form-modal${isCreateModalOpen && !editingGuest ? " guest-create-form-modal" : ""}`} title={editingGuest ? "Редактировать гостя" : "Добавить гостя"} description={editingGuest ? "Измените данные гостя и просмотрите цепочку согласования." : "Гость будет сохранён в выбранной группе."} onClose={closeForm}>{error && <div className="alert alert-error">{error}</div>}<form className={`form guest-edit-form guest-edit-form-with-tags${isCreateModalOpen && !editingGuest ? " guest-create-form-with-person-picker" : ""}`} onSubmit={submitGuest}>
+      {isCreateModalOpen && !editingGuest && (
+        <aside className="organization-picker guest-person-picker" aria-label="Оригинальная структура">
+          <div className="organization-picker-header">
+            <strong>Оригинальная структура</strong>
+            {organizationTree && (
+              <span>{organizationTree.departmentsCount} отделов · {organizationTree.employeesCount} сотрудников</span>
+            )}
           </div>
-        ) : (
-          <div className="similar-employees-message">
-            {similarGuestsLoading
-              ? "Поиск по имени, email и телефону..."
-              : "Введите не менее двух символов в имени, email или телефоне."}
+          <input
+            className="organization-picker-search"
+            value={organizationTreeSearch}
+            onChange={(event) => setOrganizationTreeSearch(event.target.value)}
+            placeholder="Поиск отдела или сотрудника"
+            disabled={organizationTreeLoading}
+          />
+          {organizationTreeLoading ? (
+            <div className="organization-picker-message">Загружаем структуру...</div>
+          ) : organizationTreeError ? (
+            <div className="organization-picker-message error-text">{organizationTreeError}</div>
+          ) : !organizationTree || organizationTree.employeesCount === 0 ? (
+            <div className="organization-picker-message">Оригинальная структура пока не загружена.</div>
+          ) : (
+            <ul className="org-tree-list org-tree-root">
+              {organizationTree.departments
+                .filter((department) => departmentMatchesSearch(department, normalizeSearch(organizationTreeSearch)))
+                .map((department) => (
+                  <OrganizationDepartmentNode
+                    key={department.id}
+                    department={department}
+                    query={organizationTreeSearch}
+                    depth={0}
+                    selectedEmployeeId={selectedOrganizationEmployeeId}
+                    onSelectEmployee={useOrganizationPersonForGuest}
+                  />
+                ))}
+            </ul>
+          )}
+        </aside>
+      )}
+      <div className="guest-form-main">
+        {isCreateModalOpen && !editingGuest && selectedOrganizationEmployeePosition && (
+          <div className="alert alert-info guest-person-source-message">
+            Данные заполнены из оригинальной структуры. Должность: {selectedOrganizationEmployeePosition}. Email и телефон заполните вручную.
           </div>
         )}
-      </div>}
-      {editingGuest && <div className="guest-workflow-section"><h3 className="workflow-title">Цепочка согласования</h3>{renderWorkflow(editingGuest)}</div>}
+        <label className="field"><span>Имя</span><input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={saving} required /></label>
+        <label className="field"><span>Email</span><input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} disabled={saving} /></label>
+        <label className="field"><span>Телефон</span><input type="tel" value={formData.phone} onChange={(event) => setFormData({ ...formData, phone: event.target.value })} disabled={saving} /></label>
+        <label className="field"><span>Группа</span><select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value })} disabled={saving} required>{flatGroups.filter((group) => scopeIds.has(group.id)).map((group) => <option key={group.id} value={group.id}>{"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}</option>)}</select></label>
+        <div className="field guest-category-field">
+          <div className="selected-category-row">
+            <span>Категория</span>
+            {selectedCategory ? (
+              <span className="category-arrow selected-category-arrow" style={{ backgroundColor: selectedCategory.color, color: "#ffffff" }}>
+                {selectedCategory.name}
+              </span>
+            ) : (
+              <span className="selected-category-empty">Без категории</span>
+            )}
+          </div>
+          <div className="category-choice-list" role="radiogroup" aria-label="Категория гостя">
+            <button
+              className={`category-choice${formData.categoryId === "" ? " selected" : ""}`}
+              type="button"
+              role="radio"
+              aria-checked={formData.categoryId === ""}
+              onClick={() => setFormData({ ...formData, categoryId: "" })}
+              disabled={saving}
+            >
+              Без категории
+            </button>
+            {categories.map((category) => {
+              const value = String(category.id);
+              return (
+                <button
+                  className={`category-choice category-choice-arrow${formData.categoryId === value ? " selected" : ""}`}
+                  type="button"
+                  role="radio"
+                  aria-checked={formData.categoryId === value}
+                  key={category.id}
+                  onClick={() => setFormData({ ...formData, categoryId: value })}
+                  disabled={saving}
+                >
+                  <span className="category-arrow" style={{ backgroundColor: category.color, color: "#ffffff" }}>
+                    {category.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {isCreateModalOpen && !editingGuest && <div className="similar-employees similar-guests" aria-live="polite">
+          <div className="similar-employees-heading">
+            <strong>Похожие гости</strong>
+            {similarGuestsLoading && <span>Ищем...</span>}
+          </div>
+          {similarGuestsError ? (
+            <div className="similar-employees-message error-text">{similarGuestsError}</div>
+          ) : similarGuests.length > 0 ? (
+            <div className="similar-employees-list">
+              <div className="similar-employee-row similar-employee-header" aria-hidden="true">
+                <div className="similar-employee-data similar-guest-data">
+                  <span>Имя</span>
+                  <span>Email</span>
+                  <span>Телефон</span>
+                  <span>Мероприятие</span>
+                  <span>Группа</span>
+                  <span>Статус</span>
+                </div>
+                <span className="similar-employee-header-action">Действие</span>
+              </div>
+              {similarGuests.map((guest) => (
+                <div className="similar-employee-row" key={guest.id}>
+                  <div className="similar-employee-data similar-guest-data">
+                    <span>{guest.name}</span>
+                    <span>{guest.email || "—"}</span>
+                    <span>{guest.phone || "—"}</span>
+                    <span title={guest.eventName || undefined}>{guest.eventName || "—"}</span>
+                    <span>{guest.groupName || "—"}</span>
+                    <span>{statusLabel[guest.status] ?? guest.status}</span>
+                  </div>
+                  <button
+                    className="secondary-button similar-employee-use"
+                    type="button"
+                    onClick={() => useSimilarGuest(guest)}
+                    disabled={saving}
+                  >
+                    Использовать
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="similar-employees-message">
+              {similarGuestsLoading
+                ? "Поиск по имени, email и телефону..."
+                : "Введите не менее двух символов в имени, email или телефоне."}
+            </div>
+          )}
+        </div>}
+        {editingGuest && <div className="guest-workflow-section"><h3 className="workflow-title">Цепочка согласования</h3>{renderWorkflow(editingGuest)}</div>}
+      </div>
+
+      <aside className="guest-tags-side-panel" aria-label="Метки гостя">
+        <div className="guest-tags-side-section">
+          <h3>Присвоенные метки</h3>
+          <div className="selected-tags-row guest-tags-selected-panel">
+            {selectedTags.length === 0 ? (
+              <span className="selected-category-empty">Без меток</span>
+            ) : selectedTags.map((tag) => (
+              <span className="tag-badge selected-tag-badge" key={tag.id} style={{ backgroundColor: tag.color, color: "#ffffff" }}>
+                {tag.name}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="guest-tags-side-section guest-tags-available-section">
+          <h3>Доступные метки</h3>
+          <div className="tag-choice-list guest-tags-choice-list" role="group" aria-label="Метки гостя">
+            <button
+              className={`category-choice${formData.tagIds.length === 0 ? " selected" : ""}`}
+              type="button"
+              onClick={() => setFormData({ ...formData, tagIds: [] })}
+              disabled={saving}
+            >
+              Без меток
+            </button>
+            {tags.length === 0 ? (
+              <span className="tag-filter-empty">Меток пока нет.</span>
+            ) : tags.map((tag) => {
+              const selected = formData.tagIds.includes(String(tag.id));
+              return (
+                <button
+                  className={`tag-choice${selected ? " selected" : ""}`}
+                  type="button"
+                  key={tag.id}
+                  onClick={() => toggleFormTag(tag.id)}
+                  disabled={saving}
+                >
+                  <span className="tag-badge" style={{ backgroundColor: tag.color, color: "#ffffff" }}>
+                    {tag.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </aside>
+
       <div className="modal-actions"><button className="secondary-button" type="button" onClick={closeForm} disabled={saving}>Закрыть</button><button className="primary-button" type="submit" disabled={saving || Boolean(editingGuest && !isGuestEditDirty)}>{saving ? "Сохраняем..." : "Сохранить"}</button></div>
     </form></Modal>}
 

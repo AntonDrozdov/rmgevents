@@ -26,7 +26,8 @@ public sealed class UserService(
         string? email,
         string? tel,
         long roleId,
-        long groupId)
+        long groupId,
+        long? organizationEmployeeId)
     {
         if (string.IsNullOrWhiteSpace(loginValue))
             throw new InvalidOperationException("Login is required");
@@ -53,6 +54,7 @@ public sealed class UserService(
                 EventId = eventId,
                 RoleId = roleId,
                 GroupId = groupId,
+                OrganizationEmployeeId = organizationEmployeeId,
                 CreatedByUserId = creator.Id,
                 Name = name,
                 Surname = surname,

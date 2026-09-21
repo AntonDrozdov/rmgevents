@@ -14,6 +14,8 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .ThenInclude(x => x.Permission)
             .Include(x => x.Group)
             .Include(x => x.Login)
+            .Include(x => x.OrganizationEmployee)
+            .ThenInclude(x => x!.Department)
             .Include(x => x.CreatedByUser)
             .ThenInclude(x => x!.Role)
             .FirstOrDefaultAsync(x => x.Id == id);
@@ -30,6 +32,8 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .ThenInclude(x => x.Permission)
             .Include(x => x.Group)
             .Include(x => x.Login)
+            .Include(x => x.OrganizationEmployee)
+            .ThenInclude(x => x!.Department)
             .ToListAsync();
     }
     
@@ -42,6 +46,8 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .ThenInclude(x => x.Permission)
             .Include(x => x.Group)
             .Include(x => x.Login)
+            .Include(x => x.OrganizationEmployee)
+            .ThenInclude(x => x!.Department)
             .Include(x => x.CreatedByUser)
             .ThenInclude(x => x!.Role)
             .FirstOrDefaultAsync();
@@ -54,6 +60,8 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .Include(x => x.Role)
             .Include(x => x.Group)
             .Include(x => x.Login)
+            .Include(x => x.OrganizationEmployee)
+            .ThenInclude(x => x!.Department)
             .Include(x => x.CreatedByUser)
             .ThenInclude(x => x!.Role)
             .ToListAsync();
@@ -74,6 +82,8 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
             .Include(user => user.Event)
             .Include(user => user.Role)
             .Include(user => user.Group)
+            .Include(user => user.OrganizationEmployee)
+            .ThenInclude(x => x!.Department)
             .AsQueryable();
 
         var hasLogin = !string.IsNullOrWhiteSpace(login);
@@ -132,6 +142,8 @@ public sealed class UserRepository(ApplicationDbContext db) : IUserRepository
         return await db.Users
             .Where(x => x.GroupId == groupId)
             .Include(x => x.Role)
+            .Include(x => x.OrganizationEmployee)
+            .ThenInclude(x => x!.Department)
             .ToListAsync();
     }
 

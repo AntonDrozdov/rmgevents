@@ -2,7 +2,7 @@ name: rmgevents
 
 services:
   corebackend:
-    image: rmgevents-corebackend:latest
+    image: rmgevents-corebackend:${APP_VERSION:?Set APP_VERSION in deploy/.env}
     container_name: rmgevents-corebackend
     environment:
       ASPNETCORE_ENVIRONMENT: Production
@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: rmgevents-frontend:latest
+    image: rmgevents-frontend:${APP_VERSION:?Set APP_VERSION in deploy/.env}
     container_name: rmgevents-frontend
     depends_on:
       - corebackend

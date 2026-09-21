@@ -36,6 +36,9 @@ public sealed class UsersController(
             user.Role?.Name,
             user.GroupId,
             user.Group?.Name,
+            user.OrganizationEmployeeId,
+            user.OrganizationEmployee?.Position,
+            user.OrganizationEmployee?.Department?.Name,
             user.Name,
             user.Surname,
             user.AdditionalName,
@@ -100,7 +103,8 @@ public sealed class UsersController(
                 request.Email,
                 request.Tel,
                 request.RoleId,
-                request.GroupId);
+                request.GroupId,
+                request.OrganizationEmployeeId);
             
             return Created(
                 $"/users/{user.Id}",

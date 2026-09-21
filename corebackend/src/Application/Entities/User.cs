@@ -7,6 +7,7 @@ public sealed class User
     public long EventId { get; set; }
     public long RoleId { get; set; }
     public long GroupId { get; set; } // The group this user is assigned to
+    public long? OrganizationEmployeeId { get; set; }
     public long? CreatedByUserId { get; set; }
     public required string Name { get; set; }
     public required string Surname { get; set; }
@@ -21,6 +22,7 @@ public sealed class User
     public Event? Event { get; set; }
     public Role? Role { get; set; }
     public Group? Group { get; set; }
+    public OrganizationEmployee? OrganizationEmployee { get; set; }
     public User? CreatedByUser { get; set; }
     public ICollection<User> CreatedUsers { get; set; } = [];
     public ICollection<Guest> CreatedGuests { get; set; } = [];

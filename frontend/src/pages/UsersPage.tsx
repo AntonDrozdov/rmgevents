@@ -4,7 +4,15 @@ import { useParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
-import { GroupTreeDto, RoleDto, UserDto, UserSearchResultDto } from "../types";
+import {
+  GroupTreeDto,
+  OrganizationDepartmentTreeItemDto,
+  OrganizationEmployeeTreeItemDto,
+  OrganizationStructureTreeDto,
+  RoleDto,
+  UserDto,
+  UserSearchResultDto,
+} from "../types";
 import { flattenGroups } from "../utils/groups";
 
 const formatUserName = (user: Pick<UserDto, "surname" | "name" | "additionalName">) =>
@@ -43,6 +51,117 @@ const ResetPasswordIcon = () => (
   </svg>
 );
 
+const normalizeSearch = (value: string) => value.trim().toLocaleLowerCase("ru-RU");
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const HighlightedText: React.FC<{ value: string; query: string }> = ({ value, query }) => {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return <>{value}</>;
+
+  const parts = value.split(new RegExp(`(${escapeRegExp(trimmedQuery)})`, "ig"));
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.toLocaleLowerCase("ru-RU") === trimmedQuery.toLocaleLowerCase("ru-RU") ? (
+          <mark className="org-tree-search-highlight" key={`${part}-${index}`}>
+            {part}
+          </mark>
+        ) : (
+          <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
+        )
+      )}
+    </>
+  );
+};
+
+const departmentMatchesSearch = (department: OrganizationDepartmentTreeItemDto, query: string): boolean => {
+  if (!query) return true;
+
+  const ownMatch = normalizeSearch(department.name).includes(query);
+  const employeeMatch = department.employees.some((employee) =>
+    normalizeSearch(`${employee.fullName} ${employee.position}`).includes(query)
+  );
+  const childMatch = department.children.some((child) => departmentMatchesSearch(child, query));
+
+  return ownMatch || employeeMatch || childMatch;
+};
+
+const OrganizationDepartmentNode: React.FC<{
+  department: OrganizationDepartmentTreeItemDto;
+  query: string;
+  depth: number;
+  selectedEmployeeId: number | null;
+  onSelectEmployee: (employee: OrganizationEmployeeTreeItemDto) => void;
+}> = ({ department, query, depth, selectedEmployeeId, onSelectEmployee }) => {
+  const [isOpen, setIsOpen] = useState(depth < 1);
+  const normalizedQuery = normalizeSearch(query);
+  const visibleEmployees = normalizedQuery
+    ? department.employees.filter((employee) =>
+        normalizeSearch(`${employee.fullName} ${employee.position}`).includes(normalizedQuery)
+      )
+    : department.employees;
+  const visibleChildren = department.children.filter((child) => departmentMatchesSearch(child, normalizedQuery));
+  const hasContent = visibleEmployees.length > 0 || visibleChildren.length > 0;
+
+  useEffect(() => {
+    if (normalizedQuery && hasContent) setIsOpen(true);
+  }, [normalizedQuery, hasContent]);
+
+  if (!hasContent && normalizedQuery) return null;
+
+  return (
+    <li className="org-tree-department">
+      <button
+        className="org-tree-department-button"
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        style={{ paddingLeft: 10 + depth * 12 }}
+      >
+        <span aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
+        <strong>
+          <HighlightedText value={department.name} query={query} />
+        </strong>
+        <small>{department.employees.length}</small>
+      </button>
+      {isOpen && (
+        <div className="org-tree-department-content">
+          {visibleEmployees.map((employee) => (
+            <button
+              className={`org-tree-employee${selectedEmployeeId === employee.id ? " selected" : ""}`}
+              key={employee.id}
+              type="button"
+              onClick={() => onSelectEmployee(employee)}
+              style={{ paddingLeft: 30 + depth * 12 }}
+            >
+              <span>
+                <HighlightedText value={employee.fullName} query={query} />
+              </span>
+              <small>
+                <HighlightedText value={employee.position} query={query} />
+              </small>
+            </button>
+          ))}
+          {visibleChildren.length > 0 && (
+            <ul className="org-tree-list">
+              {visibleChildren.map((child) => (
+                <OrganizationDepartmentNode
+                  key={child.id}
+                  department={child}
+                  query={query}
+                  depth={depth + 1}
+                  selectedEmployeeId={selectedEmployeeId}
+                  onSelectEmployee={onSelectEmployee}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </li>
+  );
+};
+
 export const UsersPage: React.FC = () => {
   const { eventId = "" } = useParams<{ eventId: string }>();
   const { currentUser, currentEvent, events } = useAuth();
@@ -56,6 +175,12 @@ export const UsersPage: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [formData, setFormData] = useState(emptyForm());
   const [loginManuallyEdited, setLoginManuallyEdited] = useState(false);
+  const [organizationTree, setOrganizationTree] = useState<OrganizationStructureTreeDto | null>(null);
+  const [organizationTreeLoading, setOrganizationTreeLoading] = useState(false);
+  const [organizationTreeError, setOrganizationTreeError] = useState("");
+  const [organizationTreeSearch, setOrganizationTreeSearch] = useState("");
+  const [selectedOrganizationEmployeeId, setSelectedOrganizationEmployeeId] = useState<number | null>(null);
+  const [selectedOrganizationEmployeePosition, setSelectedOrganizationEmployeePosition] = useState("");
   const [similarUsers, setSimilarUsers] = useState<UserSearchResultDto[]>([]);
   const [similarUsersLoading, setSimilarUsersLoading] = useState(false);
   const [similarUsersError, setSimilarUsersError] = useState("");
@@ -153,6 +278,23 @@ export const UsersPage: React.FC = () => {
     }
   };
 
+  const loadOrganizationTreeForCreate = async () => {
+    if (!eventId) return;
+
+    setOrganizationTreeLoading(true);
+    setOrganizationTreeError("");
+
+    try {
+      setOrganizationTree(await apiClient.getOrganizationStructureTree(eventId));
+    } catch (err) {
+      setOrganizationTree(null);
+      setOrganizationTreeError("Не удалось загрузить оригинальную структуру.");
+      console.error(err);
+    } finally {
+      setOrganizationTreeLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!hasCreatePermission) {
       setError("У вас нет прав для управления сотрудниками.");
@@ -222,7 +364,12 @@ export const UsersPage: React.FC = () => {
     setIsCreateModalOpen(true);
     setSimilarUserSourceRoleName(null);
     setIsAdminPromotionWarningOpen(false);
-    await loadReferencesForCreate();
+    setSelectedOrganizationEmployeeId(null);
+    setSelectedOrganizationEmployeePosition("");
+    await Promise.all([
+      loadReferencesForCreate(),
+      loadOrganizationTreeForCreate(),
+    ]);
   };
 
   const closeCreateModal = () => {
@@ -235,7 +382,31 @@ export const UsersPage: React.FC = () => {
     setSimilarUsersLoading(false);
     setSimilarUserSourceRoleName(null);
     setIsAdminPromotionWarningOpen(false);
+    setOrganizationTreeSearch("");
+    setSelectedOrganizationEmployeeId(null);
+    setSelectedOrganizationEmployeePosition("");
+    setOrganizationTreeError("");
     setError("");
+  };
+
+  const useOrganizationEmployee = (employee: OrganizationEmployeeTreeItemDto) => {
+    skipNextSearch.current = true;
+    setSelectedOrganizationEmployeeId(employee.id);
+    setSelectedOrganizationEmployeePosition(employee.position);
+    setSimilarUserSourceRoleName(null);
+    setFormData((current) => {
+      const nextEmail = current.email;
+      return {
+        ...current,
+        surname: employee.surname ?? current.surname,
+        name: employee.name ?? current.name,
+        additionalName: employee.additionalName ?? "",
+        email: nextEmail,
+        login: loginManuallyEdited ? current.login : nextEmail || current.login,
+      };
+    });
+    setSimilarUsers([]);
+    setSimilarUsersError("");
   };
 
   const useSimilarUser = (user: UserSearchResultDto) => {
@@ -248,6 +419,8 @@ export const UsersPage: React.FC = () => {
     const roleId = String(role?.id ?? formData.roleId);
 
     skipNextSearch.current = true;
+    setSelectedOrganizationEmployeeId(null);
+    setSelectedOrganizationEmployeePosition("");
     setLoginManuallyEdited(true);
     setFormData({
       login: user.login,
@@ -280,6 +453,7 @@ export const UsersPage: React.FC = () => {
         tel: formData.tel.trim() || undefined,
         roleId: Number(formData.roleId),
         groupId: Number(formData.groupId),
+        organizationEmployeeId: selectedOrganizationEmployeeId ?? undefined,
       });
       setFormData(emptyForm(String(flatGroups[0]?.id ?? ""), String(roles[0]?.id ?? "")));
       setLoginManuallyEdited(false);
@@ -555,14 +729,60 @@ export const UsersPage: React.FC = () => {
 
       {isCreateModalOpen && (
         <Modal
-          className="employee-form-modal"
+          className="employee-form-modal employee-create-modal"
           title="Создать сотрудника"
           description="Заполните данные сотрудника и выберите его роль и группу."
           onClose={closeCreateModal}
         >
-          {error && <div className="alert alert-error">{error}</div>}
+          <div className="employee-create-layout">
+            <aside className="organization-picker" aria-label="Оригинальная структура">
+              <div className="organization-picker-header">
+                <strong>Оригинальная структура</strong>
+                {organizationTree && (
+                  <span>{organizationTree.departmentsCount} отделов · {organizationTree.employeesCount} сотрудников</span>
+                )}
+              </div>
+              <input
+                className="organization-picker-search"
+                value={organizationTreeSearch}
+                onChange={(event) => setOrganizationTreeSearch(event.target.value)}
+                placeholder="Поиск отдела или сотрудника"
+                disabled={organizationTreeLoading}
+              />
+              {organizationTreeLoading ? (
+                <div className="organization-picker-message">Загружаем структуру...</div>
+              ) : organizationTreeError ? (
+                <div className="organization-picker-message error-text">{organizationTreeError}</div>
+              ) : !organizationTree || organizationTree.employeesCount === 0 ? (
+                <div className="organization-picker-message">Оригинальная структура пока не загружена.</div>
+              ) : (
+                <ul className="org-tree-list org-tree-root">
+                  {organizationTree.departments
+                    .filter((department) => departmentMatchesSearch(department, normalizeSearch(organizationTreeSearch)))
+                    .map((department) => (
+                      <OrganizationDepartmentNode
+                        key={department.id}
+                        department={department}
+                        query={organizationTreeSearch}
+                        depth={0}
+                        selectedEmployeeId={selectedOrganizationEmployeeId}
+                        onSelectEmployee={useOrganizationEmployee}
+                      />
+                    ))}
+                </ul>
+              )}
+            </aside>
+
+            <div className="employee-create-form-side">
+              {error && <div className="alert alert-error">{error}</div>}
+              {selectedOrganizationEmployeePosition && (
+                <div className="alert alert-info employee-source-message">
+                  Данные заполнены из оригинальной структуры. Должность: {selectedOrganizationEmployeePosition}. Email в загруженной таблице отсутствует — заполните его вручную.
+                </div>
+              )}
 
           <form className="form employee-form" onSubmit={handleSubmit}>
+            <div className="employee-form-fields">
             <label className="field">
               <span>Фамилия *</span>
               <input value={formData.surname} onChange={(event) => setFormData({ ...formData, surname: event.target.value })} disabled={saving} required />
@@ -711,6 +931,7 @@ export const UsersPage: React.FC = () => {
                 </div>
               )}
             </div>
+            </div>
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={closeCreateModal} disabled={saving}>
                 Закрыть
@@ -720,6 +941,8 @@ export const UsersPage: React.FC = () => {
               </button>
             </div>
           </form>
+            </div>
+          </div>
         </Modal>
       )}
 
