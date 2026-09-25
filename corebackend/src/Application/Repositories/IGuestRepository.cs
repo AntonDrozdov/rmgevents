@@ -3,6 +3,7 @@ namespace Application.Repositories;
 public interface IGuestRepository
 {
     Task<Entities.Guest?> GetByIdAsync(long id);
+    Task<Entities.Guest?> GetByPublicIdAsync(Guid publicId);
     Task<List<Entities.Guest>> GetByEventIdAsync(long eventId);
     Task<(List<Entities.Guest> Items, int TotalCount, int Page)> GetPageByEventIdAsync(
         long eventId,

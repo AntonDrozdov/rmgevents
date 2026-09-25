@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { ReferenceCollection } from "../components/ReferenceCollection";
 import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
@@ -8,7 +9,7 @@ import { TagDto } from "../types";
 const EditIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l11-11-4-4L4 16v4Zm12.5-16.5 4 4 1-1a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0l-1 1Z" /></svg>;
 const DeleteIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 0 1-2-2V6h14v13a2 2 0 0 1-2 2H7Zm1-3h2V9H8v9Zm6 0h2V9h-2v9ZM4 5V3h5l1-1h4l1 1h5v2H4Z" /></svg>;
 
-const emptyForm = { name: "", color: "#2F6F87" };
+const emptyForm = { name: "" };
 const formatDateTime = (value: string) => new Date(value).toLocaleString("ru-RU");
 
 export const TagsPage: React.FC = () => {
@@ -30,8 +31,7 @@ export const TagsPage: React.FC = () => {
   const isArchived = selectedEvent?.isArchived ?? false;
   const canManageTags = (currentUser?.permissions.includes("create_event") ?? false) && !isArchived;
   const isFormDirty = editingTag !== null && (
-    formData.name.trim() !== editingTag.name ||
-    formData.color.toUpperCase() !== editingTag.color.toUpperCase()
+    formData.name.trim() !== editingTag.name
   );
 
   const loadTags = async () => {
@@ -62,7 +62,7 @@ export const TagsPage: React.FC = () => {
   const openEditModal = (tag: TagDto) => {
     setError("");
     setEditingTag(tag);
-    setFormData({ name: tag.name, color: tag.color });
+    setFormData({ name: tag.name });
     setIsModalOpen(true);
   };
 
@@ -78,11 +78,16 @@ export const TagsPage: React.FC = () => {
     event.preventDefault();
     if (editingTag && !isFormDirty) return;
 
+    if (!formData.name.trim() || formData.name.length > 50) {
+      setError("Название метки: от 1 до 50 символов.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     const request = {
       name: formData.name.trim(),
-      color: formData.color,
+      color: "#FFFFFF",
     };
 
     try {
@@ -143,107 +148,39 @@ export const TagsPage: React.FC = () => {
     {error && !isModalOpen && !deleteTag && <div className="alert alert-error">{error}</div>}
     {isArchived && <div className="alert alert-info">Мероприятие завершено. Метки доступны только для просмотра.</div>}
 
-    <section className="panel">
-      {loading ? (
-        <div className="empty-state compact">Загрузка...</div>
-      ) : tags.length === 0 ? (
-        <div className="empty-state compact">Меток пока нет.</div>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Название</th>
-                <th>Цвет</th>
-                <th>Создана</th>
-                <th className="actions-column" aria-label="Действия" />
-              </tr>
-            </thead>
-            <tbody>
-              {tags.map((tag) => (
-                <tr
-                  className={canManageTags ? "table-hover-row table-editable-row" : "table-hover-row"}
-                  key={tag.id}
-                  tabIndex={canManageTags ? 0 : undefined}
-                  onClick={canManageTags ? (event) => {
-                    if (!(event.target as HTMLElement).closest("button, a, input, select, textarea")) {
-                      openEditModal(tag);
-                    }
-                  } : undefined}
-                  onKeyDown={canManageTags ? (event) => {
-                    if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
-                      event.preventDefault();
-                      openEditModal(tag);
-                    }
-                  } : undefined}
-                >
-                  <td>
-                    <span className="tag-badge" style={{ backgroundColor: tag.color, color: "#ffffff" }}>
-                      {tag.name}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="category-color-cell">
-                      <span className="category-color-swatch" style={{ backgroundColor: tag.color }} aria-hidden="true" />
-                      <span>{tag.color}</span>
-                    </div>
-                  </td>
-                  <td>{formatDateTime(tag.createdAt)}</td>
-                  <td className="actions-column">
-                    {canManageTags ? (
-                      <div className="table-icon-actions">
-                        <button className="icon-button" type="button" onClick={() => openEditModal(tag)} title="Редактировать" aria-label={`Редактировать ${tag.name}`}>
+    <ReferenceCollection items={tags} variant="tags" loading={loading} canManage={canManageTags} onEdit={openEditModal}
+      renderActions={(tag) => <><button className="icon-button" type="button" onClick={() => openEditModal(tag)} title="Редактировать" aria-label={`Редактировать ${tag.name}`}>
                           <EditIcon />
                         </button>
                         <button className="icon-button icon-button-danger" type="button" onClick={() => setDeleteTag(tag)} title="Удалить" aria-label={`Удалить ${tag.name}`}>
                           <DeleteIcon />
-                        </button>
-                      </div>
-                    ) : "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+                        </button></>} />
 
     {isModalOpen && (
       <Modal
         title={editingTag ? "Редактировать метку" : "Создать метку"}
-        description="Укажите название и цвет метки. Метки можно назначать гостям в любом количестве."
+        description="Укажите название метки (до 50 символов)."
         onClose={closeModal}
       >
         {error && <div className="alert alert-error">{error}</div>}
         <form className="form category-form" onSubmit={submitTag}>
+          {editingTag && (
+            <label className="field">
+              <span>Дата создания</span>
+              <input value={formatDateTime(editingTag.createdAt)} readOnly />
+            </label>
+          )}
           <label className="field">
             <span>Название метки</span>
             <input
               value={formData.name}
               onChange={(event) => setFormData({ ...formData, name: event.target.value })}
               disabled={saving}
-              maxLength={255}
+              maxLength={50}
               required
             />
           </label>
-          <div className="field category-color-field">
-            <span>Цвет метки</span>
-            <div className="category-color-picker-row">
-              <input
-                className="category-color-input"
-                type="color"
-                value={formData.color}
-                onChange={(event) => setFormData({ ...formData, color: event.target.value })}
-                disabled={saving}
-                required
-              />
-              <span className="category-color-value">{formData.color.toUpperCase()}</span>
-              <span className="tag-badge" style={{ backgroundColor: formData.color, color: "#ffffff" }}>
-                {formData.name.trim() || "Новая метка"}
-              </span>
-            </div>
-          </div>
+          <span className="tag-badge">{formData.name.trim() || "Новая метка"}</span>
           <div className="modal-actions">
             <button className="secondary-button" type="button" onClick={closeModal} disabled={saving}>Закрыть</button>
             <button className="primary-button" type="submit" disabled={saving || Boolean(editingTag && !isFormDirty)}>

@@ -4,6 +4,7 @@ using Application.Services;
 namespace Infrastructure.Services;
 
 public sealed class GuestService(
+    PlacementService placements,
     IGuestRepository guestRepository,
     IGroupRepository groupRepository,
     ICategoryRepository categoryRepository,
@@ -23,7 +24,10 @@ public sealed class GuestService(
         "rejected"
     };
 
-    public async Task<Application.Entities.Guest> CreateGuestAsync(
+    public Task<Application.Entities.Guest> CreateGuestAsync(long eventId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null)
+        => placements.Transaction(eventId, () => CreateGuestCoreAsync(eventId, loginId, name, email, phone, groupId, categoryId, tagIds, placementId, placementSeatNumber));
+
+    private async Task<Application.Entities.Guest> CreateGuestCoreAsync(
         long eventId,
         long loginId,
         string name,
@@ -31,7 +35,7 @@ public sealed class GuestService(
         string? phone,
         long groupId,
         long? categoryId,
-        IReadOnlyCollection<long> tagIds)
+        IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null)
     {
         await eventStateGuard.EnsureActiveAsync(eventId);
 
@@ -56,12 +60,15 @@ public sealed class GuestService(
         await EnsureCategoryBelongsToEventAsync(eventId, categoryId);
         var normalizedTagIds = await EnsureTagsBelongToEventAsync(eventId, tagIds);
         
+        var resolvedSeatNumber = await placements.ResolveSeat(eventId, groupId, placementId, requestedSeatNumber: placementSeatNumber);
         var guest = new Application.Entities.Guest
         {
             Id = 0,
             EventId = eventId,
             GroupId = groupId,
             CreatedByUserId = actor.Id,
+            PlacementId = placementId,
+            PlacementSeatNumber = resolvedSeatNumber,
             Name = name,
             Email = email,
             Phone = phone,
@@ -96,6 +103,8 @@ public sealed class GuestService(
     {
         return await guestRepository.GetByIdAsync(guestId);
     }
+
+    public Task<Application.Entities.Guest?> GetGuestByPublicIdAsync(Guid publicId) => guestRepository.GetByPublicIdAsync(publicId);
     
     public async Task<List<Application.Entities.Guest>> GetGuestsByEventAsync(long eventId)
     {
@@ -407,7 +416,13 @@ public sealed class GuestService(
         }
     }
     
-    public async Task UpdateGuestAsync(
+    public async Task UpdateGuestAsync(long guestId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null)
+    {
+        var guest = await guestRepository.GetByIdAsync(guestId) ?? throw new InvalidOperationException("Guest not found");
+        await placements.Transaction(guest.EventId, async () => { await UpdateGuestCoreAsync(guestId, loginId, name, email, phone, groupId, categoryId, tagIds, placementId, placementSeatNumber); return true; });
+    }
+
+    private async Task UpdateGuestCoreAsync(
         long guestId,
         long loginId,
         string name,
@@ -415,7 +430,7 @@ public sealed class GuestService(
         string? phone,
         long groupId,
         long? categoryId,
-        IReadOnlyCollection<long> tagIds)
+        IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null)
     {
         var guest = await guestRepository.GetByIdAsync(guestId);
         if (guest == null)
@@ -442,6 +457,10 @@ public sealed class GuestService(
         await EnsureCategoryBelongsToEventAsync(guest.EventId, categoryId);
         var normalizedTagIds = await EnsureTagsBelongToEventAsync(guest.EventId, tagIds);
 
+        var requestedSeat = placementSeatNumber ?? (guest.PlacementId == placementId ? guest.PlacementSeatNumber : null);
+        var resolvedSeatNumber = await placements.ResolveSeat(guest.EventId, groupId, placementId, guest.Id, requestedSeat);
+        guest.PlacementId = placementId;
+        guest.PlacementSeatNumber = resolvedSeatNumber;
         guest.Name = name;
         guest.Email = email;
         guest.Phone = phone;
@@ -510,7 +529,7 @@ public sealed class GuestService(
     private async Task EnsureCategoryBelongsToEventAsync(long eventId, long? categoryId)
     {
         if (!categoryId.HasValue)
-            return;
+            throw new InvalidOperationException("Guest category is required");
 
         var category = await categoryRepository.GetByIdAsync(categoryId.Value);
         if (category == null || category.EventId != eventId)
@@ -523,6 +542,9 @@ public sealed class GuestService(
             .Where(id => id > 0)
             .Distinct()
             .ToList() ?? [];
+
+        if (normalizedTagIds.Count > 4)
+            throw new InvalidOperationException("A guest can have at most 4 tags");
 
         if (normalizedTagIds.Count == 0)
             return normalizedTagIds;

@@ -1,3 +1,4 @@
+import { Placement, PlacementInput, PlacementGuest, PlacementTemplate } from "../types/placements";
 import axios, { AxiosInstance } from "axios";
 import {
   ApproveGuestRequest,
@@ -18,6 +19,7 @@ import {
   GroupTemplateDto,
   GroupTreeDto,
   GuestDto,
+  PublicGuestDto,
   GuestSearchResultDto,
   LoginRequest,
   LoginResponse,
@@ -27,6 +29,8 @@ import {
   ResetGroupsResultDto,
   RoleDto,
   TagDto,
+  TicketTemplateDto,
+  TicketTemplateInput,
   UpdateCategoryRequest,
   UpdateGroupRequest,
   UpdateEventArchiveStatusRequest,
@@ -64,6 +68,16 @@ class ApiClient {
       return config;
     });
   }
+
+  async getPlacements(eventId: string | number): Promise<Placement[]> { return (await this.client.get('/events/'+eventId+'/placements')).data; }
+  async createPlacements(eventId: string | number, input: PlacementInput): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements', input)).data; }
+  async updatePlacement(eventId: string | number, id: number, input: PlacementInput): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/'+id, input)).data; }
+  async deletePlacement(eventId: string | number, id: number | null): Promise<void> { await this.client.delete('/events/'+eventId+'/placements'+(id === null ? '' : '/'+id), { params: { confirmed: true } }); }
+  async placementGuests(eventId: string | number, groupId: number): Promise<PlacementGuest[]> { return (await this.client.get('/events/'+eventId+'/placements/guests', { params: { groupId } })).data; }
+  async assignPlacement(eventId: string | number, id: number, guestId: number, remove = false): Promise<void> { await this.client.put('/events/'+eventId+'/placements/'+id+'/guests/'+guestId, { remove }); }
+  async placementTemplates(eventId: string | number): Promise<PlacementTemplate[]> { return (await this.client.get('/events/'+eventId+'/placements/templates')).data; }
+  async savePlacementTemplate(eventId: string | number, name: string): Promise<void> { await this.client.post('/events/'+eventId+'/placements/templates', { name }); }
+  async applyPlacementTemplate(eventId: string | number, id: number): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/templates/'+id+'/apply', null, { params: { confirmed: true } })).data; }
 
   setToken(token: string) {
     this.token = token;
@@ -141,6 +155,12 @@ class ApiClient {
     );
     return response.data.id;
   }
+  async uploadTicketBackground(eventId: string | number, file: File): Promise<number> { const data = new FormData(); data.append("file", file); return (await this.client.post<{ id: number }>(`/images/events/${eventId}/ticket-background`, data, { headers: { "Content-Type": "multipart/form-data" } })).data.id; }
+  async getTicketTemplates(eventId: string | number): Promise<TicketTemplateDto[]> { return (await this.client.get(`/events/${eventId}/ticket-templates`)).data; }
+  async createTicketTemplate(eventId: string | number, input: TicketTemplateInput): Promise<TicketTemplateDto> { return (await this.client.post(`/events/${eventId}/ticket-templates`, input)).data; }
+  async updateTicketTemplate(eventId: string | number, id: number, input: TicketTemplateInput): Promise<TicketTemplateDto> { return (await this.client.put(`/events/${eventId}/ticket-templates/${id}`, input)).data; }
+  async setTicketTemplateDefault(eventId: string | number, id: number): Promise<void> { await this.client.post(`/events/${eventId}/ticket-templates/${id}/default`); }
+  async deleteTicketTemplate(eventId: string | number, id: number): Promise<void> { await this.client.delete(`/events/${eventId}/ticket-templates/${id}`); }
 
   getImageUrl(imageId: number): string {
     return `/api/images/${imageId}`;
@@ -316,6 +336,15 @@ class ApiClient {
   async createGuest(eventId: string | number, request: CreateGuestRequest): Promise<GuestDto> {
     const response = await this.client.post<GuestDto>(`/events/${eventId}/guests`, request);
     return response.data;
+  }
+
+  async getGuest(eventId: string | number, guestId: number): Promise<GuestDto> {
+    const response = await this.client.get<GuestDto>(`/events/${eventId}/guests/${guestId}`);
+    return response.data;
+  }
+
+  async getPublicGuest(publicId: string): Promise<PublicGuestDto> {
+    return (await this.client.get<PublicGuestDto>(`/public/guests/${publicId}`)).data;
   }
 
   async searchGuests(

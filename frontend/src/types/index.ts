@@ -55,6 +55,8 @@ export interface UpdateEventRequest {
 export interface UpdateEventArchiveStatusRequest {
   isArchived: boolean;
 }
+export interface TicketTemplateDto { id: number; name: string; backgroundImageId: number; qrX: number; qrY: number; qrSize: number; qrRadius: number; isDefault: boolean; }
+export interface TicketTemplateInput { name: string; backgroundImageId: number; qrX: number; qrY: number; qrSize: number; qrRadius: number; }
 
 export interface EventDetailDto {
   id: number;
@@ -315,6 +317,9 @@ export interface UpdateUserRequest {
 }
 
 export interface GuestDto {
+  publicId: string;
+  placementId?: number | null;
+  placementSeatNumber?: number | null;
   id: number;
   eventId: number;
   groupId: number;
@@ -332,6 +337,18 @@ export interface GuestDto {
   createdAt: string;
   approvedAt?: string | null;
   decisions: GuestDecisionDto[];
+}
+
+export interface PublicGuestDto {
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  groupName?: string | null;
+  categoryName?: string | null;
+  categoryColor?: string | null;
+  tags: GuestTagDto[];
+  status: string;
+  createdAt: string;
 }
 
 export interface PagedResultDto<T> {
@@ -361,6 +378,8 @@ export interface GuestDecisionDto {
 }
 
 export interface CreateGuestRequest {
+  placementId?: number | null;
+  placementSeatNumber?: number | null;
   name: string;
   email?: string;
   phone?: string;

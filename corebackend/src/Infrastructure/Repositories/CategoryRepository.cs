@@ -47,6 +47,9 @@ public sealed class CategoryRepository(ApplicationDbContext db) : ICategoryRepos
         var category = await db.Categories.FindAsync(id);
         if (category != null)
         {
+            if (await db.GuestCategories.AnyAsync(x => x.CategoryId == id))
+                throw new InvalidOperationException("Cannot delete a category assigned to guests. Reassign the guests first.");
+
             db.Categories.Remove(category);
         }
     }

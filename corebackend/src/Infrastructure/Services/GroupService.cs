@@ -4,6 +4,7 @@ using Application.Services;
 namespace Infrastructure.Services;
 
 public sealed class GroupService(
+    PlacementService placements,
     IGroupRepository groupRepository,
     IUserRepository userRepository,
     IGuestRepository guestRepository,
@@ -230,6 +231,7 @@ public sealed class GroupService(
 
         if (moved)
         {
+            await placements.ValidateGroupMove(eventId, groupId, parentGroupId);
             quota = 0;
         }
         else
@@ -337,6 +339,8 @@ public sealed class GroupService(
         foreach (var guest in guests.Where(guest => guest.GroupId != rootGroup.Id))
         {
             guest.GroupId = rootGroup.Id;
+            guest.PlacementId = null;
+            guest.PlacementSeatNumber = null;
             await guestRepository.UpdateAsync(guest);
             guestsMoved++;
         }

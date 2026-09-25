@@ -3,6 +3,7 @@ using System;
 using Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,10 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260924120000_AddPlacementRows")]
+    partial class AddPlacementRows
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -317,10 +319,6 @@ namespace Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
-                    b.Property<Guid>("PublicId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("public_id");
-
                     b.Property<DateTimeOffset?>("ApprovedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("approved_at");
@@ -365,10 +363,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("placement_id");
 
-                    b.Property<int?>("PlacementSeatNumber")
-                        .HasColumnType("integer")
-                        .HasColumnName("placement_seat_number");
-
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -384,13 +378,6 @@ namespace Infrastructure.Migrations
                     b.HasIndex("GroupId");
 
                     b.HasIndex("PlacementId");
-
-                    b.HasIndex("PlacementId", "PlacementSeatNumber")
-                        .IsUnique()
-                        .HasFilter("placement_id IS NOT NULL AND placement_seat_number IS NOT NULL");
-
-                    b.HasIndex("PublicId")
-                        .IsUnique();
 
                     b.HasIndex("EventId", "CreatedAt")
                         .HasDatabaseName("IX_guests_event_id_created_at");

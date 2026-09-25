@@ -127,7 +127,7 @@ public sealed partial class CategoryService(
         var normalized = name.Trim();
         if (normalized.Length == 0)
             throw new InvalidOperationException("Category name is required");
-        if (normalized.Length > 255)
+        if (normalized.Length > 50)
             throw new InvalidOperationException("Category name is too long");
 
         return normalized;

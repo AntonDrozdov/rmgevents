@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Api.Contracts;
 
 public sealed record TagDto(
@@ -13,9 +15,9 @@ public sealed record GuestTagDto(
     string Color);
 
 public sealed record CreateTagRequest(
-    string Name,
-    string Color);
+    [Required, StringLength(50)] string Name,
+    string Color = "#FFFFFF");
 
 public sealed record UpdateTagRequest(
-    string Name,
-    string Color);
+    [Required, StringLength(50)] string Name,
+    string Color = "#FFFFFF");

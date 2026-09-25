@@ -192,7 +192,7 @@ export const EventInformationPage: React.FC = () => {
       <div className="event-information-heading">
         <div>
           <p className="eyebrow">Мероприятие</p>
-          <h1>Настройки</h1>
+          <h1>О мероприятии</h1>
           <p className="muted">Измените основную информацию и обложку мероприятия.</p>
         </div>
       </div>

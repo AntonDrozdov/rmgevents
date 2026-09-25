@@ -27,6 +27,7 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
     private static GuestDto MapGuest(Application.Entities.Guest guest) =>
         new(
             guest.Id,
+            guest.PublicId,
             guest.EventId,
             guest.GroupId,
             guest.Group?.Name,
@@ -57,7 +58,7 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
                     item.Action,
                     item.ActorName,
                     item.CreatedAt))
-                .ToList());
+                .ToList(), guest.PlacementId, guest.PlacementSeatNumber);
 
     [HttpGet]
     public async Task<ActionResult<PagedResultDto<GuestDto>>> GetGuests(
@@ -77,6 +78,14 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
             guests.TotalCount,
             guests.Page,
             guests.PageSize));
+    }
+
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpGet("{guestId:long}")]
+    public async Task<ActionResult<GuestDto>> GetGuest(long eventId, long guestId)
+    {
+        var guest = await guestService.GetGuestAsync(guestId);
+        return guest == null || guest.EventId != eventId ? NotFound() : Ok(MapGuest(guest));
     }
 
     [Authorize(Policy = "CanCreateGuest")]
@@ -118,7 +127,7 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
                 request.Phone,
                 request.GroupId,
                 request.CategoryId,
-                request.TagIds ?? []);
+                request.TagIds ?? [], request.PlacementId, request.PlacementSeatNumber);
             
             return Created(
                 $"/guests/{guest.Id}",
@@ -255,7 +264,7 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
                 request.Phone,
                 request.GroupId,
                 request.CategoryId,
-                request.TagIds ?? []);
+                request.TagIds ?? [], request.PlacementId, request.PlacementSeatNumber);
 
             var guest = await guestService.GetGuestAsync(guestId);
             return guest == null ? NotFound() : Ok(MapGuest(guest));

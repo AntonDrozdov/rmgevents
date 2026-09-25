@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Api.Contracts;
 
 public sealed record CategoryDto(
@@ -8,9 +10,9 @@ public sealed record CategoryDto(
     DateTimeOffset CreatedAt);
 
 public sealed record CreateCategoryRequest(
-    string Name,
+    [Required, StringLength(50)] string Name,
     string Color);
 
 public sealed record UpdateCategoryRequest(
-    string Name,
+    [Required, StringLength(50)] string Name,
     string Color);

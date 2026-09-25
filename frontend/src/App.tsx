@@ -4,6 +4,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EventSettingsPage } from "./pages/EventSettingsPage";
 import { GroupsPage } from "./pages/GroupsPage";
+import { PlacementsPage } from "./pages/PlacementsPage";
 import { GuestsPage } from "./pages/GuestsPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -12,6 +13,8 @@ import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { EventInformationPage } from "./pages/EventInformationPage";
 import { EventLogsPage } from "./pages/EventLogsPage";
 import { TagsPage } from "./pages/TagsPage";
+import { PublicGuestPage } from "./pages/PublicGuestPage";
+import { TicketTemplatesPage } from "./pages/TicketTemplatesPage";
 
 function App() {
   return (
@@ -20,6 +23,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/change-password" element={<ChangePasswordPage />} />
+          <Route path="/guest/:publicId" element={<PublicGuestPage />} />
           <Route
             path="/dashboard"
             element={
@@ -60,6 +64,8 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/events/:eventId/placements" element={<ProtectedRoute requiredPermission="create_group"><EventSettingsPage><PlacementsPage /></EventSettingsPage></ProtectedRoute>} />
+          <Route path="/events/:eventId/ticket-templates" element={<ProtectedRoute requiredPermission="create_event"><EventSettingsPage><TicketTemplatesPage /></EventSettingsPage></ProtectedRoute>} />
           <Route
             path="/events/:eventId/categories"
             element={

@@ -3,8 +3,11 @@ namespace Application.Entities;
 public sealed class Guest
 {
     public long Id { get; set; }
+    public Guid PublicId { get; set; } = Guid.NewGuid();
     public long EventId { get; set; }
     public long GroupId { get; set; }
+    public long? PlacementId { get; set; }
+    public int? PlacementSeatNumber { get; set; }
     public long CreatedByUserId { get; set; }
     public required string Name { get; set; }
     public string? Email { get; set; }

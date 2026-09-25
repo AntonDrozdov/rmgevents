@@ -22,6 +22,15 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .Include(x => x.Decisions)
             .FirstOrDefaultAsync(x => x.Id == id);
     }
+
+    public async Task<Application.Entities.Guest?> GetByPublicIdAsync(Guid publicId)
+    {
+        return await db.Guests.AsNoTracking()
+            .Include(x => x.Group)
+            .Include(x => x.GuestCategory).ThenInclude(x => x!.Category)
+            .Include(x => x.GuestTags).ThenInclude(x => x.Tag)
+            .FirstOrDefaultAsync(x => x.PublicId == publicId);
+    }
     
     public async Task<List<Application.Entities.Guest>> GetByEventIdAsync(long eventId)
     {

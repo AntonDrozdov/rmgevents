@@ -1,10 +1,9 @@
-using System.Text.RegularExpressions;
 using Application.Repositories;
 using Application.Services;
 
 namespace Infrastructure.Services;
 
-public sealed partial class TagService(
+public sealed class TagService(
     ITagRepository tagRepository,
     IPermissionService permissionService,
     IEventStateGuard eventStateGuard,
@@ -28,7 +27,7 @@ public sealed partial class TagService(
         await EnsureCanManageTagsAsync(eventId, loginId);
 
         var normalizedName = NormalizeName(name);
-        var normalizedColor = NormalizeColor(color);
+        const string normalizedColor = "#FFFFFF";
         if (await tagRepository.ExistsByNameAsync(eventId, normalizedName))
             throw new InvalidOperationException("Tag with the same name already exists");
 
@@ -69,7 +68,7 @@ public sealed partial class TagService(
             throw new InvalidOperationException($"Tag {tagId} not found");
 
         var normalizedName = NormalizeName(name);
-        var normalizedColor = NormalizeColor(color);
+        const string normalizedColor = "#FFFFFF";
         if (await tagRepository.ExistsByNameAsync(eventId, normalizedName, tagId))
             throw new InvalidOperationException("Tag with the same name already exists");
 
@@ -127,21 +126,10 @@ public sealed partial class TagService(
         var normalized = name.Trim();
         if (normalized.Length == 0)
             throw new InvalidOperationException("Tag name is required");
-        if (normalized.Length > 255)
-            throw new InvalidOperationException("Tag name is too long");
+        if (normalized.Length > 50)
+            throw new InvalidOperationException("Tag name must not exceed 50 characters");
 
         return normalized;
     }
 
-    private static string NormalizeColor(string color)
-    {
-        var normalized = color.Trim();
-        if (!HexColorRegex().IsMatch(normalized))
-            throw new InvalidOperationException("Tag color must be a hex color");
-
-        return normalized.ToUpperInvariant();
-    }
-
-    [GeneratedRegex("^#[0-9A-Fa-f]{6}$")]
-    private static partial Regex HexColorRegex();
 }

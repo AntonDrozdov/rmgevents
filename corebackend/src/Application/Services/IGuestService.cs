@@ -2,8 +2,9 @@ namespace Application.Services;
 
 public interface IGuestService
 {
-    Task<Entities.Guest> CreateGuestAsync(long eventId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds);
+    Task<Entities.Guest> CreateGuestAsync(long eventId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null);
     Task<Entities.Guest?> GetGuestAsync(long guestId);
+    Task<Entities.Guest?> GetGuestByPublicIdAsync(Guid publicId);
     Task<List<Entities.Guest>> GetGuestsByEventAsync(long eventId);
     Task<(List<Entities.Guest> Items, int TotalCount, int Page, int PageSize)> GetGuestsPageByEventAsync(
         long eventId,
@@ -25,6 +26,6 @@ public interface IGuestService
     Task RejectGuestAsync(long guestId, long approverLoginId);
     Task InviteGuestAsync(long guestId, long inviterLoginId);
     Task RestoreGuestToSavedAsync(long guestId, long loginId);
-    Task UpdateGuestAsync(long guestId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds);
+    Task UpdateGuestAsync(long guestId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null);
     Task DeleteGuestAsync(long guestId, long loginId);
 }

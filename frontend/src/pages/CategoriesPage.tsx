@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { ReferenceCollection } from "../components/ReferenceCollection";
 import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
@@ -78,6 +79,11 @@ export const CategoriesPage: React.FC = () => {
     event.preventDefault();
     if (editingCategory && !isFormDirty) return;
 
+    if (!formData.name.trim() || formData.name.length > 50) {
+      setError("Название категории должно содержать от 1 до 50 символов.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     const request = {
@@ -118,7 +124,7 @@ export const CategoriesPage: React.FC = () => {
       setCategories((current) => current.filter((category) => category.id !== deleteCategory.id));
       setDeleteCategory(null);
     } catch (err) {
-      setError("Не удалось удалить категорию.");
+      setError("Не удалось удалить категорию. Если она назначена гостям, сначала выберите для них другую категорию.");
       console.error(err);
     } finally {
       setSaving(false);
@@ -143,71 +149,13 @@ export const CategoriesPage: React.FC = () => {
     {error && !isModalOpen && !deleteCategory && <div className="alert alert-error">{error}</div>}
     {isArchived && <div className="alert alert-info">Мероприятие завершено. Категории доступны только для просмотра.</div>}
 
-    <section className="panel">
-      {loading ? (
-        <div className="empty-state compact">Загрузка...</div>
-      ) : categories.length === 0 ? (
-        <div className="empty-state compact">Категорий пока нет.</div>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Название</th>
-                <th>Цвет</th>
-                <th>Создана</th>
-                <th className="actions-column" aria-label="Действия" />
-              </tr>
-            </thead>
-            <tbody>
-              {categories.map((category) => (
-                <tr
-                  className={canManageCategories ? "table-hover-row table-editable-row" : "table-hover-row"}
-                  key={category.id}
-                  tabIndex={canManageCategories ? 0 : undefined}
-                  onClick={canManageCategories ? (event) => {
-                    if (!(event.target as HTMLElement).closest("button, a, input, select, textarea")) {
-                      openEditModal(category);
-                    }
-                  } : undefined}
-                  onKeyDown={canManageCategories ? (event) => {
-                    if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
-                      event.preventDefault();
-                      openEditModal(category);
-                    }
-                  } : undefined}
-                >
-                  <td>
-                    <span className="category-arrow" style={{ backgroundColor: category.color, color: "#ffffff" }}>
-                      {category.name}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="category-color-cell">
-                      <span className="category-color-swatch" style={{ backgroundColor: category.color }} aria-hidden="true" />
-                      <span>{category.color}</span>
-                    </div>
-                  </td>
-                  <td>{formatDateTime(category.createdAt)}</td>
-                  <td className="actions-column">
-                    {canManageCategories ? (
-                      <div className="table-icon-actions">
-                        <button className="icon-button" type="button" onClick={() => openEditModal(category)} title="Редактировать" aria-label={`Редактировать ${category.name}`}>
+    <ReferenceCollection items={categories} variant="categories" loading={loading} canManage={canManageCategories} onEdit={openEditModal}
+      renderActions={(category) => <><button className="icon-button" type="button" onClick={() => openEditModal(category)} title="Редактировать" aria-label={`Редактировать ${category.name}`}>
                           <EditIcon />
                         </button>
                         <button className="icon-button icon-button-danger" type="button" onClick={() => setDeleteCategory(category)} title="Удалить" aria-label={`Удалить ${category.name}`}>
                           <DeleteIcon />
-                        </button>
-                      </div>
-                    ) : "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+                        </button></>} />
 
     {isModalOpen && (
       <Modal
@@ -217,13 +165,19 @@ export const CategoriesPage: React.FC = () => {
       >
         {error && <div className="alert alert-error">{error}</div>}
         <form className="form category-form" onSubmit={submitCategory}>
+          {editingCategory && (
+            <label className="field">
+              <span>Дата создания</span>
+              <input value={formatDateTime(editingCategory.createdAt)} readOnly />
+            </label>
+          )}
           <label className="field">
             <span>Название категории</span>
             <input
               value={formData.name}
               onChange={(event) => setFormData({ ...formData, name: event.target.value })}
               disabled={saving}
-              maxLength={255}
+              maxLength={50}
               required
             />
           </label>
@@ -239,7 +193,7 @@ export const CategoriesPage: React.FC = () => {
                 required
               />
               <span className="category-color-value">{formData.color.toUpperCase()}</span>
-              <span className="category-arrow" style={{ backgroundColor: formData.color, color: "#ffffff" }}>
+              <span className="category-arrow"><span className="category-dot" style={{ backgroundColor: formData.color }} aria-hidden="true" />
                 {formData.name.trim() || "Новая категория"}
               </span>
             </div>
@@ -257,7 +211,7 @@ export const CategoriesPage: React.FC = () => {
     {deleteCategory && (
       <Modal
         title="Удалить категорию"
-        description={`Категория «${deleteCategory.name}» будет удалена. У гостей эта категория будет снята.`}
+        description={`Категория «${deleteCategory.name}» будет удалена. Если она назначена гостям, сначала выберите для них другую категорию.`}
         onClose={() => !saving && setDeleteCategory(null)}
       >
         {error && <div className="alert alert-error">{error}</div>}

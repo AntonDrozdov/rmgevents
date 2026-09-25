@@ -71,4 +71,13 @@ public sealed class ImagesController(
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    [Authorize(Policy = "CanCreateEvent")]
+    [HttpPost("events/{eventId:long}/ticket-background")]
+    public async Task<ActionResult<ImageUploadResponse>> UploadTicketBackground(long eventId, [FromForm] IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0 || file.Length > 3 * 1024 * 1024) return BadRequest(new { message = "Выберите PNG или JPEG размером до 3 МБ." });
+        if (Path.GetExtension(file.FileName).ToLowerInvariant() is not ".png" and not ".jpg" and not ".jpeg") return BadRequest(new { message = "Допустимы только PNG и JPEG." });
+        await eventStateGuard.EnsureActiveAsync(eventId); await using var stream = new MemoryStream(); await file.CopyToAsync(stream, cancellationToken); var image = await imageService.SaveEventCover(file.FileName, file.ContentType, stream.ToArray(), cancellationToken); return Created($"/api/images/{image.Id}", new ImageUploadResponse(image.Id));
+    }
 }

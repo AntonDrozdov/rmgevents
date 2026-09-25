@@ -9,8 +9,18 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
     public void Configure(EntityTypeBuilder<Guest> builder)
     {
         builder.ToTable("guests");
+        builder.Property(x => x.PlacementId).HasColumnName("placement_id");
+        builder.Property(x => x.PlacementSeatNumber).HasColumnName("placement_seat_number");
+        builder.HasOne<Placement>().WithMany().HasForeignKey(x => x.PlacementId).OnDelete(DeleteBehavior.SetNull);
         
         builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.PublicId)
+            .HasColumnName("public_id")
+            .IsRequired();
+
+        builder.HasIndex(x => x.PublicId)
+            .IsUnique();
         
         builder.Property(x => x.Id)
             .HasColumnName("id")
@@ -77,5 +87,9 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
 
         builder.HasIndex(x => new { x.EventId, x.Status, x.CreatedAt })
             .HasDatabaseName("IX_guests_event_id_status_created_at");
+
+        builder.HasIndex(x => new { x.PlacementId, x.PlacementSeatNumber })
+            .IsUnique()
+            .HasFilter("placement_id IS NOT NULL AND placement_seat_number IS NOT NULL");
     }
 }

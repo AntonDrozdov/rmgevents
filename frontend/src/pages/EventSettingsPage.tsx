@@ -58,9 +58,19 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
           Группы
         </NavLink>
       )}
+      {canOpenGroups && (
+        <NavLink className={tabClassName} to={`/events/${eventId}/placements`} onClick={() => setIsMobileMenuOpen(false)}>
+          Размещение
+        </NavLink>
+      )}
       {canOpenUsers && (
         <NavLink className={tabClassName} to={`/events/${eventId}/users`} onClick={() => setIsMobileMenuOpen(false)}>
           Сотрудники
+        </NavLink>
+      )}
+      {canOpenSettings && (
+        <NavLink className={tabClassName} to={`/events/${eventId}/ticket-templates`} onClick={() => setIsMobileMenuOpen(false)}>
+          Шаблоны билетов
         </NavLink>
       )}
       {canOpenSettings && (
@@ -78,7 +88,7 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
       </NavLink>
       {canOpenSettings && (
         <NavLink className={tabClassName} to={`/events/${eventId}/settings`} onClick={() => setIsMobileMenuOpen(false)}>
-          Настройки
+          О мероприятии
         </NavLink>
       )}
     </nav>

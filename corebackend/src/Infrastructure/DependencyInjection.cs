@@ -21,6 +21,7 @@ public static class DependencyInjection
                 npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "corebackend");
             }));
         services.AddMemoryCache();
+        services.AddScoped<PlacementService>();
         
         services.AddScoped<IImageRepository, ImageRepository>();
         services.AddScoped<IImageService, ImageService>();

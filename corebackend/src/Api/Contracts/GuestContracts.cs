@@ -1,7 +1,10 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Api.Contracts;
 
 public sealed record GuestDto(
     long Id,
+    Guid PublicId,
     long EventId,
     long GroupId,
     string? GroupName,
@@ -17,7 +20,20 @@ public sealed record GuestDto(
     string? CreatedByRoleName,
     DateTimeOffset CreatedAt,
     DateTimeOffset? ApprovedAt,
-    List<GuestDecisionDto> Decisions);
+    List<GuestDecisionDto> Decisions,
+    long? PlacementId,
+    int? PlacementSeatNumber);
+
+public sealed record PublicGuestDto(
+    string Name,
+    string? Email,
+    string? Phone,
+    string? GroupName,
+    string? CategoryName,
+    string? CategoryColor,
+    List<GuestTagDto> Tags,
+    string Status,
+    DateTimeOffset CreatedAt);
 
 public sealed record PagedResultDto<T>(
     List<T> Items,
@@ -47,8 +63,10 @@ public sealed record CreateGuestRequest(
     string? Email,
     string? Phone,
     long GroupId,
-    long? CategoryId,
-    List<long>? TagIds);
+    [Required] long? CategoryId,
+    List<long>? TagIds,
+    long? PlacementId = null,
+    int? PlacementSeatNumber = null);
 
 public sealed record ApproveGuestRequest(
     long GuestId,
@@ -59,5 +77,7 @@ public sealed record UpdateGuestRequest(
     string? Email,
     string? Phone,
     long GroupId,
-    long? CategoryId,
-    List<long>? TagIds);
+    [Required] long? CategoryId,
+    List<long>? TagIds,
+    long? PlacementId = null,
+    int? PlacementSeatNumber = null);
