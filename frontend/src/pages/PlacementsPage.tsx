@@ -26,6 +26,7 @@ type PlacementPropertiesTarget = {
   placement: Placement;
   members: Placement[];
   isRowBatch: boolean;
+  isGroup: boolean;
 };
 const canvasOrigin = 4000;
 const canvasWorkspace = { width: 10000, height: 8000 };
@@ -112,7 +113,7 @@ export const PlacementsPage: React.FC = () => {
   const [selectedOrganizationEmployeeId, setSelectedOrganizationEmployeeId] = useState<number | null>(null);
   const [seatPopover, setSeatPopover] = useState<{ placementId: number; seatNumber: number; guest: PlacementGuest } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [batchPopover, setBatchPopover] = useState<string | null>(null);
+  const selectedIdsRef = useRef<Set<number>>(new Set());
   const [selectionBox, setSelectionBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const canvas = useRef<HTMLDivElement>(null);
   const drag = useRef<number | null>(null);
@@ -129,6 +130,12 @@ export const PlacementsPage: React.FC = () => {
   const viewportInitializedFor = useRef<string | null>(null);
   const propertySaveTimer = useRef<number | null>(null);
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
+  const setPlacementSelection = (ids: Set<number>) => {
+    selectedIdsRef.current = ids;
+    setSelectedIds(ids);
+  };
+
+  useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
 
   const load = async () => {
     const [list, groupTree, cats] = await Promise.all([apiClient.getPlacements(eventId), apiClient.getGroupTree(eventId), apiClient.getCategories(eventId)]);
@@ -242,14 +249,16 @@ export const PlacementsPage: React.FC = () => {
     const radius = tableRadiusFor(placement.quota ?? 0);
     return { width: radius * 2 + 92, height: radius * 2 + 164 };
   };
+  const placementType = (placement: Placement): PlacementFormType => placement.displayChildrenAsRows ? "container" : placement.isRow ? "row" : "table";
   const batchMembers = (placement: Placement) => placement.rowBatchId
-    ? items.filter(item => item.rowBatchId === placement.rowBatchId && item.isRow === placement.isRow)
+    ? items.filter(item => item.rowBatchId === placement.rowBatchId)
     : [placement];
+  const isHomogeneousGroup = (members: Placement[]) => members.length > 0 && members.every(member => placementType(member) === placementType(members[0]));
   const formForPlacement = (placement: Placement, members = batchMembers(placement)): PlacementForm => {
-    const placementType: PlacementFormType = placement.displayChildrenAsRows ? "container" : placement.isRow ? "row" : "table";
+    const type = placementType(placement);
     const isRowBatch = placement.isRow && !!placement.rowBatchId && members.length > 1;
     return {
-      ...blank("", placementType),
+      ...blank("", type),
       name: isRowBatch ? placement.name.replace(/\s+\d+$/, "") : placement.name,
       displayChildrenAsRows: placement.displayChildrenAsRows,
       parentId: String(placement.parentId ?? ""),
@@ -265,18 +274,19 @@ export const PlacementsPage: React.FC = () => {
     if (selected.length === 1) {
       const placement = selected[0];
       const members = batchMembers(placement);
-      if (members.length > 1) return placement.isRow
-        ? { key: `rows:${placement.rowBatchId}`, placement: members[0], members, isRowBatch: true }
+      if (members.length > 1) return isHomogeneousGroup(members)
+        ? { key: `group:${placement.rowBatchId}`, placement: members[0], members, isRowBatch: placement.isRow, isGroup: true }
         : null;
-      return { key: `placement:${placement.id}`, placement, members: [placement], isRowBatch: false };
+      return { key: `placement:${placement.id}`, placement, members: [placement], isRowBatch: false, isGroup: false };
     }
     if (selected.length > 1) {
-      const rowBatchId = selected[0].rowBatchId;
-      const members = rowBatchId ? items.filter(item => item.rowBatchId === rowBatchId && item.isRow) : [];
-      const isCompleteRowBatch = members.length > 1
+      const batchId = selected[0].rowBatchId;
+      const members = batchId ? items.filter(item => item.rowBatchId === batchId) : [];
+      const isCompleteGroup = members.length > 1
         && members.length === selected.length
-        && members.every(member => selectedIds.has(member.id));
-      return isCompleteRowBatch ? { key: `rows:${rowBatchId}`, placement: members[0], members, isRowBatch: true } : null;
+        && members.every(member => selectedIds.has(member.id))
+        && isHomogeneousGroup(members);
+      return isCompleteGroup ? { key: `group:${batchId}`, placement: members[0], members, isRowBatch: members[0].isRow, isGroup: true } : null;
     }
     return null;
   })();
@@ -291,31 +301,38 @@ export const PlacementsPage: React.FC = () => {
       propertySaveTimer.current = null;
       const quota = draft.noQuota ? null : Number(draft.quota);
       const minimumQuota = draft.placementType === "row" ? 1 : 0;
-      if (!draft.name.trim() || !Number(draft.groupId) || (!draft.noQuota && (quota === null || !Number.isFinite(quota) || quota < minimumQuota || quota > 50))) return;
+      if ((!target.isGroup && !draft.name.trim()) || !Number(draft.groupId) || (!draft.noQuota && (quota === null || !Number.isFinite(quota) || quota < minimumQuota || quota > 50))) return;
       const placement = target.placement;
-      const input = {
-        name: draft.name.trim(),
-        parentId: placement.parentId,
+      const inputFor = (member: Placement, preserveRowBatch = false) => ({
+        name: target.isGroup && !target.isRowBatch ? member.name : draft.name.trim(),
+        parentId: member.parentId,
         groupId: Number(draft.groupId),
         quota,
         displayChildrenAsRows: draft.placementType === "container",
         isRow: draft.placementType === "row",
         count: draft.placementType === "row" ? Math.min(100, Math.max(1, Number(draft.count) || 1)) : 1,
         startNumber: Math.max(1, Number(draft.startNumber) || 1),
-        canvasX: placement.canvasX,
-        canvasY: placement.canvasY,
-        canvasWidth: placement.canvasWidth,
-        canvasHeight: placement.canvasHeight
-      };
+        canvasX: member.canvasX,
+        canvasY: member.canvasY,
+        canvasWidth: member.canvasWidth,
+        canvasHeight: member.canvasHeight,
+        preserveRowBatch
+      });
       void (async () => {
         try {
           const list = target.isRowBatch && placement.rowBatchId
-            ? await apiClient.updatePlacementBatch(eventId, placement.rowBatchId, input)
-            : await apiClient.updatePlacement(eventId, placement.id, input);
+            ? await apiClient.updatePlacementBatch(eventId, placement.rowBatchId, inputFor(placement))
+            : target.isGroup
+              ? await (async () => {
+                let updated = items;
+                for (const member of target.members) updated = await apiClient.updatePlacement(eventId, member.id, inputFor(member, true));
+                return updated;
+              })()
+              : await apiClient.updatePlacement(eventId, placement.id, inputFor(placement));
           setItems(list);
           const updatedPlacement = list.find(item => item.id === placement.id);
-          setSelectedIds(updatedPlacement?.rowBatchId
-            ? new Set(list.filter(item => item.rowBatchId === updatedPlacement.rowBatchId && item.isRow).map(item => item.id))
+          setPlacementSelection(updatedPlacement?.rowBatchId
+            ? new Set(list.filter(item => item.rowBatchId === updatedPlacement.rowBatchId).map(item => item.id))
             : new Set([placement.id]));
         } catch (err) {
           setError(message(err));
@@ -363,7 +380,7 @@ export const PlacementsPage: React.FC = () => {
     return { width, height };
   };
   const focusPlacement = (placement: Placement) => {
-    if (canEditStructure) setSelectedIds(new Set(batchMembers(placement).map(item => item.id)));
+    if (canEditStructure) setPlacementSelection(new Set(batchMembers(placement).map(item => item.id)));
     setSearch("");
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       const el = canvas.current;
@@ -411,7 +428,7 @@ export const PlacementsPage: React.FC = () => {
         const list = await apiClient.copyPlacements(eventId, placementClipboard.current);
         const copiedIds = list.filter(item => !knownIds.has(item.id)).map(item => item.id);
         setItems(list);
-        setSelectedIds(new Set(copiedIds));
+        setPlacementSelection(new Set(copiedIds));
       });
     };
     window.addEventListener("keydown", onKeyDown);
@@ -449,10 +466,12 @@ export const PlacementsPage: React.FC = () => {
     const members = batchMembers(placement);
     const parent = items.find(item => item.id === placement.parentId);
     const parentSize = parent ? containerFootprint(parent) : { width: 0, height: 0 };
-    const roots = new Set(members.map(member => member.id));
+    const memberIds = new Set(members.map(member => member.id));
+    const roots = new Set(members.filter(member => member.parentId === null || !memberIds.has(member.parentId)).map(member => member.id));
     const movingIds = new Set([...roots].flatMap(id => [...descendants(id)]));
-    const minX = Math.min(...members.map(member => member.canvasX ?? 0));
-    const minY = Math.min(...members.map(member => member.canvasY ?? 0));
+    const movingMembers = items.filter(item => movingIds.has(item.id));
+    const minX = Math.min(...movingMembers.map(member => member.canvasX ?? 0));
+    const minY = Math.min(...movingMembers.map(member => member.canvasY ?? 0));
     const targetX = (parent?.canvasX ?? minX) + parentSize.width + 60;
     const targetY = parent?.canvasY ?? minY;
     void act(async () => {
@@ -460,7 +479,7 @@ export const PlacementsPage: React.FC = () => {
       for (const member of items.filter(item => movingIds.has(item.id))) {
         const offsetX = (member.canvasX ?? 0) - minX;
         const offsetY = (member.canvasY ?? 0) - minY;
-        list = await apiClient.updatePlacement(eventId, member.id, { ...member, parentId: roots.has(member.id) ? null : member.parentId, canvasX: targetX + offsetX, canvasY: targetY + offsetY });
+        list = await apiClient.updatePlacement(eventId, member.id, { ...member, parentId: roots.has(member.id) ? null : member.parentId, canvasX: targetX + offsetX, canvasY: targetY + offsetY, preserveRowBatch: !!member.rowBatchId });
       }
       setItems(list);
     });
@@ -506,7 +525,7 @@ export const PlacementsPage: React.FC = () => {
         const list = await apiClient.createPlacements(eventId, input);
         const createdIds = list.filter(item => !knownIds.has(item.id)).map(item => item.id);
         setItems(list);
-        setSelectedIds(new Set(createdIds));
+        setPlacementSelection(new Set(createdIds));
         if (items.length === 0 && initialPosition) {
           window.requestAnimationFrame(() => {
             const canvasElement = canvas.current;
@@ -526,7 +545,7 @@ export const PlacementsPage: React.FC = () => {
     if (!p || p.parentId === parentId) return;
     if (parentId !== null && descendants(id).has(parentId)) { setError("Нельзя переносить объект в собственную ветку."); return; }
     if (!p.groupId) { open(p); setForm(f => ({ ...f, parentId: String(parentId ?? "") })); setError("Для сохранения переноса укажите группу."); return; }
-    void act(async () => setItems(await apiClient.updatePlacement(eventId, id, { ...p, parentId })));
+    void act(async () => setItems(await apiClient.updatePlacement(eventId, id, { ...p, parentId, preserveRowBatch: !!p.rowBatchId })));
   };
   const drop = (e: React.DragEvent, parentId: number | null) => {
     e.preventDefault(); e.stopPropagation();
@@ -547,7 +566,7 @@ export const PlacementsPage: React.FC = () => {
     drag.current = null;
     setDraggedId(null);
     setDropTarget(null);
-    void act(async () => setItems(await apiClient.updatePlacement(eventId, placement.id, { ...placement, canvasX, canvasY })));
+    void act(async () => setItems(await apiClient.updatePlacement(eventId, placement.id, { ...placement, canvasX, canvasY, preserveRowBatch: !!placement.rowBatchId })));
   };
   const dragBranch = draggedId === null ? new Set<number>() : descendants(draggedId);
   const invalidDrop = (target: number) => {
@@ -593,20 +612,23 @@ export const PlacementsPage: React.FC = () => {
   const startPlacementMove = (e: React.PointerEvent<HTMLDivElement>, placement: Placement, members: Placement[]) => {
     if (e.button !== 0 || !canEditStructure || (e.target as HTMLElement).closest("[data-placement-control]")) return;
     e.stopPropagation();
+    const currentSelection = selectedIdsRef.current;
     if (e.ctrlKey) {
-      setSelectedIds(current => {
-        const next = new Set(current);
-        if (next.has(placement.id)) next.delete(placement.id); else next.add(placement.id);
-        return next;
-      });
+      const memberIds = members.map(member => member.id);
+      const next = new Set(currentSelection);
+      const removeMembers = memberIds.every(id => next.has(id));
+      for (const id of memberIds) {
+        if (removeMembers) next.delete(id); else next.add(id);
+      }
+      setPlacementSelection(next);
       return;
     }
-    const requestedIds = selectedIds.has(placement.id)
-      ? new Set([...selectedIds, ...members.map(member => member.id)])
+    const requestedIds = currentSelection.has(placement.id)
+      ? new Set([...currentSelection, ...members.map(member => member.id)])
       : new Set(members.map(member => member.id));
     const rootIds = new Set([...requestedIds].filter(id => ![...requestedIds].some(parentId => parentId !== id && descendants(parentId).has(id))));
     const ids = new Set([...rootIds].flatMap(id => [...descendants(id)]));
-    if (!selectedIds.has(placement.id)) setSelectedIds(requestedIds);
+    if (!currentSelection.has(placement.id)) setPlacementSelection(requestedIds);
     const positions = new Map([...ids].flatMap(id => {
       const item = items.find(value => value.id === id);
       return item ? [[id, { x: item.canvasX ?? 0, y: item.canvasY ?? 0 }] as const] : [];
@@ -670,8 +692,7 @@ export const PlacementsPage: React.FC = () => {
       return <div key={p.id} data-placement-id={p.id} className={`placement-node placement-free-node ${isRow ? "placement-row-free" : ""} ${p.quota === null ? "placement-hall" : isRow ? "" : "placement-table"}${canEditStructure ? " placement-can-drag" : ""}${p.parentId !== null ? " placement-contained" : ""}${isAboveSelectedContainer ? " placement-above-selected-container" : ""}${isSelected ? " placement-selected" : ""}${isDragging ? " placement-dragging" : ""}${query && p.name.toLocaleLowerCase("ru-RU").includes(query) ? " placement-match" : ""}${dragBranch.has(p.id) ? " group-tree-node-drag-branch" : ""}${draggedId === p.id ? " group-tree-node-drag-source" : ""}${dropTarget === p.id ? invalidDrop(p.id) ? " group-tree-node-drop-disabled" : " group-tree-node-drop-target" : ""}`}
           onClick={e => {
             if (suppressNodeClick.current || !canEditStructure || e.ctrlKey || (e.target as HTMLElement).closest("[data-placement-control]")) return;
-            setSelectedIds(new Set(members.map(member => member.id)));
-            setBatchPopover(isGrouped ? p.rowBatchId : null);
+            setPlacementSelection(new Set(members.map(member => member.id)));
           }}
           style={{ left: x, top: y, zIndex: layer, "--table-radius": `${tableRadius}px`, "--container-width": containerSize ? `${containerSize.width}px` : undefined, "--container-height": containerSize ? `${containerSize.height}px` : undefined } as React.CSSProperties}
           draggable={false} onPointerDownCapture={e => startPlacementMove(e, p, members)}
@@ -693,24 +714,29 @@ export const PlacementsPage: React.FC = () => {
             })}
             {isRow && p.quota > 50 && <span className="placement-seats-more">Ещё {p.quota - 50} мест</span>}
           </div>}
-          <div className="group-tree-node-actions placement-node-actions">
-            {canEditStructure && <>
-              <button className="icon-button icon-button-danger" data-placement-control type="button" onPointerDown={e => e.stopPropagation()} onClick={() => remove(p.id)} aria-label={`Удалить ветку ${p.name}`} title="Удалить ветку">
+          {canEditStructure && isSelected && (!isGrouped || isBatchLeader) && <div className={`group-tree-node-actions placement-node-actions${isGrouped ? " placement-group-actions" : ""}`} data-placement-control style={isGrouped ? { left: groupBounds.left + (groupBounds.right - groupBounds.left) / 2 - x, top: groupBounds.bottom - y + 8 } : undefined}>
+              <button className="icon-button icon-button-danger" type="button" onPointerDown={e => e.stopPropagation()} onClick={() => remove(p.id)} aria-label={`Удалить ветку ${p.name}`} title="Удалить ветку">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 0 1-2-2V6h14v13a2 2 0 0 1-2 2H7Zm1-3h2V9H8v9Zm6 0h2V9h-2v9ZM4 5V3h5l1-1h4l1 1h5v2H4Z" /></svg>
               </button>
               {p.parentId !== null && (!isGrouped || isBatchLeader) && <button className="icon-button" data-placement-control type="button" onPointerDown={e => e.stopPropagation()} onClick={() => detachFromContainer(p)} aria-label={`Вынести ${p.name} из контейнера`} title="Вынести из контейнера"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V4m0 0L6 10m6-6 6 6M5 20h14" /></svg></button>}
-            </>}
-          </div>
-          {canEditStructure && isRow && p.parentId !== null && (!isGrouped || isBatchLeader) && <button className="icon-button placement-extract-button" data-placement-control type="button" onPointerDown={e => e.stopPropagation()} onClick={() => detachFromContainer(p)} aria-label={`Вынести ${p.name} из контейнера`} title="Вынести из контейнера"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V4m0 0L6 10m6-6 6 6M5 20h14" /></svg></button>}
-          {isBatchLeader && batchPopover === p.rowBatchId && <div className="placement-batch-popover" data-placement-control style={{ left: groupBounds.left + (groupBounds.right - groupBounds.left) / 2 - x, top: groupBounds.bottom - y + 8 }}><button type="button" className="icon-button placement-ungroup-button" aria-label="Отменить группировку" title="Отменить группировку" onClick={e => { e.stopPropagation(); void act(async () => { setItems(await apiClient.ungroupPlacementRows(eventId, p.rowBatchId!)); setBatchPopover(null); }); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5H5v3M5 5l5 5M16 5h3v3m0-3-5 5M8 19H5v-3m0 3 5-5m6 5h3v-3m0 3-5-5" /></svg></button></div>}
+              {isGrouped && <button type="button" className="icon-button placement-ungroup-button" aria-label="Отменить группировку" title="Отменить группировку" onClick={e => { e.stopPropagation(); void act(async () => { setItems(await apiClient.ungroupPlacementRows(eventId, p.rowBatchId!)); }); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5H5v3M5 5l5 5M16 5h3v3m0-3-5 5M8 19H5v-3m0 3 5-5m6 5h3v-3m0 3-5-5" /></svg></button>}
+          </div>}
       </div>;
     })}</div>;
   };
 
-  const selectionBoxAtPointer = (element: HTMLDivElement, start: { x: number; y: number }, clientX: number, clientY: number) => {
+  const canvasPointAtPointer = (element: HTMLDivElement, clientX: number, clientY: number) => {
     const rect = element.getBoundingClientRect();
-    const x = clientX - rect.left + element.scrollLeft;
-    const y = clientY - rect.top + element.scrollTop;
+    const scaleX = rect.width / element.offsetWidth || 1;
+    const scaleY = rect.height / element.offsetHeight || 1;
+    return {
+      x: (clientX - rect.left) / scaleX + element.scrollLeft,
+      y: (clientY - rect.top) / scaleY + element.scrollTop
+    };
+  };
+
+  const selectionBoxAtPointer = (element: HTMLDivElement, start: { x: number; y: number }, clientX: number, clientY: number) => {
+    const { x, y } = canvasPointAtPointer(element, clientX, clientY);
     return { left: Math.min(start.x, x), top: Math.min(start.y, y), width: Math.abs(x - start.x), height: Math.abs(y - start.y) };
   };
 
@@ -813,7 +839,7 @@ export const PlacementsPage: React.FC = () => {
 
       if (updates.size) void act(async () => {
         let list = [...moved.sourceItems.values()];
-        for (const item of updates.values()) list = await apiClient.updatePlacement(eventId, item.id, item);
+        for (const item of updates.values()) list = await apiClient.updatePlacement(eventId, item.id, { ...item, preserveRowBatch: !!item.rowBatchId });
         setItems(list);
       });
     }
@@ -821,23 +847,24 @@ export const PlacementsPage: React.FC = () => {
       ? selectionBoxAtPointer(canvas.current, selectionStart.current, e.clientX, e.clientY)
       : selectionBoxRef.current;
     if (!moved?.didMove && currentSelectionBox && currentSelectionBox.width < 4 && currentSelectionBox.height < 4) {
-      setSelectedIds(new Set());
+      setPlacementSelection(new Set());
     } else if (!moved?.didMove && currentSelectionBox && canvas.current) {
-      const canvasRect = canvas.current.getBoundingClientRect();
       const selected = new Set<number>();
       canvas.current.querySelectorAll<HTMLElement>("[data-placement-id]").forEach(node => {
         const rect = node.getBoundingClientRect();
-        const left = rect.left - canvasRect.left + canvas.current!.scrollLeft;
-        const top = rect.top - canvasRect.top + canvas.current!.scrollTop;
-        const right = left + rect.width;
-        const bottom = top + rect.height;
+        const topLeft = canvasPointAtPointer(canvas.current!, rect.left, rect.top);
+        const bottomRight = canvasPointAtPointer(canvas.current!, rect.right, rect.bottom);
+        const left = topLeft.x;
+        const top = topLeft.y;
+        const right = bottomRight.x;
+        const bottom = bottomRight.y;
         const intersects = left < currentSelectionBox.left + currentSelectionBox.width
           && right > currentSelectionBox.left
           && top < currentSelectionBox.top + currentSelectionBox.height
           && bottom > currentSelectionBox.top;
         if (intersects) selected.add(Number(node.dataset.placementId));
       });
-      setSelectedIds(selected);
+      setPlacementSelection(selected);
     }
     selectionStart.current = null;
     selectionBoxRef.current = null;
@@ -858,9 +885,9 @@ export const PlacementsPage: React.FC = () => {
   return <div className="tab-content">
     <div className="section-heading">
       <div className="section-actions placement-page-actions">
-        {placementMode === "seating" && canManage && <button className="danger-button" disabled={busy} onClick={() => { setPlacementMode("schema"); setSelectedIds(new Set()); setSeatPlacement(null); }}>Редактировать схему размещения</button>}
+        {placementMode === "seating" && canManage && <button className="danger-button" disabled={busy} onClick={() => { setPlacementMode("schema"); setPlacementSelection(new Set()); setSeatPlacement(null); }}>Редактировать схему размещения</button>}
         {canEditStructure && <><button className="placement-reset-button" disabled={busy || !items.length} onClick={() => remove(null)}>Сбросить</button>
-          <button className="danger-button" disabled={busy} onClick={() => { setPlacementMode("seating"); setSelectedIds(new Set()); setBatchPopover(null); setFormOpen(false); }}>Вернуться к рассадке</button></>}
+          <button className="danger-button" disabled={busy} onClick={() => { setPlacementMode("seating"); setPlacementSelection(new Set()); setFormOpen(false); }}>Вернуться к рассадке</button></>}
       </div>
     </div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
@@ -891,7 +918,7 @@ export const PlacementsPage: React.FC = () => {
         onDragOver={e => { if (canEditStructure && !busy && drag.current !== null) e.preventDefault(); }}
         onDrop={dropOnCanvas}
         onContextMenu={e => e.preventDefault()}
-        onPointerDown={e => { if ((e.target as HTMLElement).closest(".placement-node")) return; const el = canvas.current!; if (e.button === 0 && canEditStructure) { const rect = el.getBoundingClientRect(); selectionStart.current = { x: e.clientX - rect.left + el.scrollLeft, y: e.clientY - rect.top + el.scrollTop }; const initialSelectionBox = { left: selectionStart.current.x, top: selectionStart.current.y, width: 0, height: 0 }; selectionBoxRef.current = initialSelectionBox; setSelectionBox(initialSelectionBox); } else if (e.button === 2) { pan.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }; } el.setPointerCapture(e.pointerId); }}
+        onPointerDown={e => { const el = canvas.current!; if (e.button === 2) { pan.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }; el.setPointerCapture(e.pointerId); return; } if ((e.target as HTMLElement).closest(".placement-node")) return; if (e.button === 0 && canEditStructure) { selectionStart.current = canvasPointAtPointer(el, e.clientX, e.clientY); const initialSelectionBox = { left: selectionStart.current.x, top: selectionStart.current.y, width: 0, height: 0 }; selectionBoxRef.current = initialSelectionBox; setSelectionBox(initialSelectionBox); } el.setPointerCapture(e.pointerId); }}
         onPointerMove={handleCanvasPointerMove}
         onPointerUp={handleCanvasPointerUp}
         onPointerCancel={handleCanvasPointerCancel}>
@@ -901,11 +928,11 @@ export const PlacementsPage: React.FC = () => {
           </>}
           {selectionBox && <div className="placement-selection-box" style={selectionBox} />}
         </div>
-        {canEditStructure && selectedIds.size > 1 && <div className="placement-selection-actions"><button type="button" className="secondary-button" onClick={() => void act(async () => { setItems(await apiClient.groupPlacementRows(eventId, [...selectedIds])); setSelectedIds(new Set()); })}>Сгруппировать</button></div>}
+        {canEditStructure && selectedIds.size > 1 && <div className="placement-selection-actions"><button type="button" className="secondary-button" onClick={() => void act(async () => { const groupedIds = [...selectedIds]; const list = await apiClient.groupPlacementRows(eventId, groupedIds); setItems(list); const batchId = list.find(item => groupedIds.includes(item.id))?.rowBatchId; setPlacementSelection(batchId ? new Set(list.filter(item => item.rowBatchId === batchId).map(item => item.id)) : new Set(groupedIds)); })}>Сгруппировать</button></div>}
         {canEditStructure && selectedPropertiesTarget && propertyFormKey === selectedPropertiesTarget.key && <aside className="placement-properties-panel" aria-label="Свойства объекта размещения">
-          <header className="placement-properties-header"><h2>{selectedPropertiesTarget.isRowBatch ? "Группа рядов" : "Свойства объекта"}</h2></header>
+          <header className="placement-properties-header"><h2>{selectedPropertiesTarget.isRowBatch ? "Группа рядов" : selectedPropertiesTarget.isGroup ? "Свойства группы" : "Свойства объекта"}</h2></header>
           <div className="placement-properties-form">
-            <label className="field"><span>Название</span><input maxLength={140} required disabled={!canManage} value={propertyForm.name} onChange={e => changeProperties({ name: e.target.value })} onBlur={commitProperties} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>
+            {(!selectedPropertiesTarget.isGroup || selectedPropertiesTarget.isRowBatch) && <label className="field"><span>Название</span><input maxLength={140} required disabled={!canManage} value={propertyForm.name} onChange={e => changeProperties({ name: e.target.value })} onBlur={commitProperties} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>}
             <label className="field"><span>Группа *</span><select required disabled={!canManage} value={propertyForm.groupId} onChange={e => changeProperties({ groupId: e.target.value }, true)}><option value="">Выберите группу</option>{flatGroups.map(group => <option key={group.id} value={group.id}>{"— ".repeat(group.level)}{group.name}</option>)}</select></label>
             <section className={`placement-seat-settings${propertyForm.noQuota ? " placement-seat-settings-disabled" : ""}`} aria-disabled={propertyForm.noQuota}>
               <h3>Настройки мест</h3>

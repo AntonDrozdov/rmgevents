@@ -4090,17 +4090,15 @@ code {
 .placement-selection-actions { position: absolute; z-index: 31; right: 16px; bottom: 16px; }
 .placement-tree-view-with-properties .placement-selection-actions { right: 320px; }
 .placement-seating-empty-note { position: absolute; z-index: 11; right: 16px; bottom: 16px; max-width: 340px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; background: rgba(255, 255, 255, .94); color: #526078; font-size: 13px; line-height: 1.35; pointer-events: none; }
-.placement-batch-popover { position: absolute; z-index: 25; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); }
 .placement-ungroup-button { width: 28px; height: 28px; padding: 5px; border-color: #9a3146; background: #fff7f8; color: #8b263b; box-shadow: 0 1px 3px rgba(58, 22, 30, .18); }
 .placement-ungroup-button:hover { background: #8b263b; color: #fff; }
 .placement-node.placement-row-free { display: block; width: max-content; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
-.placement-row-free .placement-node-content, .placement-row-free .placement-node-actions { display: none; }
+.placement-row-free .placement-node-content { display: none; }
 .placement-row-free .placement-seats { width: max-content; max-width: none; padding: 0; flex-wrap: nowrap; overflow: visible; }
-.placement-extract-button { position: absolute; top: calc(100% + 7px); left: 50%; z-index: 12; width: 26px; height: 26px; padding: 4px; transform: translateX(-50%); background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, .18); }
 .placement-node.placement-hall { width: var(--container-width, 250px); min-height: var(--container-height, 54px); transition: width .16s ease, min-height .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease; }
 .placement-node.placement-hall.group-tree-node-drop-target { border-color: #16815f; background: rgba(222, 247, 237, .97); box-shadow: 0 0 0 4px rgba(22, 129, 95, .18), 0 10px 24px rgba(22, 129, 95, .18); }
 .placement-node.placement-hall.group-tree-node-drop-target::after { position: absolute; right: 12px; bottom: 10px; color: #16815f; font-size: 12px; font-weight: 700; content: "Отпустите, чтобы поместить"; }
-.placement-table { width: calc(var(--table-radius) * 2 + 92px); min-height: calc(var(--table-radius) * 2 + 92px); clip-path: circle(50% at 50% 50%); }
+.placement-table { width: calc(var(--table-radius) * 2 + 92px); min-height: calc(var(--table-radius) * 2 + 92px); border-radius: 50%; }
 .placement-table-seats { position: relative; display: block; width: calc(var(--table-radius) * 2 + 56px); height: calc(var(--table-radius) * 2 + 56px); padding: 0; }
 .placement-table-seats::after { position: absolute; top: 50%; left: 50%; width: max(40px, calc(var(--table-radius) * 2 - 76px)); height: max(40px, calc(var(--table-radius) * 2 - 76px)); transform: translate(-50%, -50%); border: 2px solid #526078; border-radius: 50%; background: #eef2f8; content: ""; }
 .placement-table-seats .placement-seat-wrap { position: absolute; z-index: 1; }
@@ -4176,7 +4174,8 @@ code {
 .placement-seat-popover button { grid-column: 2; grid-row: 1 / span 2; align-self: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #526078; font-size: 22px; line-height: 1; cursor: pointer; }
 .placement-seat-popover button:hover { background: #eef2f8; color: #172033; }
 .placement-seats-more { font-size: 11px; color: #657086; }
-.placement-node-actions { display: flex; width: 100%; justify-content: center; gap: 6px; margin-top: 2px; }
+.placement-node-actions { position: absolute; z-index: 25; top: calc(100% + 8px); left: 50%; display: flex; width: max-content; justify-content: center; gap: 6px; margin: 0; padding: 4px; transform: translateX(-50%); border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; box-shadow: 0 4px 12px rgba(15, 23, 42, .14); }
+.placement-node-actions.placement-group-actions { top: auto; }
 .placement-node button:focus-visible { outline: 2px solid var(--brand-color); outline-offset: 2px; }
 .placement-modal { width: min(780px, 100%); max-height: none; overflow: visible; }
 .placement-checkbox { display: flex; align-items: center; gap: 12px; }

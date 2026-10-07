@@ -27,6 +27,7 @@ export interface PlacementInput {
   canvasWidth?: number | null;
   canvasHeight?: number | null;
   isRow?: boolean;
+  preserveRowBatch?: boolean;
 }
 export interface PlacementGuest {
   id: number; name: string; categoryName: string | null; groupId: number; groupName: string; placementId: number | null; seatNumber: number | null;

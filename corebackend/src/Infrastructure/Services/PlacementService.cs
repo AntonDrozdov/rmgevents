@@ -7,7 +7,7 @@ using System.Text.Json;
 namespace Infrastructure.Services;
 
 public sealed record PlacementView(long Id, long? ParentId, long? GroupId, string Name, int? Quota, int GuestCount, List<int> OccupiedSeatNumbers, bool DisplayChildrenAsRows = false, int? CanvasX = null, int? CanvasY = null, int? CanvasWidth = null, int? CanvasHeight = null, Guid? RowBatchId = null, bool IsRow = false);
-public sealed record PlacementInput(string Name, long? ParentId, long? GroupId, int? Quota, int Count = 1, int StartNumber = 1, bool DisplayChildrenAsRows = false, int? CanvasX = null, int? CanvasY = null, int? CanvasWidth = null, int? CanvasHeight = null, bool IsRow = false);
+public sealed record PlacementInput(string Name, long? ParentId, long? GroupId, int? Quota, int Count = 1, int StartNumber = 1, bool DisplayChildrenAsRows = false, int? CanvasX = null, int? CanvasY = null, int? CanvasWidth = null, int? CanvasHeight = null, bool IsRow = false, bool PreserveRowBatch = false);
 public sealed record PlacementGuest(long Id, string Name, string? CategoryName, long GroupId, string GroupName, long? PlacementId, int? SeatNumber);
 
 public sealed class PlacementService(ApplicationDbContext db, IPermissionService permissions, IEventStateGuard guard)
@@ -171,7 +171,8 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
 
         p.ParentId = input.ParentId; p.GroupId = input.GroupId; p.Quota = input.Quota;
         p.DisplayChildrenAsRows = input.DisplayChildrenAsRows; p.CanvasX = input.CanvasX; p.CanvasY = input.CanvasY; p.CanvasWidth = input.CanvasWidth; p.CanvasHeight = input.CanvasHeight; p.IsRow = input.IsRow;
-        if (input.IsRow && input.Count > 1)
+        var preserveRowBatch = input.PreserveRowBatch && p.RowBatchId.HasValue;
+        if (!preserveRowBatch && input.IsRow && input.Count > 1)
         {
             var batchId = p.RowBatchId ?? Guid.NewGuid();
             p.RowBatchId = batchId;
@@ -183,7 +184,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
                 Name = input.Name.Trim() + " " + (input.StartNumber + i)
             });
         }
-        else
+        else if (!preserveRowBatch)
         {
             p.RowBatchId = null;
             p.Name = input.Name.Trim();
@@ -194,7 +195,10 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
 
     public Task<List<PlacementView>> UpdateRowBatch(long eventId, Guid batchId, PlacementInput input) => Transaction(eventId, async () =>
     {
-        var rows = await db.Placements.Where(x => x.EventId == eventId && x.RowBatchId == batchId).OrderBy(x => x.Id).ToListAsync();
+        var groupedPlacements = await db.Placements.Where(x => x.EventId == eventId && x.RowBatchId == batchId).ToListAsync();
+        if (groupedPlacements.Any(x => !x.IsRow))
+            throw new InvalidOperationException("Свойства рядов можно менять только у однородной группы рядов.");
+        var rows = groupedPlacements.OrderBy(x => x.Id).ToList();
         if (rows.Count == 0) throw new InvalidOperationException("Группа рядов не найдена.");
         if (input.DisplayChildrenAsRows || !input.Quota.HasValue || input.Quota <= 0 || input.Count < 1 || input.Count > 100)
             throw new InvalidOperationException("Для группы рядов укажите положительное количество мест и от 1 до 100 рядов.");
@@ -225,11 +229,22 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
 
     public Task<List<PlacementView>> GroupRows(long eventId, IReadOnlyCollection<long> ids) => Transaction(eventId, async () =>
     {
-        var rows = await db.Placements.Where(x => x.EventId == eventId && ids.Contains(x.Id)).ToListAsync();
-        if (rows.Count < 2 || rows.Count != ids.Distinct().Count() || rows.Select(x => x.IsRow).Distinct().Count() != 1)
-            throw new InvalidOperationException("Выберите не менее двух объектов одного типа.");
+        var all = await db.Placements.Where(x => x.EventId == eventId).ToListAsync();
+        var groupedIds = ids.Distinct().ToHashSet();
+        if (groupedIds.Count < 2 || groupedIds.Any(id => all.All(item => item.Id != id)))
+            throw new InvalidOperationException("Выберите не менее двух объектов размещения.");
+
+        // A container moves together with everything placed inside it.
+        while (true)
+        {
+            var count = groupedIds.Count;
+            foreach (var placement in all)
+                if (placement.ParentId.HasValue && groupedIds.Contains(placement.ParentId.Value)) groupedIds.Add(placement.Id);
+            if (count == groupedIds.Count) break;
+        }
+
         var batchId = Guid.NewGuid();
-        foreach (var row in rows) row.RowBatchId = batchId;
+        foreach (var placement in all.Where(item => groupedIds.Contains(item.Id))) placement.RowBatchId = batchId;
         await db.SaveChangesAsync();
         return await List(eventId);
     });
