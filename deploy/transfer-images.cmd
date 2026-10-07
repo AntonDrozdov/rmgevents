@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "REMOTE_HOST=root@45.12.238.40"
 set "REMOTE_DIR=/opt/rmgevents"
@@ -7,20 +7,27 @@ set "APP_VERSION="
 for /f "usebackq tokens=1,2 delims==" %%A in ("%~dp0.env") do if "%%A"=="APP_VERSION" set "APP_VERSION=%%B"
 if not defined APP_VERSION goto :error
 
-if not exist "%~dp0docker-compose.yml" goto :error
+set "COMPOSE_FILE=%~dp0docker-compose.yml"
+set "ENV_FILE=%~dp0.env"
+if not exist "%COMPOSE_FILE%" goto :error
 
-echo Checking images for version %APP_VERSION%...
-docker image inspect rmgevents-corebackend:%APP_VERSION% rmgevents-frontend:%APP_VERSION% >nul
+echo Reading image versions from Compose for %APP_VERSION%...
+set "IMAGES="
+for /f "usebackq delims=" %%I in (`docker compose --env-file "%ENV_FILE%" -f "%COMPOSE_FILE%" config --images`) do set "IMAGES=!IMAGES! %%I"
+if not defined IMAGES goto :error
+
+echo Checking images:!IMAGES!
+docker image inspect !IMAGES! >nul
 if errorlevel 1 goto :error
 
 ssh %REMOTE_HOST% "mkdir -p %REMOTE_DIR%"
 if errorlevel 1 goto :error
 
 echo Loading images directly into Docker on the server...
-docker save rmgevents-corebackend:%APP_VERSION% rmgevents-frontend:%APP_VERSION% | ssh %REMOTE_HOST% "docker load"
+docker save !IMAGES! | ssh %REMOTE_HOST% "docker load"
 if errorlevel 1 goto :error
 
-ssh %REMOTE_HOST% "docker image inspect rmgevents-corebackend:%APP_VERSION% rmgevents-frontend:%APP_VERSION% > /dev/null"
+ssh %REMOTE_HOST% "docker image inspect !IMAGES! > /dev/null"
 if errorlevel 1 goto :error
 
 echo Transferring server Compose and version %APP_VERSION%...

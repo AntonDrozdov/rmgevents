@@ -20,14 +20,16 @@ switch ($Bump) {
 }
 $version = "$major.$minor.$patch"
 $previousVersion = $env:APP_VERSION
+$buildEnvFile = Join-Path $PSScriptRoot '.build.env'
 try {
-    $env:APP_VERSION = $version
-    docker compose --env-file $versionFile -f $composeFile build
+    Set-Content -LiteralPath $buildEnvFile -Value "APP_VERSION=$version" -Encoding ascii
+    docker compose --env-file $buildEnvFile -f $composeFile build
     if ($LASTEXITCODE -ne 0) { throw 'Docker image build failed.' }
-    docker compose --env-file $versionFile -f $composeFile up -d --force-recreate
+    docker compose --env-file $buildEnvFile -f $composeFile up -d --force-recreate
     if ($LASTEXITCODE -ne 0) { throw 'Docker container startup failed.' }
     Set-Content -LiteralPath $versionFile -Value "APP_VERSION=$version" -Encoding ascii
     Write-Host "Started backend and frontend version $version"
 } finally {
     $env:APP_VERSION = $previousVersion
+    Remove-Item -LiteralPath $buildEnvFile -Force -ErrorAction SilentlyContinue
 }

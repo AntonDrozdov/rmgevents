@@ -72,6 +72,10 @@ class ApiClient {
   async getPlacements(eventId: string | number): Promise<Placement[]> { return (await this.client.get('/events/'+eventId+'/placements')).data; }
   async createPlacements(eventId: string | number, input: PlacementInput): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements', input)).data; }
   async updatePlacement(eventId: string | number, id: number, input: PlacementInput): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/'+id, input)).data; }
+  async updatePlacementBatch(eventId: string | number, batchId: string, input: PlacementInput): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/batches/'+batchId, input)).data; }
+  async copyPlacements(eventId: string | number, ids: number[]): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/copy', { ids })).data; }
+  async groupPlacementRows(eventId: string | number, ids: number[]): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/rows/group', { ids })).data; }
+  async ungroupPlacementRows(eventId: string | number, batchId: string): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/rows/batches/'+batchId+'/ungroup')).data; }
   async deletePlacement(eventId: string | number, id: number | null): Promise<void> { await this.client.delete('/events/'+eventId+'/placements'+(id === null ? '' : '/'+id), { params: { confirmed: true } }); }
   async placementGuests(eventId: string | number, groupId: number): Promise<PlacementGuest[]> { return (await this.client.get('/events/'+eventId+'/placements/guests', { params: { groupId } })).data; }
   async assignPlacement(eventId: string | number, id: number, guestId: number, remove = false): Promise<void> { await this.client.put('/events/'+eventId+'/placements/'+id+'/guests/'+guestId, { remove }); }

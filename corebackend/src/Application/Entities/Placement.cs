@@ -9,6 +9,12 @@ public sealed class Placement
     public string Name { get; set; } = "";
     public int? Quota { get; set; }
     public bool DisplayChildrenAsRows { get; set; }
+    public int? CanvasX { get; set; }
+    public int? CanvasY { get; set; }
+    public int? CanvasWidth { get; set; }
+    public int? CanvasHeight { get; set; }
+    public Guid? RowBatchId { get; set; }
+    public bool IsRow { get; set; }
 }
 
 public sealed class PlacementTemplate

@@ -17,6 +17,12 @@ public sealed class PlacementConfiguration : IEntityTypeConfiguration<Placement>
         b.Property(x => x.Name).HasColumnName("name").HasMaxLength(150);
         b.Property(x => x.Quota).HasColumnName("quota");
         b.Property(x => x.DisplayChildrenAsRows).HasColumnName("display_children_as_rows").HasDefaultValue(false);
+        b.Property(x => x.CanvasX).HasColumnName("canvas_x");
+        b.Property(x => x.CanvasY).HasColumnName("canvas_y");
+        b.Property(x => x.CanvasWidth).HasColumnName("canvas_width");
+        b.Property(x => x.CanvasHeight).HasColumnName("canvas_height");
+        b.Property(x => x.RowBatchId).HasColumnName("row_batch_id");
+        b.Property(x => x.IsRow).HasColumnName("is_row").HasDefaultValue(false);
         b.HasOne<Event>().WithMany().HasForeignKey(x => x.EventId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne<Placement>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne<Group>().WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.SetNull);

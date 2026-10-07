@@ -14,12 +14,12 @@ Run from the repository root:
 The script builds and recreates both containers, then saves the version on success.
 Previous image tags remain available for rollback.
 
-For server deployment, copy `docker-compose.yml` and `.env` together, and load
-both images with the version from `.env`. `transfer-images.cmd` reads that same
-version when streaming `docker save` directly through SSH into server-side
+For server deployment, copy `docker-compose.yml` and `.env` together. `transfer-images.cmd`
+uses `docker compose config --images` with the version from `.env`; it verifies and
+streams every image referenced by that Compose configuration directly to server-side
 `docker load`, without archive files. It then copies `docker-compose.yml` and `.env`
-to `/opt/rmgevents` on the configured server. It checks that both versioned
-images exist before transfer and validates the remote Compose configuration.
+to `/opt/rmgevents` and validates the remote Compose configuration. This keeps the
+transferred image tags exactly aligned with the deployed `APP_VERSION`.
 It does not restart containers.
 Run on the server from the directory containing these files:
 
