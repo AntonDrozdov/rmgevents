@@ -6,8 +6,8 @@ using System.Text.Json;
 
 namespace Infrastructure.Services;
 
-public sealed record PlacementView(long Id, long? ParentId, long? GroupId, string Name, int? Quota, int GuestCount, List<int> OccupiedSeatNumbers, bool DisplayChildrenAsRows = false, int? CanvasX = null, int? CanvasY = null, int? CanvasWidth = null, int? CanvasHeight = null, Guid? RowBatchId = null, bool IsRow = false);
-public sealed record PlacementInput(string Name, long? ParentId, long? GroupId, int? Quota, int Count = 1, int StartNumber = 1, bool DisplayChildrenAsRows = false, int? CanvasX = null, int? CanvasY = null, int? CanvasWidth = null, int? CanvasHeight = null, bool IsRow = false, bool PreserveRowBatch = false);
+public sealed record PlacementView(long Id, long? ParentId, long? GroupId, string Name, int? Quota, int GuestCount, List<int> OccupiedSeatNumbers, bool DisplayChildrenAsRows = false, int? CanvasX = null, int? CanvasY = null, int? CanvasWidth = null, int? CanvasHeight = null, Guid? RowBatchId = null, bool IsRow = false, string? Color = null, Dictionary<int, string>? SeatLabels = null, bool IsLabel = false);
+public sealed record PlacementInput(string Name, long? ParentId, long? GroupId, int? Quota, int Count = 1, int StartNumber = 1, bool DisplayChildrenAsRows = false, int? CanvasX = null, int? CanvasY = null, int? CanvasWidth = null, int? CanvasHeight = null, bool IsRow = false, bool PreserveRowBatch = false, string? Color = null, bool IsLabel = false);
 public sealed record PlacementGuest(long Id, string Name, string? CategoryName, long GroupId, string GroupName, long? PlacementId, int? SeatNumber);
 
 public sealed class PlacementService(ApplicationDbContext db, IPermissionService permissions, IEventStateGuard guard)
@@ -48,7 +48,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         var guestCounts = await db.Guests.AsNoTracking().Where(g => g.EventId == eventId && g.PlacementId.HasValue)
             .GroupBy(g => g.PlacementId!.Value).ToDictionaryAsync(g => g.Key, g => g.Count());
         return placements.Select(p => new PlacementView(p.Id, p.ParentId, p.GroupId, p.Name, p.Quota,
-            guestCounts.GetValueOrDefault(p.Id), occupied.GetValueOrDefault(p.Id, []), p.DisplayChildrenAsRows, p.CanvasX, p.CanvasY, p.CanvasWidth, p.CanvasHeight, p.RowBatchId, p.IsRow)).ToList();
+            guestCounts.GetValueOrDefault(p.Id), occupied.GetValueOrDefault(p.Id, []), p.DisplayChildrenAsRows, p.CanvasX, p.CanvasY, p.CanvasWidth, p.CanvasHeight, p.RowBatchId, p.IsRow, p.Color, ParseSeatLabels(p.SeatLabelsJson), p.IsLabel)).ToList();
     }
 
     public async Task<HashSet<long>> GroupScope(long eventId, long groupId)
@@ -103,13 +103,22 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
 
     private async Task ValidateInput(long eventId, PlacementInput input, long? id = null)
     {
+        _ = NormalizeColor(input.Color);
         if (string.IsNullOrWhiteSpace(input.Name) || input.Name.Trim().Length > 140) throw new InvalidOperationException("Название: от 1 до 140 символов.");
         if (input.Quota < 0) throw new InvalidOperationException("Количество мест не может быть отрицательным.");
         if (input.CanvasWidth < 0 || input.CanvasHeight < 0) throw new InvalidOperationException("Размер объекта не может быть отрицательным.");
         if (!input.DisplayChildrenAsRows && input.Quota is > 50) throw new InvalidOperationException("В ряду или за столом может быть не более 50 мест.");
+        if (input.IsLabel && (input.Quota.HasValue || input.IsRow || input.DisplayChildrenAsRows))
+            throw new InvalidOperationException("Надпись не может содержать места или быть рядом либо контейнером.");
         if (!input.GroupId.HasValue) throw new InvalidOperationException("Укажите группу.");
         var scope = await GroupScope(eventId, input.GroupId.Value);
         var all = await db.Placements.AsNoTracking().Where(x => x.EventId == eventId).ToDictionaryAsync(x => x.Id);
+        if (input.IsRow && (!input.Quota.HasValue || input.Quota <= 0))
+            throw new InvalidOperationException("Ряд должен содержать хотя бы одно место.");
+        if (input.ParentId.HasValue && !input.IsRow && !input.IsLabel && !input.Quota.HasValue)
+            throw new InvalidOperationException("В контейнер можно поместить только объект с местами.");
+        if (input.ParentId.HasValue && input.DisplayChildrenAsRows)
+            throw new InvalidOperationException("Контейнер рядов нельзя поместить внутрь другого контейнера.");
         if (input.DisplayChildrenAsRows && input.Quota.HasValue)
             throw new InvalidOperationException("Контейнер рядов не может иметь места.");
         if (input.ParentId.HasValue && (!all.TryGetValue(input.ParentId.Value, out var directParent) || !directParent.DisplayChildrenAsRows))
@@ -131,6 +140,30 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         }
     }
 
+    private static string? NormalizeColor(string? color)
+    {
+        if (string.IsNullOrWhiteSpace(color)) return null;
+        var normalized = color.Trim();
+        if (normalized.Length != 7 || normalized[0] != '#' || normalized.Skip(1).Any(value => !Uri.IsHexDigit(value)))
+            throw new InvalidOperationException("Цвет объекта должен быть указан в формате #RRGGBB.");
+        return normalized.ToUpperInvariant();
+    }
+
+    private static Dictionary<int, string> ParseSeatLabels(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return JsonSerializer.Deserialize<Dictionary<int, string>>(json) ?? []; }
+        catch (JsonException) { return []; }
+    }
+
+    private static string SerializeSeatLabels(IReadOnlyDictionary<int, string>? labels, int? quota = null)
+    {
+        var normalized = (labels ?? new Dictionary<int, string>())
+            .Where(item => item.Key > 0 && (!quota.HasValue || item.Key <= quota.Value) && !string.IsNullOrWhiteSpace(item.Value))
+            .ToDictionary(item => item.Key, item => item.Value.Trim());
+        return JsonSerializer.Serialize(normalized);
+    }
+
     public Task<List<PlacementView>> Create(long eventId, PlacementInput input) => Transaction(eventId, async () =>
     {
         await ValidateInput(eventId, input);
@@ -138,6 +171,8 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
             throw new InvalidOperationException("Можно создать от 1 до 100 объектов; начальный номер должен быть положительным.");
         if (input.DisplayChildrenAsRows && input.Count != 1)
             throw new InvalidOperationException("ЗАЛ создаётся одним пустым объектом. Ряды добавляются отдельно.");
+        if (input.IsLabel && input.Count != 1)
+            throw new InvalidOperationException("Надпись создаётся одним объектом.");
         if (input.Count > 1 && $"{input.Name.Trim()} {input.StartNumber + input.Count - 1}".Length > 150)
             throw new InvalidOperationException("Название с номером не должно превышать 150 символов.");
         var rowBatchId = input.Count > 1 ? Guid.NewGuid() : (Guid?)null;
@@ -152,7 +187,8 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
                 CanvasY = input.CanvasY.HasValue ? input.CanvasY.Value + row * (input.IsRow ? 54 : 220) : null,
                 CanvasWidth = input.CanvasWidth,
                 CanvasHeight = input.CanvasHeight,
-                RowBatchId = rowBatchId, IsRow = input.IsRow,
+                Color = NormalizeColor(input.Color),
+                RowBatchId = rowBatchId, IsRow = input.IsRow, IsLabel = input.IsLabel,
                 Name = input.Name.Trim() + (input.Count > 1 ? $" {input.StartNumber + i}" : "")
             });
         }
@@ -170,7 +206,8 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
             throw new InvalidOperationException("Название с номером не должно превышать 150 символов.");
 
         p.ParentId = input.ParentId; p.GroupId = input.GroupId; p.Quota = input.Quota;
-        p.DisplayChildrenAsRows = input.DisplayChildrenAsRows; p.CanvasX = input.CanvasX; p.CanvasY = input.CanvasY; p.CanvasWidth = input.CanvasWidth; p.CanvasHeight = input.CanvasHeight; p.IsRow = input.IsRow;
+        p.DisplayChildrenAsRows = input.DisplayChildrenAsRows; p.CanvasX = input.CanvasX; p.CanvasY = input.CanvasY; p.CanvasWidth = input.CanvasWidth; p.CanvasHeight = input.CanvasHeight; p.Color = NormalizeColor(input.Color); p.IsRow = input.IsRow; p.IsLabel = input.IsLabel;
+        p.SeatLabelsJson = SerializeSeatLabels(ParseSeatLabels(p.SeatLabelsJson), input.Quota);
         var preserveRowBatch = input.PreserveRowBatch && p.RowBatchId.HasValue;
         if (!preserveRowBatch && input.IsRow && input.Count > 1)
         {
@@ -180,7 +217,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
             for (var i = 1; i < input.Count; i++) db.Placements.Add(new Placement
             {
                 EventId = eventId, ParentId = input.ParentId, GroupId = input.GroupId, Quota = input.Quota, DisplayChildrenAsRows = false,
-                CanvasX = input.CanvasX, CanvasY = (input.CanvasY ?? 40) + i * 54, RowBatchId = batchId, IsRow = true,
+                CanvasX = input.CanvasX, CanvasY = (input.CanvasY ?? 40) + i * 54, Color = NormalizeColor(input.Color), RowBatchId = batchId, IsRow = true,
                 Name = input.Name.Trim() + " " + (input.StartNumber + i)
             });
         }
@@ -215,12 +252,13 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         {
             var row = rows[i];
             row.Name = input.Name.Trim() + (input.Count > 1 ? " " + (input.StartNumber + i) : "");
-            row.ParentId = input.ParentId; row.GroupId = input.GroupId; row.Quota = input.Quota; row.DisplayChildrenAsRows = false; row.IsRow = true;
+            row.ParentId = input.ParentId; row.GroupId = input.GroupId; row.Quota = input.Quota; row.DisplayChildrenAsRows = false; row.Color = NormalizeColor(input.Color); row.IsRow = true;
+            row.SeatLabelsJson = SerializeSeatLabels(ParseSeatLabels(row.SeatLabelsJson), input.Quota);
             row.RowBatchId = input.Count > 1 ? batchId : null;
         }
         for (var i = rows.Count; i < input.Count; i++) db.Placements.Add(new Placement
         {
-            EventId = eventId, ParentId = input.ParentId, GroupId = input.GroupId, Quota = input.Quota, DisplayChildrenAsRows = false, RowBatchId = batchId, IsRow = true,
+            EventId = eventId, ParentId = input.ParentId, GroupId = input.GroupId, Quota = input.Quota, DisplayChildrenAsRows = false, Color = NormalizeColor(input.Color), RowBatchId = batchId, IsRow = true,
             Name = input.Name.Trim() + " " + (input.StartNumber + i), CanvasX = rows[0].CanvasX, CanvasY = (rows[0].CanvasY ?? 40) + i * 54
         });
         await db.SaveChangesAsync();
@@ -291,8 +329,11 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
                     CanvasY = item.CanvasY.HasValue ? item.CanvasY.Value + 48 : null,
                     CanvasWidth = item.CanvasWidth,
                     CanvasHeight = item.CanvasHeight,
+                    Color = item.Color,
+                    SeatLabelsJson = item.SeatLabelsJson,
                     RowBatchId = item.RowBatchId.HasValue && copiedBatches.TryGetValue(item.RowBatchId.Value, out var batchId) ? batchId : null,
-                    IsRow = item.IsRow
+                    IsRow = item.IsRow,
+                    IsLabel = item.IsLabel
                 };
                 db.Placements.Add(copy);
                 await db.SaveChangesAsync();
@@ -308,6 +349,23 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         var rows = await db.Placements.Where(x => x.EventId == eventId && x.RowBatchId == batchId).ToListAsync();
         if (rows.Count == 0) throw new InvalidOperationException("Группа рядов не найдена.");
         foreach (var row in rows) row.RowBatchId = null;
+        await db.SaveChangesAsync();
+        return await List(eventId);
+    });
+
+    public Task<List<PlacementView>> UpdateSeatLabel(long eventId, long id, int seatNumber, string? label) => Transaction(eventId, async () =>
+    {
+        var placement = await db.Placements.FirstOrDefaultAsync(item => item.Id == id && item.EventId == eventId)
+            ?? throw new InvalidOperationException("Объект размещения не найден.");
+        if (!placement.Quota.HasValue || seatNumber < 1 || seatNumber > placement.Quota.Value)
+            throw new InvalidOperationException("Указанное место не существует.");
+
+        var normalized = label?.Trim() ?? "";
+        if (normalized.Length > 12) throw new InvalidOperationException("Подпись места не должна превышать 12 символов.");
+        var labels = ParseSeatLabels(placement.SeatLabelsJson);
+        if (normalized.Length == 0 || normalized == seatNumber.ToString()) labels.Remove(seatNumber);
+        else labels[seatNumber] = normalized;
+        placement.SeatLabelsJson = SerializeSeatLabels(labels, placement.Quota);
         await db.SaveChangesAsync();
         return await List(eventId);
     });
@@ -355,6 +413,10 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
     {
         var template = await db.PlacementTemplates.AsNoTracking().FirstOrDefaultAsync(x => x.Id == templateId) ?? throw new InvalidOperationException("Шаблон не найден.");
         var source = JsonSerializer.Deserialize<List<PlacementView>>(template.Structure) ?? [];
+        var rootGroupId = await db.Groups.AsNoTracking()
+            .Where(group => group.EventId == eventId && group.ParentGroupId == null)
+            .Select(group => (long?)group.Id)
+            .SingleOrDefaultAsync() ?? throw new InvalidOperationException("Корневая группа мероприятия не найдена.");
         await Delete(eventId, null, confirmed);
         var map = new Dictionary<long, long>();
         while (map.Count < source.Count)
@@ -363,7 +425,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
             if (ready.Count == 0) throw new InvalidOperationException("Некорректная структура шаблона.");
             foreach (var item in ready)
             {
-                var p = new Placement { EventId = eventId, Name = item.Name, Quota = item.Quota, DisplayChildrenAsRows = item.DisplayChildrenAsRows, CanvasX = item.CanvasX, CanvasY = item.CanvasY, CanvasWidth = item.CanvasWidth, CanvasHeight = item.CanvasHeight, RowBatchId = item.RowBatchId, IsRow = item.IsRow, ParentId = item.ParentId.HasValue ? map[item.ParentId.Value] : null };
+                var p = new Placement { EventId = eventId, GroupId = rootGroupId, Name = item.Name, Quota = item.Quota, DisplayChildrenAsRows = item.DisplayChildrenAsRows, CanvasX = item.CanvasX, CanvasY = item.CanvasY, CanvasWidth = item.CanvasWidth, CanvasHeight = item.CanvasHeight, Color = NormalizeColor(item.Color), SeatLabelsJson = SerializeSeatLabels(item.SeatLabels, item.Quota), RowBatchId = item.RowBatchId, IsRow = item.IsRow, IsLabel = item.IsLabel, ParentId = item.ParentId.HasValue ? map[item.ParentId.Value] : null };
                 db.Placements.Add(p); await db.SaveChangesAsync(); map[item.Id] = p.Id;
             }
         }

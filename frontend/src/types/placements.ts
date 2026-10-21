@@ -11,8 +11,11 @@ export interface Placement {
   canvasY: number | null;
   canvasWidth: number | null;
   canvasHeight: number | null;
+  color: string | null;
+  seatLabels: Record<number, string>;
   rowBatchId: string | null;
   isRow: boolean;
+  isLabel: boolean;
 }
 export interface PlacementInput {
   name: string;
@@ -26,7 +29,9 @@ export interface PlacementInput {
   canvasY?: number | null;
   canvasWidth?: number | null;
   canvasHeight?: number | null;
+  color?: string | null;
   isRow?: boolean;
+  isLabel?: boolean;
   preserveRowBatch?: boolean;
 }
 export interface PlacementGuest {

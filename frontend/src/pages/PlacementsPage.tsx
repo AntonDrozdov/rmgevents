@@ -8,7 +8,7 @@ import { CategoryDto, GroupTreeDto, GuestDto, OrganizationDepartmentTreeItemDto,
 import { Placement, PlacementGuest, PlacementTemplate } from "../types/placements";
 import { flattenGroups } from "../utils/groups";
 
-type PlacementFormType = "container" | "row" | "table";
+type PlacementFormType = "container" | "row" | "table" | "label";
 type PlacementMove = {
   x: number;
   y: number;
@@ -21,6 +21,16 @@ type PlacementMove = {
   expandedContainerSizes: Map<number, { width: number; height: number }>;
   didMove: boolean;
 };
+type PlacementResize = {
+  item: Placement;
+  pointerX: number;
+  pointerY: number;
+  containerX: number;
+  containerY: number;
+  width: number;
+  height: number;
+  didResize: boolean;
+};
 type PlacementPropertiesTarget = {
   key: string;
   placement: Placement;
@@ -30,9 +40,18 @@ type PlacementPropertiesTarget = {
 };
 const canvasOrigin = 4000;
 const canvasWorkspace = { width: 10000, height: 8000 };
-const blank = (parentId = "", placementType: PlacementFormType = "table") => ({ name: "", parentId, groupId: "", quota: "10", noQuota: placementType === "container", displayChildrenAsRows: placementType === "container", placementType, count: 1, startNumber: 1 });
+const defaultPlacementColor = "#2f6f87";
+const blank = (parentId = "", placementType: PlacementFormType = "table") => ({ name: "", parentId, groupId: "", quota: "10", noQuota: placementType === "container" || placementType === "label", displayChildrenAsRows: placementType === "container", placementType, count: 1, startNumber: 1, color: "" });
 type PlacementForm = ReturnType<typeof blank>;
 const tableRadiusFor = (quota: number) => Math.max(72, Math.ceil((quota * 33) / (Math.PI * 2)) + 18);
+let rowLabelMeasureContext: CanvasRenderingContext2D | null = null;
+const rowLabelWidthFor = (name: string) => {
+  if (typeof document === "undefined") return name.length * 8;
+  rowLabelMeasureContext ??= document.createElement("canvas").getContext("2d");
+  if (!rowLabelMeasureContext) return name.length * 8;
+  rowLabelMeasureContext.font = '700 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  return Math.ceil(rowLabelMeasureContext.measureText(name).width);
+};
 const message = (err: unknown) => axios.isAxiosError(err) && typeof err.response?.data === "string" ? err.response.data : "Не удалось выполнить действие. Попробуйте ещё раз.";
 const normalizeSearch = (value: string) => value.trim().toLocaleLowerCase("ru-RU");
 
@@ -66,6 +85,7 @@ export const PlacementsPage: React.FC = () => {
   const [placementMode, setPlacementMode] = useState<"schema" | "seating">("seating");
   const canEditStructure = canManage && placementMode === "schema";
   const canSeatGuests = canCreateGuest && placementMode === "seating";
+  const canEditSeatLabels = canManage && placementMode === "seating";
   const [items, setItems] = useState<Placement[]>([]);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [categories, setCategories] = useState<CategoryDto[]>([]);
@@ -104,6 +124,8 @@ export const PlacementsPage: React.FC = () => {
   const [seatExistingSearch, setSeatExistingSearch] = useState("");
   const [seatLoading, setSeatLoading] = useState(false);
   const [seatSaving, setSeatSaving] = useState(false);
+  const [seatLabelSaving, setSeatLabelSaving] = useState(false);
+  const [seatLabelDraft, setSeatLabelDraft] = useState("");
   const [seatError, setSeatError] = useState("");
   const [seatForm, setSeatForm] = useState({ name: "", email: "", phone: "", groupId: "", categoryId: "", tagIds: [] as number[] });
   const [organizationTree, setOrganizationTree] = useState<OrganizationStructureTreeDto | null>(null);
@@ -123,12 +145,12 @@ export const PlacementsPage: React.FC = () => {
   const selectionStart = useRef<{ x: number; y: number } | null>(null);
   const selectionBoxRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
   const selectedMove = useRef<PlacementMove | null>(null);
+  const placementResize = useRef<PlacementResize | null>(null);
   const dropContainer = useRef<number | null>(null);
   const placementClipboard = useRef<number[]>([]);
   const suppressNodeClick = useRef(false);
   const dismissedSeatPopover = useRef<string | null>(null);
   const viewportInitializedFor = useRef<string | null>(null);
-  const propertySaveTimer = useRef<number | null>(null);
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
   const setPlacementSelection = (ids: Set<number>) => {
     selectedIdsRef.current = ids;
@@ -188,8 +210,10 @@ export const PlacementsPage: React.FC = () => {
     return ids;
   };
   const openSeatForm = async (placement: Placement, selectedSeatNumber: number) => {
-    if (!canSeatGuests || !placement.groupId || seatLoading) return;
-    setSeatPlacement(placement); setSeatNumber(selectedSeatNumber); setSeatTab("existing"); setSeatGuest(null); setSeatExistingGuests([]); setSeatExistingSearch(""); setSeatLoading(true); setSeatSaving(false); setSeatError(""); setOrganizationSearch(""); setSelectedOrganizationEmployeeId(null); setOrganizationError("");
+    if ((!canSeatGuests && !canEditSeatLabels) || seatLoading) return;
+    setSeatPlacement(placement); setSeatNumber(selectedSeatNumber); setSeatLabelDraft(placement.seatLabels?.[selectedSeatNumber] ?? String(selectedSeatNumber)); setSeatTab("existing"); setSeatGuest(null); setSeatExistingGuests([]); setSeatExistingSearch(""); setSeatLoading(true); setSeatSaving(false); setSeatLabelSaving(false); setSeatError(""); setOrganizationSearch(""); setSelectedOrganizationEmployeeId(null); setOrganizationError("");
+    if (!canSeatGuests) { setSeatLoading(false); return; }
+    if (!placement.groupId) { setSeatError("Для рассадки гостей укажите группу объекта."); setSeatLoading(false); return; }
     try {
       const [eligibleGuests, tree, eventGuests] = await Promise.all([apiClient.placementGuests(eventId, placement.groupId), apiClient.getOrganizationStructureTree(eventId), apiClient.getGuests(eventId, { page: 1, pageSize: 1000 })]);
       const occupantId = eligibleGuests.find(guest => guest.placementId === placement.id && guest.seatNumber === selectedSeatNumber)?.id;
@@ -215,10 +239,31 @@ export const PlacementsPage: React.FC = () => {
     if (dismissedSeatPopover.current === key) dismissedSeatPopover.current = null;
     setSeatPopover(current => current?.placementId === placementId && current.seatNumber === selectedSeatNumber ? null : current);
   };
+  const persistSeatLabel = async () => {
+    if (!seatPlacement || !seatNumber) return;
+    const currentLabel = seatPlacement.seatLabels?.[seatNumber] ?? String(seatNumber);
+    const nextLabel = seatLabelDraft.trim() || String(seatNumber);
+    if (nextLabel === currentLabel) return;
+    const list = await apiClient.updatePlacementSeatLabel(eventId, seatPlacement.id, seatNumber, seatLabelDraft);
+    const updatedPlacement = list.find(item => item.id === seatPlacement.id);
+    setItems(list);
+    if (updatedPlacement) {
+      setSeatPlacement(updatedPlacement);
+      setSeatLabelDraft(updatedPlacement.seatLabels?.[seatNumber] ?? String(seatNumber));
+    }
+  };
+  const saveSeatLabel = async () => {
+    if (!seatPlacement || !seatNumber || seatLabelSaving || seatSaving) return;
+    setSeatLabelSaving(true); setSeatError("");
+    try { await persistSeatLabel(); }
+    catch (err) { setSeatError(message(err)); }
+    finally { setSeatLabelSaving(false); }
+  };
   const assignExistingGuestToSeat = async (guest: GuestDto) => {
     if (!seatPlacement || !seatNumber || seatSaving) return;
     setSeatSaving(true); setSeatError("");
     try {
+      await persistSeatLabel();
       await apiClient.updateGuest(eventId, guest.id, { name: guest.name, email: guest.email ?? undefined, phone: guest.phone ?? undefined, groupId: guest.groupId, categoryId: guest.categoryId, tagIds: guest.tags.map(tag => tag.id), placementId: seatPlacement.id, placementSeatNumber: seatNumber });
       const list = await apiClient.getPlacements(eventId);
       setItems(list); setGuestVersion(version => version + 1); setSeatPlacement(null); setSeatNumber(null);
@@ -230,6 +275,7 @@ export const PlacementsPage: React.FC = () => {
     if (!seatPlacement || !seatForm.categoryId || seatSaving) return;
     setSeatSaving(true); setSeatError("");
     try {
+      await persistSeatLabel();
       const request = { name: seatForm.name.trim(), email: seatForm.email.trim() || undefined, phone: seatForm.phone.trim() || undefined, groupId: Number(seatForm.groupId), categoryId: Number(seatForm.categoryId), tagIds: seatForm.tagIds, placementId: seatPlacement.id, placementSeatNumber: seatNumber };
       if (seatGuest) await apiClient.updateGuest(eventId, seatGuest.id, request); else await apiClient.createGuest(eventId, request);
       const list = await apiClient.getPlacements(eventId);
@@ -244,16 +290,23 @@ export const PlacementsPage: React.FC = () => {
     return ids;
   };
   const placementFootprint = (placement: Placement) => {
-    if (placement.isRow) return { width: Math.max(28, (placement.quota ?? 1) * 33 - 5), height: 28 + (placement.parentId !== null ? 40 : 0) };
+    if (placement.isLabel) return { width: Math.max(48, rowLabelWidthFor(placement.name) + 20), height: 40 };
+    if (placement.isRow) return { width: rowLabelWidthFor(placement.name) + 12 + Math.max(28, (placement.quota ?? 1) * 33 - 5), height: 28 + (placement.parentId !== null ? 40 : 0) };
     if (placement.displayChildrenAsRows) return { width: 250, height: 92 };
     const radius = tableRadiusFor(placement.quota ?? 0);
     return { width: radius * 2 + 92, height: radius * 2 + 164 };
   };
-  const placementType = (placement: Placement): PlacementFormType => placement.displayChildrenAsRows ? "container" : placement.isRow ? "row" : "table";
+  const placementType = (placement: Placement): PlacementFormType => placement.isLabel ? "label" : placement.displayChildrenAsRows ? "container" : placement.isRow ? "row" : "table";
   const batchMembers = (placement: Placement) => placement.rowBatchId
     ? items.filter(item => item.rowBatchId === placement.rowBatchId)
     : [placement];
   const isHomogeneousGroup = (members: Placement[]) => members.length > 0 && members.every(member => placementType(member) === placementType(members[0]));
+  const selectedPlacements = items.filter(item => selectedIds.has(item.id));
+  const canGroupSelection = new Set(selectedPlacements.map(item =>
+    item.rowBatchId ? `group:${item.rowBatchId}` : `placement:${item.id}`)).size > 1;
+  const selectedBatchIds = [...new Set(selectedPlacements
+    .filter(item => item.rowBatchId && batchMembers(item).length > 1)
+    .map(item => item.rowBatchId!))];
   const formForPlacement = (placement: Placement, members = batchMembers(placement)): PlacementForm => {
     const type = placementType(placement);
     const isRowBatch = placement.isRow && !!placement.rowBatchId && members.length > 1;
@@ -265,6 +318,7 @@ export const PlacementsPage: React.FC = () => {
       groupId: String(placement.groupId ?? ""),
       noQuota: placement.quota === null,
       quota: String(placement.quota ?? 10),
+      color: placement.color ?? "",
       count: isRowBatch ? members.length : 1,
       startNumber: isRowBatch ? Number(placement.name.match(/(\d+)$/)?.[1] ?? 1) : 1
     };
@@ -291,75 +345,88 @@ export const PlacementsPage: React.FC = () => {
     return null;
   })();
   useEffect(() => {
-    if (propertySaveTimer.current !== null) window.clearTimeout(propertySaveTimer.current);
     setPropertyFormKey(selectedPropertiesTarget?.key ?? null);
     setPropertyForm(selectedPropertiesTarget ? formForPlacement(selectedPropertiesTarget.placement, selectedPropertiesTarget.members) : blank());
   }, [selectedPropertiesTarget?.key]);
-  const saveProperties = (draft: PlacementForm, target: PlacementPropertiesTarget, delay = 0) => {
-    if (propertySaveTimer.current !== null) window.clearTimeout(propertySaveTimer.current);
-    const persist = () => {
-      propertySaveTimer.current = null;
-      const quota = draft.noQuota ? null : Number(draft.quota);
-      const minimumQuota = draft.placementType === "row" ? 1 : 0;
-      if ((!target.isGroup && !draft.name.trim()) || !Number(draft.groupId) || (!draft.noQuota && (quota === null || !Number.isFinite(quota) || quota < minimumQuota || quota > 50))) return;
-      const placement = target.placement;
-      const inputFor = (member: Placement, preserveRowBatch = false) => ({
-        name: target.isGroup && !target.isRowBatch ? member.name : draft.name.trim(),
-        parentId: member.parentId,
-        groupId: Number(draft.groupId),
-        quota,
-        displayChildrenAsRows: draft.placementType === "container",
-        isRow: draft.placementType === "row",
-        count: draft.placementType === "row" ? Math.min(100, Math.max(1, Number(draft.count) || 1)) : 1,
-        startNumber: Math.max(1, Number(draft.startNumber) || 1),
-        canvasX: member.canvasX,
-        canvasY: member.canvasY,
-        canvasWidth: member.canvasWidth,
-        canvasHeight: member.canvasHeight,
-        preserveRowBatch
-      });
-      void (async () => {
-        try {
-          const list = target.isRowBatch && placement.rowBatchId
-            ? await apiClient.updatePlacementBatch(eventId, placement.rowBatchId, inputFor(placement))
-            : target.isGroup
-              ? await (async () => {
-                let updated = items;
-                for (const member of target.members) updated = await apiClient.updatePlacement(eventId, member.id, inputFor(member, true));
-                return updated;
-              })()
-              : await apiClient.updatePlacement(eventId, placement.id, inputFor(placement));
-          setItems(list);
-          const updatedPlacement = list.find(item => item.id === placement.id);
-          setPlacementSelection(updatedPlacement?.rowBatchId
-            ? new Set(list.filter(item => item.rowBatchId === updatedPlacement.rowBatchId).map(item => item.id))
-            : new Set([placement.id]));
-        } catch (err) {
-          setError(message(err));
-        }
-      })();
-    };
-    if (delay) propertySaveTimer.current = window.setTimeout(persist, delay);
-    else persist();
+  const propertyFormValid = (() => {
+    if (!selectedPropertiesTarget || propertyFormKey !== selectedPropertiesTarget.key) return false;
+    const quota = propertyForm.noQuota ? null : Number(propertyForm.quota);
+    const minimumQuota = propertyForm.placementType === "row" ? 1 : 0;
+    const count = Number(propertyForm.count);
+    return ((selectedPropertiesTarget.isGroup && !selectedPropertiesTarget.isRowBatch) || !!propertyForm.name.trim())
+      && !!Number(propertyForm.groupId)
+      && (propertyForm.noQuota || (quota !== null && Number.isFinite(quota) && quota >= minimumQuota && quota <= 50))
+      && (propertyForm.placementType !== "row" || (Number.isInteger(count) && count >= 1 && count <= 100));
+  })();
+  const propertyFormDirty = !!selectedPropertiesTarget
+    && propertyFormKey === selectedPropertiesTarget.key
+    && JSON.stringify(propertyForm) !== JSON.stringify(formForPlacement(selectedPropertiesTarget.placement, selectedPropertiesTarget.members));
+  const saveProperties = (draft: PlacementForm, target: PlacementPropertiesTarget) => {
+    if (!propertyFormValid) return;
+    const quota = draft.noQuota ? null : Number(draft.quota);
+    const placement = target.placement;
+    const inputFor = (member: Placement, preserveRowBatch = false) => ({
+      name: target.isGroup && !target.isRowBatch ? member.name : draft.name.trim(),
+      parentId: member.parentId,
+      groupId: Number(draft.groupId),
+      quota,
+      displayChildrenAsRows: draft.placementType === "container",
+      isRow: draft.placementType === "row",
+      isLabel: draft.placementType === "label",
+      count: draft.placementType === "row" ? Math.min(100, Math.max(1, Number(draft.count) || 1)) : 1,
+      startNumber: Math.max(1, Number(draft.startNumber) || 1),
+      canvasX: member.canvasX,
+      canvasY: member.canvasY,
+      canvasWidth: member.canvasWidth,
+      canvasHeight: member.canvasHeight,
+      color: draft.color || null,
+      preserveRowBatch
+    });
+    void act(async () => {
+      const list = target.isRowBatch && placement.rowBatchId
+        ? await apiClient.updatePlacementBatch(eventId, placement.rowBatchId, inputFor(placement))
+        : target.isGroup
+          ? await (async () => {
+            let updated = items;
+            for (const member of target.members) updated = await apiClient.updatePlacement(eventId, member.id, inputFor(member, true));
+            return updated;
+          })()
+          : await apiClient.updatePlacement(eventId, placement.id, inputFor(placement));
+      setItems(list);
+      const updatedPlacement = list.find(item => item.id === placement.id);
+      if (updatedPlacement) {
+        const updatedMembers = updatedPlacement.rowBatchId
+          ? list.filter(item => item.rowBatchId === updatedPlacement.rowBatchId)
+          : [updatedPlacement];
+        setPropertyForm(formForPlacement(updatedPlacement, updatedMembers));
+        setPlacementSelection(new Set(updatedMembers.map(item => item.id)));
+      }
+    });
   };
-  const changeProperties = (patch: Partial<PlacementForm>, immediate = false) => {
+  const changeProperties = (patch: Partial<PlacementForm>) => {
     if (!selectedPropertiesTarget || propertyFormKey !== selectedPropertiesTarget.key) return;
-    const next = { ...propertyForm, ...patch };
-    setPropertyForm(next);
-    saveProperties(next, selectedPropertiesTarget, immediate ? 0 : 450);
-  };
-  const commitProperties = () => {
-    if (selectedPropertiesTarget && propertyFormKey === selectedPropertiesTarget.key) saveProperties(propertyForm, selectedPropertiesTarget);
+    setPropertyForm(current => ({ ...current, ...patch }));
   };
   const containerInsets = { left: 24, top: 112, right: 24, bottom: 24 };
+  const fallbackPositionFor = (placement: Placement) => {
+    const index = Math.max(0, items.findIndex(item => item.id === placement.id));
+    return { x: 40 + (index % 4) * 290, y: 40 + Math.floor(index / 4) * 180 };
+  };
   function placementLayout(placement: Placement, visited = new Set<number>()): { x: number; y: number; width: number; height: number } {
     if (placement.displayChildrenAsRows) return containerLayout(placement, visited);
     const size = placementFootprint(placement);
-    return { x: placement.canvasX ?? 0, y: placement.canvasY ?? 0, ...size };
+    const fallback = fallbackPositionFor(placement);
+    return { x: placement.canvasX ?? fallback.x, y: placement.canvasY ?? fallback.y, ...size };
   }
   function containerLayout(placement: Placement, visited = new Set<number>()): { x: number; y: number; width: number; height: number } {
     const base = placementFootprint(placement);
-    const fallback = { x: placement.canvasX ?? 0, y: placement.canvasY ?? 0, ...base };
+    const fallbackPosition = fallbackPositionFor(placement);
+    const fallback = {
+      x: placement.canvasX ?? fallbackPosition.x,
+      y: placement.canvasY ?? fallbackPosition.y,
+      width: Math.max(base.width, placement.canvasWidth ?? 0),
+      height: Math.max(base.height, placement.canvasHeight ?? 0)
+    };
     if (!visited.add(placement.id)) return fallback;
     const childLayouts = items.filter(item => item.parentId === placement.id)
       .map(child => placementLayout(child, new Set(visited)));
@@ -368,11 +435,19 @@ export const PlacementsPage: React.FC = () => {
     const top = Math.min(...childLayouts.map(child => child.y));
     const right = Math.max(...childLayouts.map(child => child.x + child.width));
     const bottom = Math.max(...childLayouts.map(child => child.y + child.height));
-    return {
+    const natural = {
       x: Math.max(0, left - containerInsets.left),
       y: Math.max(0, top - containerInsets.top),
-      width: right - left + containerInsets.left + containerInsets.right,
-      height: bottom - top + containerInsets.top + containerInsets.bottom
+      right: right + containerInsets.right,
+      bottom: bottom + containerInsets.bottom
+    };
+    const combinedLeft = Math.min(natural.x, fallback.x);
+    const combinedTop = Math.min(natural.y, fallback.y);
+    return {
+      x: combinedLeft,
+      y: combinedTop,
+      width: Math.max(natural.right, fallback.x + fallback.width) - combinedLeft,
+      height: Math.max(natural.bottom, fallback.y + fallback.height) - combinedTop
     };
   }
   const containerFootprint = (placement: Placement): { width: number; height: number } => {
@@ -410,6 +485,27 @@ export const PlacementsPage: React.FC = () => {
       });
     }));
   };
+  const focusAllPlacements = () => {
+    const el = canvas.current;
+    if (!el || !items.length) return 0;
+    const layouts = items.map(item => placementLayout(item));
+    const left = Math.min(...layouts.map(layout => layout.x));
+    const top = Math.min(...layouts.map(layout => layout.y));
+    const right = Math.max(...layouts.map(layout => layout.x + layout.width));
+    const bottom = Math.max(...layouts.map(layout => layout.y + layout.height));
+    const width = Math.max(1, right - left);
+    const height = Math.max(1, bottom - top);
+    const nextZoom = Math.min(1, Math.max(.05, Math.min((el.clientWidth - 120) / width, (el.clientHeight - 120) / height)));
+    const centerX = left + width / 2;
+    const centerY = top + height / 2;
+    setZoom(nextZoom);
+    return window.requestAnimationFrame(() => {
+      el.scrollTo({
+        left: Math.max(0, (canvasOrigin + centerX) * nextZoom - el.clientWidth / 2),
+        top: Math.max(0, (canvasOrigin + centerY) * nextZoom - el.clientHeight / 2)
+      });
+    });
+  };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!canEditStructure || busy || !(event.ctrlKey || event.metaKey)) return;
@@ -440,25 +536,7 @@ export const PlacementsPage: React.FC = () => {
     viewportInitializedFor.current = viewportKey;
     let nestedFrame = 0;
     const frame = window.requestAnimationFrame(() => {
-      const el = canvas.current;
-      if (!el) return;
-      const layouts = items.map(item => placementLayout(item));
-      const left = Math.min(...layouts.map(layout => layout.x));
-      const top = Math.min(...layouts.map(layout => layout.y));
-      const right = Math.max(...layouts.map(layout => layout.x + layout.width));
-      const bottom = Math.max(...layouts.map(layout => layout.y + layout.height));
-      const width = Math.max(1, right - left);
-      const height = Math.max(1, bottom - top);
-      const nextZoom = Math.min(1, Math.max(.05, Math.min((el.clientWidth - 120) / width, (el.clientHeight - 120) / height)));
-      const centerX = left + width / 2;
-      const centerY = top + height / 2;
-      setZoom(nextZoom);
-      nestedFrame = window.requestAnimationFrame(() => {
-        el.scrollTo({
-          left: Math.max(0, (canvasOrigin + centerX) * nextZoom - el.clientWidth / 2),
-          top: Math.max(0, (canvasOrigin + centerY) * nextZoom - el.clientHeight / 2)
-        });
-      });
+      nestedFrame = focusAllPlacements();
     });
     return () => { window.cancelAnimationFrame(frame); window.cancelAnimationFrame(nestedFrame); };
   }, [eventId, items, loading, placementMode]);
@@ -486,17 +564,18 @@ export const PlacementsPage: React.FC = () => {
   };
   const isRow = form.placementType === "row";
   const isHall = form.placementType === "container";
+  const isLabel = form.placementType === "label";
   const editingBatch = !!editing?.isRow && !!editing.rowBatchId && items.filter(item => item.rowBatchId === editing.rowBatchId).length > 1;
-  const dirty = editing && (form.displayChildrenAsRows !== editing.displayChildrenAsRows || form.name.trim() !== editing.name || (Number(form.groupId) || null) !== editing.groupId || (Number(form.parentId) || null) !== editing.parentId || (form.noQuota ? null : Number(form.quota)) !== editing.quota);
+  const dirty = editing && (placementType(editing) !== form.placementType || form.displayChildrenAsRows !== editing.displayChildrenAsRows || form.name.trim() !== editing.name || (Number(form.groupId) || null) !== editing.groupId || (Number(form.parentId) || null) !== editing.parentId || (form.noQuota ? null : Number(form.quota)) !== editing.quota || (form.color || null) !== editing.color);
   const guestReady = !!editing && !dirty && !!form.groupId && !form.noQuota && canManage;
   const showGuestsTab = false;
   const save = (e: React.FormEvent) => {
     e.preventDefault();
     void act(async () => {
       const bounds = canvas.current?.getBoundingClientRect();
-      const newObject = { isRow: form.placementType === "row", displayChildrenAsRows: form.placementType === "container", quota: form.noQuota ? null : Number(form.quota), parentId: null } as Placement;
+      const newObject = { name: form.name.trim(), isRow: form.placementType === "row", isLabel: form.placementType === "label", displayChildrenAsRows: form.placementType === "container", quota: form.noQuota ? null : Number(form.quota), parentId: null } as Placement;
       const newObjectSize = placementFootprint(newObject);
-      const count = form.placementType === "container" ? 1 : Math.max(1, Number(form.count) || 1);
+      const count = form.placementType === "container" || form.placementType === "label" ? 1 : Math.max(1, Number(form.count) || 1);
       const columns = newObject.isRow ? 1 : Math.min(3, count);
       const rows = newObject.isRow ? count : Math.ceil(count / 3);
       const createdWidth = newObjectSize.width + (columns - 1) * (newObject.isRow ? 0 : 220);
@@ -512,7 +591,7 @@ export const PlacementsPage: React.FC = () => {
             y: Math.max(0, Math.round((canvas.current.scrollTop + bounds.height / 2) / zoom - canvasOrigin - createdHeight / 2))
           }
         : null;
-      const input = { name: form.name.trim(), parentId: Number(form.parentId) || null, groupId: Number(form.groupId) || null, quota: form.noQuota ? null : Number(form.quota), displayChildrenAsRows: form.displayChildrenAsRows, isRow: form.placementType === "row", count: form.count, startNumber: form.startNumber, canvasX: editing?.canvasX ?? initialPosition?.x ?? null, canvasY: editing?.canvasY ?? initialPosition?.y ?? null, canvasWidth: editing?.canvasWidth ?? null, canvasHeight: editing?.canvasHeight ?? null };
+      const input = { name: form.name.trim(), parentId: Number(form.parentId) || null, groupId: Number(form.groupId) || null, quota: form.noQuota ? null : Number(form.quota), displayChildrenAsRows: form.displayChildrenAsRows, isRow: form.placementType === "row", isLabel: form.placementType === "label", count: form.count, startNumber: form.startNumber, canvasX: editing?.canvasX ?? initialPosition?.x ?? null, canvasY: editing?.canvasY ?? initialPosition?.y ?? null, canvasWidth: editing?.canvasWidth ?? null, canvasHeight: editing?.canvasHeight ?? null, color: form.color || null };
       if (editing) {
         const list = editingBatch && editing.rowBatchId
           ? await apiClient.updatePlacementBatch(eventId, editing.rowBatchId, input)
@@ -571,7 +650,7 @@ export const PlacementsPage: React.FC = () => {
   const dragBranch = draggedId === null ? new Set<number>() : descendants(draggedId);
   const invalidDrop = (target: number) => {
     const source = items.find(p => p.id === draggedId);
-    return dragBranch.has(target) || (!!items.find(p => p.id === target)?.displayChildrenAsRows && !!source && (source.displayChildrenAsRows || source.quota === null || source.quota < 1));
+    return dragBranch.has(target) || (!!items.find(p => p.id === target)?.displayChildrenAsRows && !!source && (source.displayChildrenAsRows || (!source.isLabel && (source.quota === null || source.quota < 1))));
   };
   const hoverDrop = (e: React.DragEvent, target: number | "root") => {
     if (!canEditStructure || busy || drag.current === null) return;
@@ -646,6 +725,23 @@ export const PlacementsPage: React.FC = () => {
     selectedMove.current = { x: e.clientX, y: e.clientY, positions, sourceItems, rootIds, containerPositions, containerSizes, expandedContainerPositions: new Map(containerPositions), expandedContainerSizes: new Map(containerSizes), didMove: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
+  const startContainerResize = (e: React.PointerEvent<HTMLButtonElement>, placement: Placement, layout: { x: number; y: number; width: number; height: number }) => {
+    if (e.button !== 0 || !canEditStructure || busy) return;
+    e.preventDefault();
+    e.stopPropagation();
+    placementResize.current = {
+      item: placement,
+      pointerX: e.clientX,
+      pointerY: e.clientY,
+      containerX: layout.x,
+      containerY: layout.y,
+      width: layout.width,
+      height: layout.height,
+      didResize: false
+    };
+    setPlacementSelection(new Set([placement.id]));
+    canvas.current?.setPointerCapture(e.pointerId);
+  };
   const dropContainerAtPoint = (move: PlacementMove, clientX: number, clientY: number) => {
     const directId = Number(document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>("[data-placement-id]")?.dataset.placementId);
     const direct = move.sourceItems.get(directId);
@@ -669,12 +765,12 @@ export const PlacementsPage: React.FC = () => {
     while (current && !visibleIds.has(current.id)) { visibleIds.add(current.id); current = items.find(x => x.id === current!.parentId); }
   }
   const renderNodes = (): React.ReactNode => {
-    return <div className="placement-free-canvas">{items.filter(p => visibleIds.has(p.id)).map((p, index) => {
+    return <div className="placement-free-canvas">{items.filter(p => visibleIds.has(p.id)).map(p => {
       const isRow = p.isRow;
-      const fallbackPosition = { x: 40 + (index % 4) * 290, y: 40 + Math.floor(index / 4) * 180 };
+      const isLabelObject = p.isLabel;
       const layout = placementLayout(p);
-      const x = !p.displayChildrenAsRows && p.canvasX === null ? fallbackPosition.x : layout.x;
-      const y = !p.displayChildrenAsRows && p.canvasY === null ? fallbackPosition.y : layout.y;
+      const x = layout.x;
+      const y = layout.y;
       const occupiedSeats = new Set(p.occupiedSeatNumbers ?? []);
       const tableRadius = tableRadiusFor(p.quota ?? 0);
       const members = batchMembers(p);
@@ -689,37 +785,39 @@ export const PlacementsPage: React.FC = () => {
         const memberLayout = placementLayout(member);
         return { left: Math.min(bounds.left, memberLayout.x), top: Math.min(bounds.top, memberLayout.y), right: Math.max(bounds.right, memberLayout.x + memberLayout.width), bottom: Math.max(bounds.bottom, memberLayout.y + memberLayout.height) };
       }, { left: x, top: y, right: x, bottom: y });
-      return <div key={p.id} data-placement-id={p.id} className={`placement-node placement-free-node ${isRow ? "placement-row-free" : ""} ${p.quota === null ? "placement-hall" : isRow ? "" : "placement-table"}${canEditStructure ? " placement-can-drag" : ""}${p.parentId !== null ? " placement-contained" : ""}${isAboveSelectedContainer ? " placement-above-selected-container" : ""}${isSelected ? " placement-selected" : ""}${isDragging ? " placement-dragging" : ""}${query && p.name.toLocaleLowerCase("ru-RU").includes(query) ? " placement-match" : ""}${dragBranch.has(p.id) ? " group-tree-node-drag-branch" : ""}${draggedId === p.id ? " group-tree-node-drag-source" : ""}${dropTarget === p.id ? invalidDrop(p.id) ? " group-tree-node-drop-disabled" : " group-tree-node-drop-target" : ""}`}
+      return <div key={p.id} data-placement-id={p.id} className={`placement-node placement-free-node ${isRow ? "placement-row-free" : ""} ${isLabelObject ? "placement-label" : p.quota === null ? "placement-hall" : isRow ? "" : "placement-table"}${p.color ? " placement-colored" : ""}${canEditStructure ? " placement-can-drag" : ""}${p.parentId !== null ? " placement-contained" : ""}${isAboveSelectedContainer ? " placement-above-selected-container" : ""}${isSelected ? " placement-selected" : ""}${isDragging ? " placement-dragging" : ""}${query && p.name.toLocaleLowerCase("ru-RU").includes(query) ? " placement-match" : ""}${dragBranch.has(p.id) ? " group-tree-node-drag-branch" : ""}${draggedId === p.id ? " group-tree-node-drag-source" : ""}${dropTarget === p.id ? invalidDrop(p.id) ? " group-tree-node-drop-disabled" : " group-tree-node-drop-target" : ""}`}
           onClick={e => {
             if (suppressNodeClick.current || !canEditStructure || e.ctrlKey || (e.target as HTMLElement).closest("[data-placement-control]")) return;
             setPlacementSelection(new Set(members.map(member => member.id)));
           }}
-          style={{ left: x, top: y, zIndex: layer, "--table-radius": `${tableRadius}px`, "--container-width": containerSize ? `${containerSize.width}px` : undefined, "--container-height": containerSize ? `${containerSize.height}px` : undefined } as React.CSSProperties}
+          style={{ left: x, top: y, zIndex: layer, "--table-radius": `${tableRadius}px`, "--container-width": containerSize ? `${containerSize.width}px` : undefined, "--container-height": containerSize ? `${containerSize.height}px` : undefined, "--placement-color": p.color ?? undefined } as React.CSSProperties}
           draggable={false} onPointerDownCapture={e => startPlacementMove(e, p, members)}
           onDragOver={e => hoverDrop(e, p.id)} onDragLeave={leaveDrop} onDrop={e => drop(e, p.id)}>
           <div className="placement-node-content">
-            <button className="placement-node-title" type="button" disabled={!canEditStructure} onClick={e => { e.stopPropagation(); if (!suppressNodeClick.current) open(p); }}>{p.name}</button>
+            <button className="placement-node-title" type="button" title={p.name} disabled={!canEditStructure} onClick={e => { e.stopPropagation(); if (!suppressNodeClick.current) open(p); }}>{p.name}</button>
           </div>
           {p.quota !== null && p.quota > 0 && <div className={`placement-seats${isRow ? " placement-row-seats" : " placement-table-seats"}`} role="img" aria-label={`Места: занято ${p.guestCount} из ${p.quota}`} title={`Занято: ${p.guestCount}. Свободно: ${Math.max(0, p.quota - p.guestCount)}.`}>
             {Array.from({ length: Math.min(p.quota, 50) }, (_, i) => {
               const selectedSeatNumber = i + 1;
+              const selectedSeatLabel = p.seatLabels?.[selectedSeatNumber] ?? String(selectedSeatNumber);
               const occupied = occupiedSeats.has(selectedSeatNumber);
               const popoverVisible = seatPopover?.placementId === p.id && seatPopover.seatNumber === selectedSeatNumber;
               const angle = (Math.PI * 2 * i) / Math.min(p.quota!, 50) - Math.PI / 2;
               const seatStyle = isRow ? undefined : { left: `calc(50% + ${Math.cos(angle) * tableRadius}px - 14px)`, top: `calc(50% + ${Math.sin(angle) * tableRadius}px - 14px)` };
               return <span key={i} className="placement-seat-wrap" style={seatStyle} onMouseEnter={() => { if (canSeatGuests && occupied) void showSeatPopover(p, selectedSeatNumber); }} onMouseLeave={() => hideSeatPopover(p.id, selectedSeatNumber)}>
-                <button type="button" className={`placement-seat${occupied ? " placement-seat-occupied" : ""}`} disabled={!canSeatGuests} aria-label={occupied ? `Редактировать гостя на месте ${selectedSeatNumber}` : `Добавить гостя на место ${selectedSeatNumber}`} title={canSeatGuests ? occupied ? "Редактировать гостя" : "Добавить гостя" : undefined} onClick={e => { e.stopPropagation(); void openSeatForm(p, selectedSeatNumber); }} />
+                <button type="button" className={`placement-seat${occupied ? " placement-seat-occupied" : ""}`} disabled={!canSeatGuests && !canEditSeatLabels} aria-label={canSeatGuests ? occupied ? `Редактировать гостя на месте ${selectedSeatLabel}` : `Добавить гостя на место ${selectedSeatLabel}` : `Изменить подпись места ${selectedSeatLabel}`} title={canSeatGuests ? `${selectedSeatLabel}: ${occupied ? "редактировать гостя" : "добавить гостя"}` : canEditSeatLabels ? `${selectedSeatLabel}: изменить подпись` : selectedSeatLabel} onClick={e => { e.stopPropagation(); void openSeatForm(p, selectedSeatNumber); }}>{selectedSeatLabel}</button>
                 {popoverVisible && <span className="placement-seat-popover" role="status"><strong>{seatPopover.guest.name}</strong><small>{seatPopover.guest.categoryName ?? "Без категории"}</small><button type="button" aria-label="Закрыть информацию о госте" title="Закрыть" onClick={e => { e.stopPropagation(); dismissedSeatPopover.current = seatPopoverKey(p.id, selectedSeatNumber); setSeatPopover(null); }}>×</button></span>}
               </span>;
             })}
             {isRow && p.quota > 50 && <span className="placement-seats-more">Ещё {p.quota - 50} мест</span>}
           </div>}
+          {canEditStructure && isSelected && p.displayChildrenAsRows && <button type="button" className="placement-container-resize-handle" data-placement-control title="Изменить размер контейнера" aria-label={`Изменить размер контейнера ${p.name}`} onPointerDown={e => startContainerResize(e, p, layout)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9 4 4m0 0h5M4 4v5m11 6 5 5m0 0h-5m5 0v-5" /></svg></button>}
           {canEditStructure && isSelected && (!isGrouped || isBatchLeader) && <div className={`group-tree-node-actions placement-node-actions${isGrouped ? " placement-group-actions" : ""}`} data-placement-control style={isGrouped ? { left: groupBounds.left + (groupBounds.right - groupBounds.left) / 2 - x, top: groupBounds.bottom - y + 8 } : undefined}>
-              <button className="icon-button icon-button-danger" type="button" onPointerDown={e => e.stopPropagation()} onClick={() => remove(p.id)} aria-label={`Удалить ветку ${p.name}`} title="Удалить ветку">
+              <button className="icon-button icon-button-danger" type="button" onPointerDown={e => e.stopPropagation()} onClick={() => remove(p.id)} aria-label={`Удалить объект ${p.name}`} title="Удалить объект">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 0 1-2-2V6h14v13a2 2 0 0 1-2 2H7Zm1-3h2V9H8v9Zm6 0h2V9h-2v9ZM4 5V3h5l1-1h4l1 1h5v2H4Z" /></svg>
               </button>
-              {p.parentId !== null && (!isGrouped || isBatchLeader) && <button className="icon-button" data-placement-control type="button" onPointerDown={e => e.stopPropagation()} onClick={() => detachFromContainer(p)} aria-label={`Вынести ${p.name} из контейнера`} title="Вынести из контейнера"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V4m0 0L6 10m6-6 6 6M5 20h14" /></svg></button>}
-              {isGrouped && <button type="button" className="icon-button placement-ungroup-button" aria-label="Отменить группировку" title="Отменить группировку" onClick={e => { e.stopPropagation(); void act(async () => { setItems(await apiClient.ungroupPlacementRows(eventId, p.rowBatchId!)); }); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5H5v3M5 5l5 5M16 5h3v3m0-3-5 5M8 19H5v-3m0 3 5-5m6 5h3v-3m0 3-5-5" /></svg></button>}
+              {p.parentId !== null && (!isGrouped || isBatchLeader) && <button className="icon-button" data-placement-control type="button" onPointerDown={e => e.stopPropagation()} onClick={() => detachFromContainer(p)} aria-label={`Вынести ${p.name} из контейнера`} title="Вынести из контейнера"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13v7h16v-7M12 16V3m0 0L7 8m5-5 5 5" /></svg></button>}
+              {isGrouped && <button type="button" className="icon-button placement-ungroup-button" aria-label="Разгруппировать объекты" title="Разгруппировать" onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); void act(async () => { setItems(await apiClient.ungroupPlacementRows(eventId, p.rowBatchId!)); }); }}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /><path d="M14 4h6v6m0-6-7 7M4 14v6h6m-6 0 7-7" /></svg></button>}
           </div>}
       </div>;
     })}</div>;
@@ -740,9 +838,29 @@ export const PlacementsPage: React.FC = () => {
     return { left: Math.min(start.x, x), top: Math.min(start.y, y), width: Math.abs(x - start.x), height: Math.abs(y - start.y) };
   };
 
+  const resizedContainerAtPointer = (resize: PlacementResize, clientX: number, clientY: number): Placement => ({
+    ...resize.item,
+    canvasX: resize.containerX,
+    canvasY: resize.containerY,
+    canvasWidth: Math.max(250, Math.round(resize.width + (clientX - resize.pointerX) / zoom)),
+    canvasHeight: Math.max(92, Math.round(resize.height + (clientY - resize.pointerY) / zoom))
+  });
+
   const handleCanvasPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = canvas.current;
     if (!el) return;
+
+    const resize = placementResize.current;
+    if (resize) {
+      const dx = (e.clientX - resize.pointerX) / zoom;
+      const dy = (e.clientY - resize.pointerY) / zoom;
+      if (resize.didResize || Math.hypot(dx, dy) >= 4) {
+        resize.didResize = true;
+        const resized = resizedContainerAtPointer(resize, e.clientX, e.clientY);
+        setItems(current => current.map(item => item.id === resized.id ? resized : item));
+      }
+      return;
+    }
 
     const move = selectedMove.current;
     if (move) {
@@ -808,6 +926,22 @@ export const PlacementsPage: React.FC = () => {
   };
 
   const handleCanvasPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const resized = placementResize.current;
+    placementResize.current = null;
+    if (resized) {
+      selectionStart.current = null;
+      selectionBoxRef.current = null;
+      setSelectionBox(null);
+      pan.current = null;
+      if (resized.didResize) {
+        suppressNodeClick.current = true;
+        window.setTimeout(() => { suppressNodeClick.current = false; }, 0);
+        const item = resizedContainerAtPointer(resized, e.clientX, e.clientY);
+        void act(async () => setItems(await apiClient.updatePlacement(eventId, item.id, { ...item, preserveRowBatch: !!item.rowBatchId })));
+      }
+      return;
+    }
+
     const moved = selectedMove.current;
     const parentId = dropContainer.current;
     selectedMove.current = null;
@@ -873,6 +1007,9 @@ export const PlacementsPage: React.FC = () => {
   };
 
   const handleCanvasPointerCancel = () => {
+    const resized = placementResize.current;
+    placementResize.current = null;
+    if (resized?.didResize) setItems(current => current.map(item => item.id === resized.item.id ? resized.item : item));
     selectedMove.current = null;
     dropContainer.current = null;
     setDropTarget(null);
@@ -895,12 +1032,17 @@ export const PlacementsPage: React.FC = () => {
     <section className="panel">
       <div className="placement-toolbar"><input className="placement-search-input" type="search" placeholder="Поиск по названию" aria-label="Поиск объектов" value={search} onChange={e => setSearch(e.target.value)} />
         {canEditStructure && <div className="group-template-actions placement-template-actions">
-          <button type="button" className="secondary-button original-structure-button" disabled={busy || loading || !items.length} onClick={() => { setTemplateName(""); setTemplateMode("save"); }}>Сохранить шаблон</button>
-          <button type="button" className="secondary-button original-structure-button" disabled={busy} onClick={() => void act(async () => { setTemplates(await apiClient.placementTemplates(eventId)); setTemplateId(""); setTemplateMode("load"); })}>Загрузить шаблон</button>
+          <button type="button" className="icon-button placement-template-icon-button" title="Сохранить схему как шаблон" aria-label="Сохранить схему как шаблон" disabled={busy || loading || !items.length} onClick={() => { setTemplateName(""); setTemplateMode("save"); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5V3Z" /><path d="M8 3v6h8V4M8 21v-7h8v7" /></svg></button>
+          <button type="button" className="icon-button placement-template-icon-button" title="Загрузить схему из шаблона" aria-label="Загрузить схему из шаблона" disabled={busy} onClick={() => void act(async () => { setTemplates(await apiClient.placementTemplates(eventId)); setTemplateId(""); setTemplateMode("load"); })}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v12H3V6Z" /><path d="M12 11v6m0 0-3-3m3 3 3-3" /></svg></button>
         </div>}
       </div>
       <div className={`placement-tree-view${canEditStructure && selectedPropertiesTarget && propertyFormKey === selectedPropertiesTarget.key ? " placement-tree-view-with-properties" : ""}`}>
-        {canEditStructure && <aside className="placement-schema-toolbar" aria-label="Создание объектов"><button type="button" className="icon-button" title="Создать контейнер" aria-label="Создать контейнер" onClick={() => openCreate("container")}>□</button><button type="button" className="icon-button" title="Создать ряд" aria-label="Создать ряд" onClick={() => openCreate("row")}>▦</button><button type="button" className="icon-button" title="Создать стол" aria-label="Создать стол" onClick={() => openCreate("table")}>●</button></aside>}
+        {canEditStructure && <aside className="placement-schema-toolbar" aria-label="Создание объектов">
+          <button type="button" className="icon-button" title="Создать контейнер" aria-label="Создать контейнер" onClick={() => openCreate("container")}><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3.5" y="5" width="25" height="22" rx="3" /><path d="M8 10h16M9 16h5v5H9zm9 0h5v5h-5z" /></svg></button>
+          <button type="button" className="icon-button" title="Создать ряд" aria-label="Создать ряд" onClick={() => openCreate("row")}><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 22h24M6 22v4m20-4v4" /><rect x="5" y="10" width="5" height="8" rx="1.5" /><rect x="13.5" y="10" width="5" height="8" rx="1.5" /><rect x="22" y="10" width="5" height="8" rx="1.5" /></svg></button>
+          <button type="button" className="icon-button" title="Создать стол" aria-label="Создать стол" onClick={() => openCreate("table")}><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="7" /><rect x="13" y="2.5" width="6" height="5" rx="1.5" /><rect x="13" y="24.5" width="6" height="5" rx="1.5" /><rect x="2.5" y="13" width="5" height="6" rx="1.5" /><rect x="24.5" y="13" width="5" height="6" rx="1.5" /></svg></button>
+          <button type="button" className="icon-button" title="Создать надпись" aria-label="Создать надпись" onClick={() => openCreate("label")}><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M6 8h20M16 8v17M10 25h12" /><path d="M11 8 7 15m14-7 4 7" /></svg></button>
+        </aside>}
         <aside className={`placement-object-list${canEditStructure ? " placement-object-list-with-toolbar" : ""}${objectListCollapsed ? " collapsed" : ""}`} aria-label="Объекты на схеме">
           <div className="placement-object-list-header">
             {!objectListCollapsed && <strong>Объекты: {items.length}</strong>}
@@ -908,7 +1050,7 @@ export const PlacementsPage: React.FC = () => {
           </div>
           {!objectListCollapsed && <div className="placement-object-list-items">
             {items.map(placement => <div className="placement-object-list-row" key={placement.id}>
-              <button type="button" className={`placement-object-list-item${selectedIds.has(placement.id) ? " selected" : ""}`} onClick={() => focusPlacement(placement)}><span>{placement.name}</span><small>{placement.displayChildrenAsRows ? "Контейнер" : placement.isRow ? "Ряд" : "Стол"}</small></button>
+              <button type="button" className={`placement-object-list-item${selectedIds.has(placement.id) ? " selected" : ""}`} onClick={() => focusPlacement(placement)}><span>{placement.name}</span><small>{placement.isLabel ? "Надпись" : placement.displayChildrenAsRows ? "Контейнер" : placement.isRow ? "Ряд" : "Стол"}</small></button>
               {canEditStructure && <button type="button" className="icon-button icon-button-danger placement-object-list-delete" disabled={busy} onClick={() => remove(placement.id)} aria-label={`Удалить ${placement.name}`} title="Удалить объект"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 0 1-2-2V6h14v13a2 2 0 0 1-2 2H7Zm1-3h2V9H8v9Zm6 0h2V9h-2v9ZM4 5V3h5l1-1h4l1 1h5v2H4Z" /></svg></button>}
             </div>)}
           </div>}
@@ -928,22 +1070,34 @@ export const PlacementsPage: React.FC = () => {
           </>}
           {selectionBox && <div className="placement-selection-box" style={selectionBox} />}
         </div>
-        {canEditStructure && selectedIds.size > 1 && <div className="placement-selection-actions"><button type="button" className="secondary-button" onClick={() => void act(async () => { const groupedIds = [...selectedIds]; const list = await apiClient.groupPlacementRows(eventId, groupedIds); setItems(list); const batchId = list.find(item => groupedIds.includes(item.id))?.rowBatchId; setPlacementSelection(batchId ? new Set(list.filter(item => item.rowBatchId === batchId).map(item => item.id)) : new Set(groupedIds)); })}>Сгруппировать</button></div>}
         {canEditStructure && selectedPropertiesTarget && propertyFormKey === selectedPropertiesTarget.key && <aside className="placement-properties-panel" aria-label="Свойства объекта размещения">
           <header className="placement-properties-header"><h2>{selectedPropertiesTarget.isRowBatch ? "Группа рядов" : selectedPropertiesTarget.isGroup ? "Свойства группы" : "Свойства объекта"}</h2></header>
           <div className="placement-properties-form">
-            {(!selectedPropertiesTarget.isGroup || selectedPropertiesTarget.isRowBatch) && <label className="field"><span>Название</span><input maxLength={140} required disabled={!canManage} value={propertyForm.name} onChange={e => changeProperties({ name: e.target.value })} onBlur={commitProperties} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>}
-            <label className="field"><span>Группа *</span><select required disabled={!canManage} value={propertyForm.groupId} onChange={e => changeProperties({ groupId: e.target.value }, true)}><option value="">Выберите группу</option>{flatGroups.map(group => <option key={group.id} value={group.id}>{"— ".repeat(group.level)}{group.name}</option>)}</select></label>
-            <section className={`placement-seat-settings${propertyForm.noQuota ? " placement-seat-settings-disabled" : ""}`} aria-disabled={propertyForm.noQuota}>
+            {(!selectedPropertiesTarget.isGroup || selectedPropertiesTarget.isRowBatch) && <label className="field"><span>Название</span><input maxLength={140} required disabled={!canManage || busy} value={propertyForm.name} onChange={e => changeProperties({ name: e.target.value })} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>}
+            <label className="field"><span>Группа *</span><select required disabled={!canManage || busy} value={propertyForm.groupId} onChange={e => changeProperties({ groupId: e.target.value })}><option value="">Выберите группу</option>{flatGroups.map(group => <option key={group.id} value={group.id}>{"— ".repeat(group.level)}{group.name}</option>)}</select></label>
+            <div className="field placement-color-field"><span>Цвет объекта</span><div className="placement-color-picker-row">
+              <input className="placement-color-input" type="color" value={propertyForm.color || defaultPlacementColor} disabled={!canManage || busy} aria-label="Выбрать цвет объекта" onChange={e => changeProperties({ color: e.target.value })} />
+              <button type="button" className="secondary-button" disabled={!canManage || busy || !propertyForm.color} onClick={() => changeProperties({ color: "" })}>Стандартный</button>
+            </div></div>
+            {propertyForm.placementType !== "label" && <section className={`placement-seat-settings${propertyForm.noQuota ? " placement-seat-settings-disabled" : ""}`} aria-disabled={propertyForm.noQuota}>
               <h3>Настройки мест</h3>
-              {propertyForm.placementType === "row" && <label className="field"><span>Количество рядов</span><input type="number" min={1} max={100} required disabled={!canManage} value={propertyForm.count} onChange={e => changeProperties({ count: Math.max(1, Number(e.target.value) || 1) })} onBlur={commitProperties} /></label>}
-              {!propertyForm.noQuota && <label className="field"><span>Количество мест</span><input type="number" min={propertyForm.placementType === "row" ? 1 : 0} max={50} required disabled={!canManage} value={propertyForm.quota} onChange={e => changeProperties({ quota: e.target.value })} onBlur={commitProperties} /></label>}
-            </section>
+              {!propertyForm.noQuota && <label className="field"><span>Количество мест</span><input type="number" min={propertyForm.placementType === "row" ? 1 : 0} max={50} required disabled={!canManage || busy} value={propertyForm.quota} onChange={e => changeProperties({ quota: e.target.value })} /></label>}
+            </section>}
+            <div className="placement-properties-actions"><button type="button" className="primary-button" disabled={!canManage || busy || !propertyFormDirty || !propertyFormValid} onClick={() => saveProperties(propertyForm, selectedPropertiesTarget)}>{busy ? "Применяем..." : "Применить"}</button></div>
           </div>
         </aside>}
-        <div className="groups-tree-zoom-actions placement-canvas-controls" aria-label="Масштаб размещения">
-          <button className="groups-tree-scroll-button" type="button" disabled={zoom >= 2} title="Увеличить масштаб" aria-label="Увеличить масштаб" onClick={() => setZoom(z => Math.min(2, +(z + .1).toFixed(2)))}>+</button>
-          <button className="groups-tree-scroll-button" type="button" disabled={zoom <= .05} title="Уменьшить масштаб" aria-label="Уменьшить масштаб" onClick={() => setZoom(z => Math.max(.05, +(z - .1).toFixed(2)))}>−</button>
+        <div className="placement-canvas-controls">
+          <div className="groups-tree-zoom-actions" aria-label="Масштаб размещения">
+            <button className="groups-tree-scroll-button placement-focus-button" type="button" disabled={!items.length} title="Показать всю схему" aria-label="Показать всю схему" onClick={focusAllPlacements}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5m0 6v5h-5m-6 0H4v-5M9 9h6v6H9z" /></svg></button>
+            <button className="groups-tree-scroll-button" type="button" disabled={zoom >= 2} title="Увеличить масштаб" aria-label="Увеличить масштаб" onClick={() => setZoom(z => Math.min(2, +(z + .1).toFixed(2)))}>+</button>
+            <button className="groups-tree-scroll-button" type="button" disabled={zoom <= .05} title="Уменьшить масштаб" aria-label="Уменьшить масштаб" onClick={() => setZoom(z => Math.max(.05, +(z - .1).toFixed(2)))}>−</button>
+          </div>
+          {canEditStructure && (canGroupSelection || selectedBatchIds.length > 0) && <div className="placement-selection-actions">
+            {canGroupSelection && <button type="button" className="secondary-button" title="Сгруппировать" aria-label="Сгруппировать выбранные объекты" disabled={busy} onClick={() => void act(async () => { const groupedIds = [...selectedIds]; const list = await apiClient.groupPlacementRows(eventId, groupedIds); setItems(list); const batchId = list.find(item => groupedIds.includes(item.id))?.rowBatchId; setPlacementSelection(batchId ? new Set(list.filter(item => item.rowBatchId === batchId).map(item => item.id)) : new Set(groupedIds)); })}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" stroke-dasharray="3 3" /><rect x="7" y="7" width="6" height="6" rx="1.5" /><rect x="11" y="11" width="6" height="6" rx="1.5" /></svg></button>}
+            {selectedBatchIds.length > 0 && <button type="button" className="secondary-button" title="Разгруппировать" aria-label="Разгруппировать выбранные объекты" disabled={busy} onClick={() => void act(async () => {
+              for (const batchId of selectedBatchIds) setItems(await apiClient.ungroupPlacementRows(eventId, batchId));
+            })}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /><path d="M14 4h6v6m0-6-7 7M4 14v6h6m-6 0 7-7" /></svg></button>}
+          </div>}
         </div>
       </div>
     </section>
@@ -954,16 +1108,21 @@ export const PlacementsPage: React.FC = () => {
         {showGuestsTab && <div className="placement-form-header-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setTab("guests")}>Гости ({editing?.guestCount ?? 0})</button></div>}
         <label className="field"><span>Название</span><input maxLength={140} required value={form.name} disabled={!canManage || busy} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
         <label className="field"><span>Группа *</span><select required disabled={!canManage || busy} value={form.groupId} onChange={e => setForm({ ...form, groupId: e.target.value })}><option value="">Выберите группу</option>{flatGroups.map(g => <option key={g.id} value={g.id}>{"— ".repeat(g.level)}{g.name}</option>)}</select></label>
-        {creationType ? <div className="placement-type-note">Тип объекта: {creationType === "container" ? "контейнер без мест" : creationType === "row" ? "ряд" : "стол"}</div> : <fieldset className="placement-type-flags" disabled={!canManage || busy}><legend>Тип объекта</legend>
+        <div className="field placement-color-field"><span>Цвет объекта</span><div className="placement-color-picker-row">
+          <input className="placement-color-input" type="color" value={form.color || defaultPlacementColor} disabled={!canManage || busy} aria-label="Выбрать цвет объекта" onChange={e => setForm({ ...form, color: e.target.value })} />
+          <button type="button" className="secondary-button" disabled={!canManage || busy || !form.color} onClick={() => setForm({ ...form, color: "" })}>Стандартный</button>
+        </div></div>
+        {creationType ? <div className="placement-type-note">Тип объекта: {creationType === "container" ? "контейнер без мест" : creationType === "row" ? "ряд" : creationType === "label" ? "надпись" : "стол"}</div> : <fieldset className="placement-type-flags" disabled={!canManage || busy}><legend>Тип объекта</legend>
           <label><input type="radio" name="placement-type" disabled={!!editing && isRow} checked={form.placementType === "container"} onChange={() => setForm({ ...form, placementType: "container", displayChildrenAsRows: true, noQuota: true, count: 1, startNumber: 1 })} /> Контейнер (без мест)</label>
           <label><input type="radio" name="placement-type" checked={form.placementType === "row"} onChange={() => setForm({ ...form, placementType: "row", displayChildrenAsRows: false, noQuota: false, quota: Number(form.quota) > 0 ? form.quota : "10" })} /> Тип ряд</label>
           <label><input type="radio" name="placement-type" checked={form.placementType === "table"} onChange={() => setForm({ ...form, placementType: "table", displayChildrenAsRows: false, noQuota: false, quota: Number(form.quota) > 0 ? form.quota : "10" })} /> Тип стол</label>
+          <label><input type="radio" name="placement-type" checked={form.placementType === "label"} onChange={() => setForm({ ...form, placementType: "label", displayChildrenAsRows: false, noQuota: true, count: 1, startNumber: 1 })} /> Надпись</label>
         </fieldset>}
-        <section className={`placement-seat-settings${isHall ? " placement-seat-settings-disabled" : ""}`} aria-disabled={isHall}>
+        {!isLabel && <section className={`placement-seat-settings${isHall ? " placement-seat-settings-disabled" : ""}`} aria-disabled={isHall}>
           <h3>Настройки мест</h3>
-          {isRow && (!editing || editingBatch) && <label className="field"><span>Количество рядов</span><input type="number" min={1} max={100} required disabled={!canManage || busy} value={form.count} onChange={e => setForm({ ...form, count: Number(e.target.value) })} /></label>}
+          {!editing && !isHall && <label className="field"><span>{isRow ? "Количество рядов" : "Количество столов"}</span><input type="number" min={1} max={100} required disabled={!canManage || busy} value={form.count} onChange={e => setForm({ ...form, count: Number(e.target.value) })} /></label>}
           {!isHall && <label className="field"><span>Количество мест</span><input type="number" min={isRow ? 1 : 0} max={50} required disabled={!canManage || busy} value={form.quota} onChange={e => setForm({ ...form, quota: e.target.value })} /></label>}
-        </section>
+        </section>}
         <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => setFormOpen(false)}>Закрыть</button>{canManage && <button className="primary-button" disabled={busy}>{busy ? "Сохраняем..." : editing ? "Сохранить" : "Создать"}</button>}</div>
       </form> : <div className="placement-guests">
         <div className="placement-form-header-actions"><button className="secondary-button" type="button" onClick={() => setTab("main")}>К объекту</button></div>
@@ -981,10 +1140,14 @@ export const PlacementsPage: React.FC = () => {
       </div>}
     </Modal>}
 
-    {seatPlacement && <Modal className="guest-form-modal seat-guest-modal" title={seatGuest ? `Гость: ${seatGuest.name}` : `Новое место в ${seatPlacement.name}`} description={seatGuest ? "Измените данные гостя, занимающего это место." : "Новый гость будет сразу размещён на выбранном месте."} onClose={() => { if (!seatSaving) setSeatPlacement(null); }}>
+    {seatPlacement && <Modal className="guest-form-modal seat-guest-modal" title={seatGuest ? `Гость: ${seatGuest.name}` : `Место ${seatLabelDraft.trim() || seatNumber} в ${seatPlacement.name}`} description={seatGuest ? "Измените подпись места или данные занимающего его гостя." : canSeatGuests ? "Измените подпись места или разместите на нём гостя." : "Измените подпись выбранного места."} onClose={() => { if (!seatSaving && !seatLabelSaving) setSeatPlacement(null); }}>
       {seatError && <div className="alert alert-error">{seatError}</div>}
       {seatLoading ? <div className="empty-state">Загрузка данных гостя...</div> : <>
-        {!seatGuest && <div className="group-edit-tabs" aria-label="Способ добавления гостя">
+        {placementMode === "seating" && <div className="seat-label-editor">
+          <label className="field"><span>Подпись места</span><input maxLength={12} value={seatLabelDraft} disabled={seatSaving || seatLabelSaving} onChange={e => setSeatLabelDraft(e.target.value)} /><small>До 12 символов. Пустое значение вернёт порядковый номер {seatNumber}.</small></label>
+          <button type="button" className="secondary-button" disabled={seatSaving || seatLabelSaving} onClick={() => void saveSeatLabel()}>{seatLabelSaving ? "Сохраняем..." : "Сохранить подпись"}</button>
+        </div>}
+        {canSeatGuests && <>{!seatGuest && <div className="group-edit-tabs" aria-label="Способ добавления гостя">
           <button className={`group-edit-tab${seatTab === "new" ? " active" : ""}`} type="button" aria-pressed={seatTab === "new"} onClick={() => setSeatTab("new")}>Новый гость</button>
           <button className={`group-edit-tab${seatTab === "existing" ? " active" : ""}`} type="button" aria-pressed={seatTab === "existing"} onClick={() => setSeatTab("existing")}>Гости мероприятия</button>
         </div>}
@@ -1006,11 +1169,13 @@ export const PlacementsPage: React.FC = () => {
         </div>
         <div className="modal-actions"><button className="secondary-button" type="button" disabled={seatSaving} onClick={() => setSeatPlacement(null)}>Закрыть</button><button className="primary-button" disabled={seatSaving || !seatForm.categoryId}>{seatSaving ? "Сохраняем..." : seatGuest ? "Сохранить" : "Добавить гостя"}</button></div>
       </form>}</>}
+        {!canSeatGuests && <div className="empty-state">Редактирование гостей недоступно для вашей роли.</div>}
+      </>}
     </Modal>}
 
     {templateMode && <Modal title={templateMode === "save" ? "Сохранить шаблон размещения" : "Загрузить шаблон размещения"} onClose={() => { if (!busy) setTemplateMode(null); }}>
       {error && <div className="alert alert-error">{error}</div>}
-      <form className="form" onSubmit={e => { e.preventDefault(); if (templateMode === "save") void act(async () => { await apiClient.savePlacementTemplate(eventId, templateName); setTemplateMode(null); }); else { setTemplateMode(null); setConfirmation({ text: `Текущая структура будет заменена. Размещение ${items.reduce((n, p) => n + p.guestCount, 0)} гостей будет снято. Загруженные объекты потребуют выбора групп. Продолжить?`, run: async () => { setItems(await apiClient.applyPlacementTemplate(eventId, Number(templateId))); setCollapsed(new Set()); setConfirmation(null); } }); } }}>
+      <form className="form" onSubmit={e => { e.preventDefault(); if (templateMode === "save") void act(async () => { await apiClient.savePlacementTemplate(eventId, templateName); setTemplateMode(null); }); else { setTemplateMode(null); setConfirmation({ text: `Текущая структура будет заменена. Размещение ${items.reduce((n, p) => n + p.guestCount, 0)} гостей будет снято. Новые объекты будут привязаны к корневой группе мероприятия. Продолжить?`, run: async () => { const list = await apiClient.applyPlacementTemplate(eventId, Number(templateId)); viewportInitializedFor.current = null; setSearch(""); setPlacementSelection(new Set()); setItems(list); setCollapsed(new Set()); setConfirmation(null); } }); } }}>
         {templateMode === "save" ? <label className="field"><span>Название шаблона</span><input required maxLength={150} value={templateName} onChange={e => setTemplateName(e.target.value)} /></label> : <label className="field"><span>Шаблон</span><select required value={templateId} onChange={e => setTemplateId(e.target.value)}><option value="">Выберите шаблон</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>{!templates.length && <small>Сохранённых шаблонов пока нет.</small>}</label>}
         <button className="primary-button" disabled={busy || (templateMode === "load" && !templateId)}>{templateMode === "save" ? "Сохранить" : "Загрузить"}</button>
       </form>

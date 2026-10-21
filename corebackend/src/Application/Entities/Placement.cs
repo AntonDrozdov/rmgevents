@@ -13,8 +13,11 @@ public sealed class Placement
     public int? CanvasY { get; set; }
     public int? CanvasWidth { get; set; }
     public int? CanvasHeight { get; set; }
+    public string? Color { get; set; }
+    public string SeatLabelsJson { get; set; } = "{}";
     public Guid? RowBatchId { get; set; }
     public bool IsRow { get; set; }
+    public bool IsLabel { get; set; }
 }
 
 public sealed class PlacementTemplate
