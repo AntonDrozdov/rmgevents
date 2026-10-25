@@ -16,6 +16,11 @@ export interface Placement {
   rowBatchId: string | null;
   isRow: boolean;
   isLabel: boolean;
+  fontSize?: number | null;
+  rotation?: number;
+  seatStartNumber?: number;
+  seatNumberingReversed?: boolean;
+  seatName?: string | null;
 }
 export interface PlacementInput {
   name: string;
@@ -32,6 +37,11 @@ export interface PlacementInput {
   color?: string | null;
   isRow?: boolean;
   isLabel?: boolean;
+  fontSize?: number | null;
+  rotation?: number;
+  seatStartNumber?: number;
+  seatNumberingReversed?: boolean;
+  seatName?: string | null;
   preserveRowBatch?: boolean;
 }
 export interface PlacementGuest {

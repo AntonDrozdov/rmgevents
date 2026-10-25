@@ -25,6 +25,11 @@ public sealed class PlacementConfiguration : IEntityTypeConfiguration<Placement>
         b.Property(x => x.SeatLabelsJson).HasColumnName("seat_labels").HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
         b.Property(x => x.RowBatchId).HasColumnName("row_batch_id");
         b.Property(x => x.IsRow).HasColumnName("is_row").HasDefaultValue(false);
+        b.Property(x => x.SeatStartNumber).HasColumnName("seat_start_number").HasDefaultValue(1);
+        b.Property(x => x.SeatNumberingReversed).HasColumnName("seat_numbering_reversed").HasDefaultValue(false);
+        b.Property(x => x.SeatName).HasColumnName("seat_name").HasMaxLength(60);
+        b.Property(x => x.Rotation).HasColumnName("rotation").HasDefaultValue(0);
+        b.Property(x => x.FontSize).HasColumnName("font_size");
         b.Property(x => x.IsLabel).HasColumnName("is_label").HasDefaultValue(false);
         b.HasOne<Event>().WithMany().HasForeignKey(x => x.EventId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne<Placement>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Cascade);

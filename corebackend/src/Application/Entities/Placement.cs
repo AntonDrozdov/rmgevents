@@ -17,6 +17,11 @@ public sealed class Placement
     public string SeatLabelsJson { get; set; } = "{}";
     public Guid? RowBatchId { get; set; }
     public bool IsRow { get; set; }
+    public int SeatStartNumber { get; set; } = 1;
+    public bool SeatNumberingReversed { get; set; }
+    public string? SeatName { get; set; }
+    public int Rotation { get; set; }
+    public int? FontSize { get; set; }
     public bool IsLabel { get; set; }
 }
 

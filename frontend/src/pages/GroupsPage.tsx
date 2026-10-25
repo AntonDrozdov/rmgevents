@@ -48,6 +48,7 @@ type GroupSearchOption = {
 };
 
 type GroupEditTab = "settings" | "create-user" | "users";
+type GroupCreateTab = "manual" | "departments";
 
 type OrganizationDepartmentPathOption = {
   department: OrganizationDepartmentTreeItemDto;
@@ -188,6 +189,26 @@ const departmentMatchesSearch = (department: OrganizationDepartmentTreeItemDto, 
   const childMatch = department.children.some((child) => departmentMatchesSearch(child, query));
 
   return ownMatch || employeeMatch || childMatch;
+};
+
+const departmentNameMatchesSearch = (
+  department: OrganizationDepartmentTreeItemDto,
+  query: string
+): boolean =>
+  !query ||
+  normalizeSearch(department.name).includes(query) ||
+  department.children.some((child) => departmentNameMatchesSearch(child, query));
+
+const findOrganizationDepartmentById = (
+  departments: OrganizationDepartmentTreeItemDto[],
+  departmentId: number
+): OrganizationDepartmentTreeItemDto | null => {
+  for (const department of departments) {
+    if (department.id === departmentId) return department;
+    const child = findOrganizationDepartmentById(department.children, departmentId);
+    if (child) return child;
+  }
+  return null;
 };
 
 const buildOrganizationDepartmentPathOptions = (
@@ -566,6 +587,81 @@ const OrganizationDepartmentNode: React.FC<{
   );
 };
 
+const GroupImportDepartmentNode: React.FC<{
+  department: OrganizationDepartmentTreeItemDto;
+  query: string;
+  depth: number;
+  selectedIds: Set<number>;
+  disabled: boolean;
+  onAdd: (department: OrganizationDepartmentTreeItemDto) => void;
+}> = ({ department, query, depth, selectedIds, disabled, onAdd }) => {
+  const normalizedQuery = normalizeSearch(query);
+  const visibleChildren = department.children.filter((child) =>
+    departmentNameMatchesSearch(child, normalizedQuery)
+  );
+  const matches = departmentNameMatchesSearch(department, normalizedQuery);
+  const [isOpen, setIsOpen] = useState(depth < 1);
+  const isSelected = selectedIds.has(department.id);
+
+  useEffect(() => {
+    if (normalizedQuery && visibleChildren.length > 0) setIsOpen(true);
+  }, [normalizedQuery, visibleChildren.length]);
+
+  if (!matches) return null;
+
+  return (
+    <li className="group-import-department">
+      <div
+        className={`group-import-department-row${isSelected ? " selected" : ""}`}
+        draggable={!disabled && !isSelected}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "copy";
+          event.dataTransfer.setData("text/plain", String(department.id));
+        }}
+        style={{ paddingLeft: 8 + depth * 16 }}
+      >
+        <button
+          className="group-import-department-toggle"
+          type="button"
+          disabled={department.children.length === 0}
+          aria-label={`${isOpen ? "Свернуть" : "Развернуть"} отдел ${department.name}`}
+          onClick={() => setIsOpen((current) => !current)}
+        >
+          {department.children.length > 0 ? (isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />) : null}
+        </button>
+        <span className="group-import-department-name">
+          <HighlightedText value={department.name} query={query} />
+        </span>
+        <button
+          className="icon-button group-import-add-button"
+          type="button"
+          disabled={disabled || isSelected}
+          title={isSelected ? "Уже добавлен" : "Добавить"}
+          aria-label={`Добавить отдел ${department.name}`}
+          onClick={() => onAdd(department)}
+        >
+          <ChevronRightIcon />
+        </button>
+      </div>
+      {isOpen && visibleChildren.length > 0 && (
+        <ul className="org-tree-list">
+          {visibleChildren.map((child) => (
+            <GroupImportDepartmentNode
+              key={child.id}
+              department={child}
+              query={query}
+              depth={depth + 1}
+              selectedIds={selectedIds}
+              disabled={disabled}
+              onAdd={onAdd}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+};
+
 export const GroupsPage = () => {
   const { eventId = "" } = useParams<{ eventId: string }>();
   const { currentUser, currentEvent, events } = useAuth();
@@ -612,6 +708,10 @@ export const GroupsPage = () => {
   const [isMoveParentSearchOpen, setIsMoveParentSearchOpen] = useState(false);
   const [activeMoveParentOptionIndex, setActiveMoveParentOptionIndex] = useState(0);
   const [form, setForm] = useState({ name: "", quota: 1 });
+  const [activeCreateTab, setActiveCreateTab] = useState<GroupCreateTab>("manual");
+  const [createDepartmentSearch, setCreateDepartmentSearch] = useState("");
+  const [createDepartments, setCreateDepartments] = useState<OrganizationDepartmentTreeItemDto[]>([]);
+  const [isCreateDepartmentDropActive, setIsCreateDepartmentDropActive] = useState(false);
   const [editForm, setEditForm] = useState({ name: "", quota: 0, parentGroupId: null as number | null });
   const [activeEditTab, setActiveEditTab] = useState<GroupEditTab>("settings");
   const [roles, setRoles] = useState<RoleDto[]>([]);
@@ -718,6 +818,10 @@ export const GroupsPage = () => {
     !matchingOrganizationDepartment;
   const isMovingGroup = editingGroup !== null && editForm.parentGroupId !== initialEditParentGroupId;
   const parentAvailableQuota = parentGroup ? getAvailableChildQuota(parentGroup) : 0;
+  const createDepartmentIds = useMemo(
+    () => new Set(createDepartments.map((department) => department.id)),
+    [createDepartments]
+  );
   const editMinimumQuota = editingGroup
     ? isMovingGroup
       ? 0
@@ -771,6 +875,14 @@ export const GroupsPage = () => {
     void loadGroups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, hasCreatePermission]);
+
+  useEffect(() => {
+    setOrganizationTree(null);
+    setOrganizationTreeError(null);
+    setOrganizationTreeSearch("");
+    setCreateDepartmentSearch("");
+    setCreateDepartments([]);
+  }, [eventId]);
 
   useEffect(() => {
     setActiveGroupSearchOptionIndex(filteredGroupSearchOptions.length > 0 ? 0 : -1);
@@ -848,7 +960,10 @@ export const GroupsPage = () => {
   }, [activeEditTab, editingGroup, eventId, referencesLoading, roles.length]);
 
   useEffect(() => {
-    if (!editingGroup || activeEditTab !== "create-user" || organizationTree || organizationTreeLoading) return;
+    const needsOrganizationTree =
+      (Boolean(editingGroup) && activeEditTab === "create-user") ||
+      (Boolean(parentGroup) && activeCreateTab === "departments");
+    if (!needsOrganizationTree || organizationTree || organizationTreeLoading) return;
 
     const loadOrganizationTree = async () => {
       if (!eventId) return;
@@ -866,7 +981,7 @@ export const GroupsPage = () => {
     };
 
     void loadOrganizationTree();
-  }, [activeEditTab, editingGroup, eventId, organizationTree, organizationTreeLoading]);
+  }, [activeCreateTab, activeEditTab, editingGroup, eventId, organizationTree, organizationTreeLoading, parentGroup]);
 
   useEffect(() => {
     if (!editingGroup || activeEditTab !== "users") return;
@@ -1288,6 +1403,10 @@ export const GroupsPage = () => {
     const availableQuota = getAvailableChildQuota(group);
     setParentGroup(group);
     setForm({ name: "", quota: Math.min(1, availableQuota) });
+    setActiveCreateTab("manual");
+    setCreateDepartmentSearch("");
+    setCreateDepartments([]);
+    setIsCreateDepartmentDropActive(false);
     setError(null);
   };
 
@@ -1295,7 +1414,26 @@ export const GroupsPage = () => {
     if (saving) return;
     setParentGroup(null);
     setForm({ name: "", quota: 1 });
+    setActiveCreateTab("manual");
+    setCreateDepartmentSearch("");
+    setCreateDepartments([]);
+    setIsCreateDepartmentDropActive(false);
     setError(null);
+  };
+
+  const addCreateDepartment = (department: OrganizationDepartmentTreeItemDto) => {
+    setCreateDepartments((current) =>
+      current.some((item) => item.id === department.id) ? current : [...current, department]
+    );
+  };
+
+  const dropCreateDepartment = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsCreateDepartmentDropActive(false);
+    const departmentId = Number(event.dataTransfer.getData("text/plain"));
+    if (!departmentId || !organizationTree) return;
+    const department = findOrganizationDepartmentById(organizationTree.departments, departmentId);
+    if (department) addCreateDepartment(department);
   };
 
   const createGroup = async () => {
@@ -1321,6 +1459,44 @@ export const GroupsPage = () => {
     } catch (createError) {
       console.error(createError);
       setError("Не удалось создать группу. Проверьте название и доступную квоту родительской группы.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createDepartmentGroups = async () => {
+    if (!eventId || !parentGroup || createDepartments.length === 0) return;
+
+    setSaving(true);
+    setError(null);
+    let createdCount = 0;
+    try {
+      for (const department of createDepartments) {
+        await apiClient.createGroup(eventId, {
+          name: department.name,
+          quota: 0,
+          parentGroupId: parentGroup.id,
+        });
+        createdCount += 1;
+      }
+      setParentGroup(null);
+      setForm({ name: "", quota: 1 });
+      setActiveCreateTab("manual");
+      setCreateDepartmentSearch("");
+      setCreateDepartments([]);
+      setIsCreateDepartmentDropActive(false);
+      await loadGroups();
+    } catch (createError) {
+      console.error(createError);
+      if (createdCount > 0) {
+        setCreateDepartments((current) => current.slice(createdCount));
+        await loadGroups();
+      }
+      setError(
+        `${getApiErrorMessage(createError, "Не удалось добавить выбранные отделы.")}${
+          createdCount > 0 ? ` Создано групп: ${createdCount}.` : ""
+        }`
+      );
     } finally {
       setSaving(false);
     }
@@ -1525,6 +1701,7 @@ export const GroupsPage = () => {
     setError(null);
     try {
       const result = await apiClient.importOriginalStructure(eventId, file);
+      setOrganizationTree(null);
       setStructureMessage(formatImportResult(result));
       setStructureWarnings(result.warnings);
     } catch (importError) {
@@ -2015,67 +2192,196 @@ export const GroupsPage = () => {
         <Modal
           title="Создание группы"
           onClose={closeCreateModal}
-          className="employee-form-modal"
+          className={`employee-form-modal group-create-modal${activeCreateTab === "departments" ? " group-create-modal-departments" : ""}`}
         >
-          <form
-            className="form employee-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void createGroup();
-            }}
-          >
-            <p className="group-create-context">
-              Родительская группа: <strong>{parentGroup.name}</strong>. Доступно квоты:{" "}
-              <strong>{parentAvailableQuota}</strong>
-            </p>
+          <div className="group-edit-tabs" role="tablist" aria-label="Способ создания дочерних групп">
+            <button
+              className={`group-edit-tab${activeCreateTab === "manual" ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={activeCreateTab === "manual"}
+              onClick={() => { setActiveCreateTab("manual"); setError(null); }}
+            >
+              Вручную
+            </button>
+            <button
+              className={`group-edit-tab${activeCreateTab === "departments" ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={activeCreateTab === "departments"}
+              onClick={() => { setActiveCreateTab("departments"); setError(null); }}
+            >
+              Из оргструктуры
+            </button>
+          </div>
 
-            <label className="field">
-              <span>Название *</span>
-              <input
-                autoFocus
-                disabled={saving}
-                required
-                value={form.name}
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                placeholder="Название группы"
-              />
-            </label>
+          {activeCreateTab === "manual" ? (
+            <form
+              className="form employee-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void createGroup();
+              }}
+            >
+              <p className="group-create-context">
+                Родительская группа: <strong>{parentGroup.name}</strong>. Доступно квоты:{" "}
+                <strong>{parentAvailableQuota}</strong>
+              </p>
 
-            <label className="field">
-              <span>Квота *</span>
-              <input
-                disabled={saving}
-                required
-                min={0}
-                max={parentAvailableQuota}
-                type="number"
-                value={form.quota}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, quota: Number(event.target.value) }))
-                }
-              />
-            </label>
+              <label className="field">
+                <span>Название *</span>
+                <input
+                  autoFocus
+                  disabled={saving}
+                  required
+                  value={form.name}
+                  onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="Название группы"
+                />
+              </label>
 
-            {error && <div className="alert alert-error employee-form-message">{error}</div>}
+              <label className="field">
+                <span>Квота *</span>
+                <input
+                  disabled={saving}
+                  required
+                  min={0}
+                  max={parentAvailableQuota}
+                  type="number"
+                  value={form.quota}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, quota: Number(event.target.value) }))
+                  }
+                />
+              </label>
 
-            <div className="modal-actions">
-              <button className="secondary-button" type="button" disabled={saving} onClick={closeCreateModal}>
-                Закрыть
-              </button>
-              <button
-                className="primary-button"
-                type="submit"
-                disabled={
-                  saving ||
-                  !form.name.trim() ||
-                  form.quota < 0 ||
-                  form.quota > parentAvailableQuota
-                }
-              >
-                {saving ? "Создаём..." : "Создать"}
-              </button>
+              {error && <div className="alert alert-error employee-form-message">{error}</div>}
+
+              <div className="modal-actions">
+                <button className="secondary-button" type="button" disabled={saving} onClick={closeCreateModal}>
+                  Закрыть
+                </button>
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={
+                    saving ||
+                    !form.name.trim() ||
+                    form.quota < 0 ||
+                    form.quota > parentAvailableQuota
+                  }
+                >
+                  {saving ? "Создаём..." : "Создать"}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="group-create-departments-tab">
+              <p className="group-create-context">
+                Выбранные отделы будут созданы как дочерние группы для <strong>{parentGroup.name}</strong>.
+              </p>
+              <div className="group-create-departments-layout">
+                <section className="group-create-departments-panel" aria-label="Доступные отделы">
+                  <header>
+                    <strong>Доступные отделы</strong>
+                    <span>{organizationTree?.departmentsCount ?? 0}</span>
+                  </header>
+                  <input
+                    className="organization-picker-search"
+                    type="search"
+                    value={createDepartmentSearch}
+                    onChange={(event) => setCreateDepartmentSearch(event.target.value)}
+                    placeholder="Поиск отдела"
+                    aria-label="Поиск доступных отделов"
+                    disabled={saving || organizationTreeLoading}
+                  />
+                  <div className="group-create-departments-list">
+                    {organizationTreeLoading ? (
+                      <div className="organization-picker-message">Загружаем структуру...</div>
+                    ) : organizationTreeError ? (
+                      <div className="organization-picker-message error-text">{organizationTreeError}</div>
+                    ) : !organizationTree || organizationTree.departmentsCount === 0 ? (
+                      <div className="organization-picker-message">Оригинальная структура пока не загружена.</div>
+                    ) : (
+                      <ul className="org-tree-list org-tree-root">
+                        {organizationTree.departments
+                          .filter((department) => departmentNameMatchesSearch(department, normalizeSearch(createDepartmentSearch)))
+                          .map((department) => (
+                            <GroupImportDepartmentNode
+                              key={department.id}
+                              department={department}
+                              query={createDepartmentSearch}
+                              depth={0}
+                              selectedIds={createDepartmentIds}
+                              disabled={saving}
+                              onAdd={addCreateDepartment}
+                            />
+                          ))}
+                      </ul>
+                    )}
+                  </div>
+                </section>
+
+                <section
+                  className={`group-create-departments-panel group-create-selected-panel${isCreateDepartmentDropActive ? " drop-active" : ""}`}
+                  aria-label="Добавляемые отделы"
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "copy";
+                    setIsCreateDepartmentDropActive(true);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      setIsCreateDepartmentDropActive(false);
+                    }
+                  }}
+                  onDrop={dropCreateDepartment}
+                >
+                  <header>
+                    <strong>Добавляемые</strong>
+                    <span>{createDepartments.length}</span>
+                  </header>
+                  <div className="group-create-selected-list">
+                    {createDepartments.length === 0 ? (
+                      <div className="group-create-drop-hint">Перетащите отдел сюда или нажмите стрелку «Добавить».</div>
+                    ) : (
+                      createDepartments.map((department) => (
+                        <div className="group-create-selected-item" key={department.id}>
+                          <span>{department.name}</span>
+                          <button
+                            className="icon-button"
+                            type="button"
+                            disabled={saving}
+                            title="Убрать"
+                            aria-label={`Убрать отдел ${department.name}`}
+                            onClick={() => setCreateDepartments((current) => current.filter((item) => item.id !== department.id))}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              {error && <div className="alert alert-error employee-form-message">{error}</div>}
+
+              <div className="modal-actions">
+                <button className="secondary-button" type="button" disabled={saving} onClick={closeCreateModal}>
+                  Закрыть
+                </button>
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={saving || createDepartments.length === 0}
+                  onClick={() => void createDepartmentGroups()}
+                >
+                  {saving ? "Добавляем..." : `Добавить (${createDepartments.length})`}
+                </button>
+              </div>
             </div>
-          </form>
+          )}
         </Modal>
       )}
 

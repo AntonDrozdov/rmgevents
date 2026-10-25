@@ -26,6 +26,7 @@ public sealed class PlacementsController(PlacementService service) : ControllerB
     public sealed record SeatLabelRequest(string? Label);
     [HttpPut("{id:long}/seats/{seatNumber:int}/label")] public Task<IActionResult> UpdateSeatLabel(long eventId, long id, int seatNumber, SeatLabelRequest input) => Run(eventId, true, async () => await service.UpdateSeatLabel(eventId, id, seatNumber, input.Label));
     [HttpPut("batches/{batchId:guid}")] public Task<IActionResult> UpdateBatch(long eventId, Guid batchId, PlacementInput input) => Run(eventId, true, async () => await service.UpdateRowBatch(eventId, batchId, input));
+    [HttpPut("rows/rotation")] public Task<IActionResult> RotateRows(long eventId, PlacementService.RowRotation[] input) => Run(eventId, true, async () => await service.RotateRows(eventId, input));
     public sealed record GroupRowsRequest(long[] Ids);
     public sealed record CopyPlacementsRequest(long[] Ids);
     [HttpPost("copy")] public Task<IActionResult> Copy(long eventId, CopyPlacementsRequest input) => Run(eventId, true, async () => await service.Copy(eventId, input.Ids));

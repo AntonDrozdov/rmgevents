@@ -72,6 +72,7 @@ class ApiClient {
   async getPlacements(eventId: string | number): Promise<Placement[]> { return (await this.client.get('/events/'+eventId+'/placements')).data; }
   async createPlacements(eventId: string | number, input: PlacementInput): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements', input)).data; }
   async updatePlacement(eventId: string | number, id: number, input: PlacementInput): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/'+id, input)).data; }
+  async rotatePlacementRows(eventId: string | number, updates: { id: number; rotation: number }[]): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/rows/rotation', updates)).data; }
   async updatePlacementSeatLabel(eventId: string | number, id: number, seatNumber: number, label: string): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/'+id+'/seats/'+seatNumber+'/label', { label })).data; }
   async updatePlacementBatch(eventId: string | number, batchId: string, input: PlacementInput): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/batches/'+batchId, input)).data; }
   async copyPlacements(eventId: string | number, ids: number[]): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/copy', { ids })).data; }

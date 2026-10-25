@@ -740,6 +740,33 @@ namespace Infrastructure.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("group_id");
 
+                    b.Property<int>("SeatStartNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1)
+                        .HasColumnName("seat_start_number");
+
+                    b.Property<bool>("SeatNumberingReversed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("seat_numbering_reversed");
+
+                    b.Property<string>("SeatName")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("seat_name");
+
+                    b.Property<int>("Rotation")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("rotation");
+
+                    b.Property<int?>("FontSize")
+                        .HasColumnType("integer")
+                        .HasColumnName("font_size");
+
                     b.Property<bool>("IsLabel")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")

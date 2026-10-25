@@ -91,6 +91,17 @@ try
     Check(list.Count(p => p.ParentId == container.Id && p.Quota == 5) == 2, "batch creates rows with seats");
     var row = list.First(p => p.ParentId == container.Id);
     await Reject(() => service.Update(1, row.Id, new(row.Name, container.Id, 1, null, IsRow: true)), "row cannot lose seats");
+    var rotationPeers = list.Where(p => p.ParentId == container.Id && p.IsRow).ToArray();
+    list = await service.RotateRows(1, rotationPeers.Select(p => new PlacementService.RowRotation(p.Id, 315)).ToArray());
+    Check(rotationPeers.All(peer => list.Single(p => p.Id == peer.Id).Rotation == 315), "rotation saves all selected rows");
+    await Reject(() => service.RotateRows(1, [new(row.Id, 90), new(container.Id, 90)]), "rotation rejects non-row objects atomically");
+    await using (var unchanged = Context())
+        Check((await unchanged.Placements.AsNoTracking().SingleAsync(p => p.Id == row.Id)).Rotation == 315, "rejected rotation leaves other rows unchanged");
+    Check(list.Single(p => p.Id == row.Id).Rotation == 315, "row rotation is saved");
+    Check(list.Single(p => p.Id == row.Id).RowBatchId == row.RowBatchId, "rotating a row preserves its group");
+    await using (var reloaded = Context())
+        Check((await reloaded.Placements.AsNoTracking().SingleAsync(p => p.Id == row.Id)).Rotation == 315, "row rotation survives database reload");
+    await Reject(() => service.Update(1, row.Id, new(row.Name, container.Id, 1, 5, IsRow: true, Rotation: 360)), "invalid row rotation is rejected");
     await Reject(() => service.Assign(1, container.Id, a.Id, false), "container cannot accept guests");
     list = await service.Create(1, new("Hall outside", null, 1, null));
     var outside = list.Single(p => p.Name == "Hall outside");
@@ -105,12 +116,35 @@ try
     var labelBatchId = list.Single(p => p.Id == label.Id).RowBatchId;
     Check(labelBatchId.HasValue && list.Single(p => p.Id == outside.Id).RowBatchId == labelBatchId, "label object can be grouped with another object");
     await service.UngroupRows(1, labelBatchId!.Value);
+    var numberedRows = (await service.List(1)).Where(p => p.IsRow && p.ParentId == container.Id).ToArray();
+    Check(numberedRows.All(p => p.SeatStartNumber == 1 && !p.SeatNumberingReversed && p.SeatName == null), "row seat numbering defaults");
+    list = await service.UpdateRowBatch(1, numberedRows[0].RowBatchId!.Value, new("Row", container.Id, 1, 5, 2, IsRow: true, Rotation: 315, SeatStartNumber: 10, SeatNumberingReversed: true, SeatName: "VIP"));
+    Check(list.Where(p => p.IsRow && p.ParentId == container.Id).All(p => p.SeatStartNumber == 10 && p.SeatNumberingReversed && p.SeatName == "VIP"), "numbering settings apply to row group");
+    await using (var numberingReload = Context())
+        Check((await numberingReload.Placements.AsNoTracking().SingleAsync(p => p.Id == row.Id)).SeatStartNumber == 10, "numbering settings survive database reload");
+    await Reject(() => service.Update(1, row.Id, new(row.Name, container.Id, 1, 5, IsRow: true, SeatStartNumber: 0)), "nonpositive seat start rejected");
+    await Reject(() => service.Update(1, row.Id, new(row.Name, container.Id, 1, 5, IsRow: true, SeatStartNumber: int.MaxValue)), "seat number overflow rejected");
+    await Reject(() => service.Update(1, row.Id, new(row.Name, container.Id, 1, 5, IsRow: true, SeatName: new string('x', 61))), "long seat name rejected");
     await service.SaveTemplate(1, "Rows template");
     var rowsTemplate = await db.PlacementTemplates.SingleAsync(t => t.Name == "Rows template");
     list = await service.ApplyTemplate(1, rowsTemplate.Id, true);
     var restoredContainer = list.Single(p => p.DisplayChildrenAsRows);
     Check(restoredContainer.Quota == null && list.Count(p => p.ParentId == restoredContainer.Id && p.Quota == 5) == 2, "template preserves row container and seats");
     Check(list.Count(p => p.IsLabel && p.Name == "Сцена") == 2, "template preserves label objects");
+    Check(list.Any(p => p.IsRow && p.Rotation == 315), "template preserves row rotation");
+    Check(list.Where(p => p.IsRow).All(p => p.SeatStartNumber == 10 && p.SeatNumberingReversed && p.SeatName == "VIP"), "template preserves row numbering settings");
+    list = await service.Create(1, new("Numbered table", null, 1, 5, SeatStartNumber: 20, SeatNumberingReversed: true, SeatName: "Seat"));
+    var numberedTable = list.Single(p => p.Name == "Numbered table");
+    Check(numberedTable.SeatStartNumber == 20 && numberedTable.SeatNumberingReversed && numberedTable.SeatName == "Seat", "table numbering settings saved on create");
+    list = await service.Update(1, numberedTable.Id, new(numberedTable.Name, null, 1, 5, SeatStartNumber: 30, SeatName: "VIP"));
+    Check(list.Single(p => p.Id == numberedTable.Id).SeatStartNumber == 30 && !list.Single(p => p.Id == numberedTable.Id).SeatNumberingReversed, "table numbering settings saved on update");
+    await using (var tableReload = Context())
+        Check((await tableReload.Placements.AsNoTracking().SingleAsync(p => p.Id == numberedTable.Id)).SeatName == "VIP", "table numbering survives database reload");
+    await Reject(() => service.Create(1, new("Invalid table", null, 1, 5, SeatStartNumber: 0)), "table rejects invalid numbering start");
+    await service.SaveTemplate(1, "Numbered tables");
+    var numberedTemplate = await db.PlacementTemplates.SingleAsync(t => t.Name == "Numbered tables");
+    list = await service.ApplyTemplate(1, numberedTemplate.Id, true);
+    Check(list.Single(p => p.Name == "Numbered table").SeatStartNumber == 30, "template preserves table numbering");
     Console.WriteLine($"Completed {checks} integration checks.");
 }
 finally
