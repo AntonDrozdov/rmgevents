@@ -175,10 +175,9 @@ export const EventLogsPage: React.FC = () => {
   };
 
   return <div className="tab-content">
-    <div className="section-heading">
+    <div className="section-heading logs-heading canvas-section-heading">
       <div className="section-title-row">
         <h2>Логи</h2>
-        <span className="badge">Всего: {totalCount}</span>
       </div>
     </div>
 

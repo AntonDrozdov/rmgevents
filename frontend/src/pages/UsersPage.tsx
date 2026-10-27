@@ -623,7 +623,7 @@ export const UsersPage: React.FC = () => {
 
   return (
     <div className="tab-content">
-      <div className="section-heading">
+      <div className="section-heading users-heading canvas-section-heading">
         <div className="section-title-row">
           <h2>Сотрудники</h2>
           <span className="badge">Всего: {users.length}</span>

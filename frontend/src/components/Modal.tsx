@@ -3,12 +3,13 @@ import React, { useEffect } from "react";
 interface ModalProps {
   title: string;
   description?: string;
+  headerActions?: React.ReactNode;
   children: React.ReactNode;
   onClose: () => void;
   className?: string;
 }
 
-export const Modal: React.FC<ModalProps> = ({ title, description, children, onClose, className = "" }) => {
+export const Modal: React.FC<ModalProps> = ({ title, description, headerActions, children, onClose, className = "" }) => {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -39,9 +40,12 @@ export const Modal: React.FC<ModalProps> = ({ title, description, children, onCl
             <h2 id="modal-title">{title}</h2>
             {description && <p className="muted">{description}</p>}
           </div>
-          <button className="modal-close-button" type="button" onClick={onClose} aria-label="Закрыть">
-            ×
-          </button>
+          <div className="modal-header-actions">
+            {headerActions}
+            <button className="modal-close-button" type="button" onClick={onClose} aria-label="Закрыть">
+              ×
+            </button>
+          </div>
         </header>
 
         {children}

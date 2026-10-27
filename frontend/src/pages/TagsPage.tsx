@@ -131,7 +131,7 @@ export const TagsPage: React.FC = () => {
   };
 
   return <div className="tab-content">
-    <div className="section-heading">
+    <div className="section-heading tags-heading canvas-section-heading">
       <div className="section-title-row">
         <h2>Метки</h2>
         <span className="badge">Всего: {tags.length}</span>

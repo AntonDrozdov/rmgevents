@@ -225,9 +225,15 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         if (input.IsRow && input.Count > 1 && $"{input.Name.Trim()} {input.StartNumber + input.Count - 1}".Length > 150)
             throw new InvalidOperationException("Название с номером не должно превышать 150 символов.");
 
+        var nextSeatStartNumber = !input.IsLabel && !input.DisplayChildrenAsRows ? input.SeatStartNumber : 1;
+        var nextSeatNumberingReversed = !input.IsLabel && !input.DisplayChildrenAsRows && input.SeatNumberingReversed;
+        var nextSeatName = !input.IsLabel && !input.DisplayChildrenAsRows && !string.IsNullOrWhiteSpace(input.SeatName) ? input.SeatName.Trim() : null;
+        var seatNamingChanged = p.SeatStartNumber != nextSeatStartNumber
+            || p.SeatNumberingReversed != nextSeatNumberingReversed
+            || !string.Equals(p.SeatName, nextSeatName, StringComparison.Ordinal);
         p.ParentId = input.ParentId; p.GroupId = input.GroupId; p.Quota = input.Quota;
-        p.DisplayChildrenAsRows = input.DisplayChildrenAsRows; p.CanvasX = input.CanvasX; p.CanvasY = input.CanvasY; p.CanvasWidth = input.CanvasWidth; p.CanvasHeight = input.CanvasHeight; p.Color = NormalizeColor(input.Color); p.SeatStartNumber = !input.IsLabel && !input.DisplayChildrenAsRows ? input.SeatStartNumber : 1; p.SeatNumberingReversed = !input.IsLabel && !input.DisplayChildrenAsRows && input.SeatNumberingReversed; p.SeatName = !input.IsLabel && !input.DisplayChildrenAsRows && !string.IsNullOrWhiteSpace(input.SeatName) ? input.SeatName.Trim() : null; p.IsRow = input.IsRow; p.Rotation = input.IsRow ? input.Rotation : 0; p.IsLabel = input.IsLabel; p.FontSize = input.IsLabel ? input.FontSize ?? 18 : null;
-        p.SeatLabelsJson = SerializeSeatLabels(ParseSeatLabels(p.SeatLabelsJson), input.Quota);
+        p.DisplayChildrenAsRows = input.DisplayChildrenAsRows; p.CanvasX = input.CanvasX; p.CanvasY = input.CanvasY; p.CanvasWidth = input.CanvasWidth; p.CanvasHeight = input.CanvasHeight; p.Color = NormalizeColor(input.Color); p.SeatStartNumber = nextSeatStartNumber; p.SeatNumberingReversed = nextSeatNumberingReversed; p.SeatName = nextSeatName; p.IsRow = input.IsRow; p.Rotation = input.IsRow ? input.Rotation : 0; p.IsLabel = input.IsLabel; p.FontSize = input.IsLabel ? input.FontSize ?? 18 : null;
+        p.SeatLabelsJson = seatNamingChanged ? SerializeSeatLabels(null) : SerializeSeatLabels(ParseSeatLabels(p.SeatLabelsJson), input.Quota);
         var preserveRowBatch = input.PreserveRowBatch && p.RowBatchId.HasValue;
         if (!preserveRowBatch && input.IsRow && input.Count > 1)
         {
@@ -271,9 +277,12 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         for (var i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
+            var seatNamingChanged = row.SeatStartNumber != input.SeatStartNumber
+                || row.SeatNumberingReversed != input.SeatNumberingReversed
+                || !string.Equals(row.SeatName, string.IsNullOrWhiteSpace(input.SeatName) ? null : input.SeatName.Trim(), StringComparison.Ordinal);
             row.Name = input.Name.Trim() + (input.Count > 1 ? " " + (input.StartNumber + i) : "");
             row.ParentId = input.ParentId; row.GroupId = input.GroupId; row.Quota = input.Quota; row.DisplayChildrenAsRows = false; row.Color = NormalizeColor(input.Color); row.SeatStartNumber = input.SeatStartNumber; row.SeatNumberingReversed = input.SeatNumberingReversed; row.SeatName = string.IsNullOrWhiteSpace(input.SeatName) ? null : input.SeatName.Trim(); row.IsRow = true; row.Rotation = input.Rotation;
-            row.SeatLabelsJson = SerializeSeatLabels(ParseSeatLabels(row.SeatLabelsJson), input.Quota);
+            row.SeatLabelsJson = seatNamingChanged ? SerializeSeatLabels(null) : SerializeSeatLabels(ParseSeatLabels(row.SeatLabelsJson), input.Quota);
             row.RowBatchId = input.Count > 1 ? batchId : null;
         }
         for (var i = rows.Count; i < input.Count; i++) db.Placements.Add(new Placement
@@ -381,9 +390,9 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
             throw new InvalidOperationException("Указанное место не существует.");
 
         var normalized = label?.Trim() ?? "";
-        if (normalized.Length > 12) throw new InvalidOperationException("Подпись места не должна превышать 12 символов.");
+        if (normalized.Length > 60) throw new InvalidOperationException("Название места не должно превышать 60 символов.");
         var labels = ParseSeatLabels(placement.SeatLabelsJson);
-        if (normalized.Length == 0 || normalized == seatNumber.ToString()) labels.Remove(seatNumber);
+        if (normalized.Length == 0) labels.Remove(seatNumber);
         else labels[seatNumber] = normalized;
         placement.SeatLabelsJson = SerializeSeatLabels(labels, placement.Quota);
         await db.SaveChangesAsync();

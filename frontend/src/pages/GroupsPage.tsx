@@ -72,6 +72,12 @@ const DeleteIcon = () => (
   </svg>
 );
 
+const AddIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z" />
+  </svg>
+);
+
 const CollapseAllIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
     <path d="M7 5h10v2H7V5Zm2.3 7L12 9.3l2.7 2.7 1.4-1.4L12 6.5l-4.1 4.1L9.3 12ZM7 17h10v2H7v-2Zm7.7-5L12 14.7 9.3 12l-1.4 1.4 4.1 4.1 4.1-4.1-1.4-1.4Z" />
@@ -81,18 +87,6 @@ const CollapseAllIcon = () => (
 const ExpandAllIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
     <path d="M7 5h10v2H7V5Zm2.3 4.5L12 12.2l2.7-2.7 1.4 1.4L12 15l-4.1-4.1 1.4-1.4ZM7 17h10v2H7v-2Z" />
-  </svg>
-);
-
-const ArrowUpIcon = () => (
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M12 5 5 12l1.4 1.4 4.6-4.6V20h2V8.8l4.6 4.6L19 12l-7-7Z" />
-  </svg>
-);
-
-const ArrowDownIcon = () => (
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M11 4v11.2l-4.6-4.6L5 12l7 7 7-7-1.4-1.4-4.6 4.6V4h-2Z" />
   </svg>
 );
 
@@ -460,13 +454,13 @@ const GroupNode = ({
                 title="Создать дочернюю группу"
                 onClick={() => onCreateChild(group)}
               >
-                +
+                <AddIcon />
               </button>
             </>
           )}
           {hasChildren && (
             <button
-              className="group-tree-collapse-toggle"
+              className="icon-button group-tree-collapse-toggle"
               type="button"
               aria-expanded={!isCollapsed}
               aria-label={`${isCollapsed ? "Развернуть" : "Свернуть"} группу ${group.name}`}
@@ -904,35 +898,6 @@ export const GroupsPage = () => {
   }, [pressedGroupId]);
 
   useEffect(() => {
-    if (!isGroupTreePanning) return;
-
-    const handleMouseMove = (event: globalThis.MouseEvent) => {
-      const panState = groupsTreePanRef.current;
-      const container = groupsTreeScrollRef.current;
-      if (!panState || !container) return;
-
-      event.preventDefault();
-      container.scrollLeft = panState.scrollLeft - (event.clientX - panState.startX);
-      container.scrollTop = panState.scrollTop - (event.clientY - panState.startY);
-    };
-
-    const stopPanning = () => {
-      groupsTreePanRef.current = null;
-      setIsGroupTreePanning(false);
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", stopPanning);
-    window.addEventListener("blur", stopPanning);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", stopPanning);
-      window.removeEventListener("blur", stopPanning);
-    };
-  }, [isGroupTreePanning]);
-
-  useEffect(() => {
     if (!editingGroup || activeEditTab !== "create-user" || roles.length > 0 || referencesLoading) return;
 
     const loadReferences = async () => {
@@ -1234,14 +1199,8 @@ export const GroupsPage = () => {
     });
   };
 
-  const handleGroupTreePanStart = (event: MouseEvent<HTMLDivElement>) => {
-    if (
-      event.button !== 0 ||
-      isInteractiveElement(event.target) ||
-      (event.target instanceof HTMLElement && event.target.closest(".group-tree-node"))
-    ) {
-      return;
-    }
+  const handleGroupTreePanStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 2) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -1253,16 +1212,22 @@ export const GroupsPage = () => {
       scrollTop: event.currentTarget.scrollTop,
     };
     setIsGroupTreePanning(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const scrollGroupsTree = (direction: "top" | "bottom") => {
+  const handleGroupTreePanMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const panState = groupsTreePanRef.current;
     const container = groupsTreeScrollRef.current;
-    if (!container) return;
+    if (!panState || !container) return;
 
-    container.scrollTo({
-      top: direction === "top" ? 0 : container.scrollHeight,
-      behavior: "smooth",
-    });
+    event.preventDefault();
+    container.scrollLeft = panState.scrollLeft - (event.clientX - panState.startX);
+    container.scrollTop = panState.scrollTop - (event.clientY - panState.startY);
+  };
+
+  const stopGroupTreePanning = () => {
+    groupsTreePanRef.current = null;
+    setIsGroupTreePanning(false);
   };
 
   const navigateToGroup = (foundGroup: GroupTreeDto) => {
@@ -1754,14 +1719,23 @@ export const GroupsPage = () => {
 
   return (
     <div className="tab-content">
-      <div className="section-heading groups-heading">
-        <div>
-          <div className="section-title-row">
-            <h2>Группы</h2>
-            <span className="badge">Всего: {groupsCount}</span>
-          </div>
-          <p>Дочерние группы расположены справа от родительских. Нажмите «+» на группе, чтобы добавить в неё новую.</p>
+      <div className="section-heading groups-heading canvas-section-heading">
+        <div className="section-title-row">
+          <h2>Группы</h2>
+          <span className="badge">Всего: {groupsCount}</span>
         </div>
+        {canManageOriginalStructure && (
+          <div className="section-actions placement-page-actions">
+            <button
+              className="placement-reset-button"
+              type="button"
+              onClick={() => setIsResetGroupsModalOpen(true)}
+              disabled={structureLoading || loading}
+            >
+              Сбросить
+            </button>
+          </div>
+        )}
       </div>
 
       {!hasCreatePermission && (
@@ -1861,22 +1835,26 @@ export const GroupsPage = () => {
               </span>
             )}
             {canManageOriginalStructure && (
-              <div className="group-template-actions">
+              <div className="group-template-actions placement-template-actions">
                 <button
-                  className="secondary-button original-structure-button"
+                  className="icon-button placement-template-icon-button"
                   type="button"
+                  title="Сохранить структуру групп как шаблон"
+                  aria-label="Сохранить структуру групп как шаблон"
                   onClick={openSaveTemplateModal}
                   disabled={structureLoading || loading || groups.length === 0}
                 >
-                  Сохранить в шаблон
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5V3Z" /><path d="M8 3v6h8V4M8 21v-7h8v7" /></svg>
                 </button>
                 <button
-                  className="secondary-button original-structure-button"
+                  className="icon-button placement-template-icon-button"
                   type="button"
+                  title="Загрузить структуру групп из шаблона"
+                  aria-label="Загрузить структуру групп из шаблона"
                   onClick={() => void openApplyTemplateModal()}
                   disabled={structureLoading}
                 >
-                  Подгрузить из шаблона
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v12H3V6Z" /><path d="M12 11v6m0 0-3-3m3 3 3-3" /></svg>
                 </button>
               </div>
             )}
@@ -1925,10 +1903,11 @@ export const GroupsPage = () => {
                 className={`groups-tree-scroll${isGroupTreePanning ? " groups-tree-scroll-panning" : ""}`}
                 ref={groupsTreeScrollRef}
                 onWheel={handleGroupTreeWheel}
-                onMouseDown={handleGroupTreePanStart}
-                onAuxClick={(event) => {
-                  if (event.button === 1) event.preventDefault();
-                }}
+                onContextMenu={(event) => event.preventDefault()}
+                onPointerDown={handleGroupTreePanStart}
+                onPointerMove={handleGroupTreePanMove}
+                onPointerUp={stopGroupTreePanning}
+                onPointerCancel={stopGroupTreePanning}
               >
                 <ul
                   className="groups-tree"
@@ -1982,26 +1961,6 @@ export const GroupsPage = () => {
                   −
                 </button>
               </div>
-              <div className="groups-tree-scroll-actions" aria-label="Быстрая прокрутка дерева групп">
-                <button
-                  className="groups-tree-scroll-button"
-                  type="button"
-                  title="Наверх"
-                  aria-label="Прокрутить группы вверх"
-                  onClick={() => scrollGroupsTree("top")}
-                >
-                  <ArrowUpIcon />
-                </button>
-                <button
-                  className="groups-tree-scroll-button"
-                  type="button"
-                  title="Вниз"
-                  aria-label="Прокрутить группы вниз"
-                  onClick={() => scrollGroupsTree("bottom")}
-                >
-                  <ArrowDownIcon />
-                </button>
-              </div>
             </div>
           )}
           {error && !parentGroup && !editingGroup && !deleteGroup && !isSaveTemplateModalOpen && !isApplyTemplateModalOpen && (
@@ -2037,14 +1996,6 @@ export const GroupsPage = () => {
                   disabled={structureLoading}
                 >
                   Применить оригинальную структуру
-                </button>
-                <button
-                  className="secondary-button original-structure-button original-structure-reset-button"
-                  type="button"
-                  onClick={() => setIsResetGroupsModalOpen(true)}
-                  disabled={structureLoading}
-                >
-                  Сбросить группы
                 </button>
               </div>
               {structureMessage && <div className="original-structure-message">{structureMessage}</div>}
@@ -2397,7 +2348,7 @@ export const GroupsPage = () => {
               type="button"
               onClick={() => setActiveEditTab("settings")}
             >
-              Группа
+              Изменить группу
             </button>
             <button
               className={`group-edit-tab${activeEditTab === "create-user" ? " active" : ""}`}
@@ -2431,7 +2382,7 @@ export const GroupsPage = () => {
                 )}
               </p>
 
-              <label className="field">
+              <label className="field group-edit-name-field">
                 <span>Название *</span>
                 <input
                   disabled={saving}
@@ -2538,7 +2489,7 @@ export const GroupsPage = () => {
                 </div>
               )}
 
-              <label className="field">
+              <label className="field group-edit-quota-field">
                 <span>Квота *</span>
                 <input
                   disabled={saving || isMovingGroup}

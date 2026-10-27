@@ -132,7 +132,7 @@ export const CategoriesPage: React.FC = () => {
   };
 
   return <div className="tab-content">
-    <div className="section-heading">
+    <div className="section-heading categories-heading canvas-section-heading">
       <div className="section-title-row">
         <h2>Категории</h2>
         <span className="badge">Всего: {categories.length}</span>

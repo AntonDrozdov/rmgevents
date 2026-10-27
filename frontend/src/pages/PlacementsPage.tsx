@@ -57,8 +57,15 @@ const blank = (parentId = "", placementType: PlacementFormType = "table") => ({ 
 type PlacementForm = ReturnType<typeof blank>;
 const SeatNumberingSettings: React.FC<{ form: PlacementForm; disabled: boolean; onChange: (patch: Partial<PlacementForm>) => void }> = ({ form, disabled, onChange }) => <>
   <label className="field"><span>Начинать нумеровать с</span><input type="number" min={1} max={2147483647 - Math.max(1, Number(form.quota) || 1) + 1} step={1} required disabled={disabled} value={form.seatStartNumber} onChange={e => onChange({ seatStartNumber: e.target.value })} /></label>
-  <label className="field"><span>Порядок нумерации</span><select disabled={disabled} value={form.seatNumberingReversed ? "rtl" : "ltr"} onChange={e => onChange({ seatNumberingReversed: e.target.value === "rtl" })}><option value="ltr">{form.placementType === "table" ? "По часовой стрелке" : "Слева направо"}</option><option value="rtl">{form.placementType === "table" ? "Против часовой стрелки" : "Справа налево"}</option></select></label>
-  <div className="field"><span>Название места</span><label><input type="checkbox" checked={form.seatWithoutName} disabled={disabled} onChange={e => onChange({ seatWithoutName: e.target.checked })} /> Без названия</label><input aria-label="Название места" maxLength={60} required={!form.seatWithoutName} disabled={disabled || form.seatWithoutName} value={form.seatName} onChange={e => onChange({ seatName: e.target.value })} /></div>
+  <label className="field placement-seat-numbering-order"><span>Порядок нумерации</span><select disabled={disabled} value={form.seatNumberingReversed ? "rtl" : "ltr"} onChange={e => onChange({ seatNumberingReversed: e.target.value === "rtl" })}><option value="ltr">{form.placementType === "table" ? "По часовой стрелке" : "Слева направо"}</option><option value="rtl">{form.placementType === "table" ? "Против часовой стрелки" : "Справа налево"}</option></select></label>
+  <div className="field placement-seat-name-field">
+    <span>Название места</span>
+    <label className="placement-seat-name-toggle">
+      <input type="checkbox" checked={form.seatWithoutName} disabled={disabled} onChange={e => onChange({ seatWithoutName: e.target.checked })} />
+      <span>Без названия</span>
+    </label>
+    <input aria-label="Название места" maxLength={60} required={!form.seatWithoutName} disabled={disabled || form.seatWithoutName} value={form.seatName} onChange={e => onChange({ seatName: e.target.value })} />
+  </div>
 </>;
 const validSeatNumberingSettings = (form: PlacementForm) => (form.placementType !== "row" && form.placementType !== "table") || (Number.isInteger(Number(form.seatStartNumber)) && Number(form.seatStartNumber) >= 1 && Number(form.seatStartNumber) + Number(form.quota) - 1 <= 2147483647 && (form.seatWithoutName || !!form.seatName.trim()));
 const tableRadiusFor = (quota: number, seatWidth = 28) => Math.max(72, Math.ceil((quota * (seatWidth + 5)) / (Math.PI * 2)) + 18);
@@ -70,11 +77,7 @@ const rowLabelWidthFor = (name: string) => {
   rowLabelMeasureContext.font = '700 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   return Math.ceil(rowLabelMeasureContext.measureText(name).width);
 };
-const rowSeatWidth = (placement: Placement) => {
-  rowLabelWidthFor(placement.name);
-  if (rowLabelMeasureContext) rowLabelMeasureContext.font = '800 10px Inter, ui-sans-serif, system-ui, sans-serif';
-  return Math.max(28, ...Array.from({ length: Math.min(placement.quota ?? 0, 50) }, (_, i) => Math.ceil(rowLabelMeasureContext?.measureText(seatLabel(placement, i + 1)).width ?? seatLabel(placement, i + 1).length * 7) + 8));
-};
+const rowSeatWidth = (_placement: Placement) => 28;
 const message = (err: unknown) => axios.isAxiosError(err) && typeof err.response?.data === "string" ? err.response.data : "Не удалось выполнить действие. Попробуйте ещё раз.";
 const normalizeSearch = (value: string) => value.trim().toLocaleLowerCase("ru-RU");
 
@@ -140,7 +143,7 @@ export const PlacementsPage: React.FC = () => {
   const [confirmation, setConfirmation] = useState<{ text: string; run: () => Promise<void> } | null>(null);
   const [seatPlacement, setSeatPlacement] = useState<Placement | null>(null);
   const [seatNumber, setSeatNumber] = useState<number | null>(null);
-  const [seatTab, setSeatTab] = useState<"new" | "existing">("existing");
+  const [seatTab, setSeatTab] = useState<"new" | "existing">("new");
   const [seatGuest, setSeatGuest] = useState<GuestDto | null>(null);
   const [seatExistingGuests, setSeatExistingGuests] = useState<GuestDto[]>([]);
   const [seatExistingLoading, setSeatExistingLoading] = useState(false);
@@ -154,6 +157,9 @@ export const PlacementsPage: React.FC = () => {
   const [seatSaving, setSeatSaving] = useState(false);
   const [seatLabelSaving, setSeatLabelSaving] = useState(false);
   const [seatLabelDraft, setSeatLabelDraft] = useState("");
+  const [seatWithoutName, setSeatWithoutName] = useState(true);
+  const [seatNameEditorOpen, setSeatNameEditorOpen] = useState(false);
+  const [seatLabelError, setSeatLabelError] = useState("");
   const [seatError, setSeatError] = useState("");
   const [seatForm, setSeatForm] = useState({ name: "", email: "", phone: "", groupId: "", categoryId: "", tagIds: [] as number[] });
   const [organizationTree, setOrganizationTree] = useState<OrganizationStructureTreeDto | null>(null);
@@ -245,7 +251,8 @@ export const PlacementsPage: React.FC = () => {
     seatViewport.current = currentCanvas
       ? { left: currentCanvas.scrollLeft, top: currentCanvas.scrollTop, zoom }
       : null;
-    setSeatPlacement(placement); setSeatNumber(selectedSeatNumber); setSeatLabelDraft(seatLabel(placement, selectedSeatNumber)); setSeatTab("existing"); setSeatGuest(null); setSeatExistingGuests([]); setSeatExistingSearch(""); setSeatExistingPage(1); setSeatExistingTotal(0); setSeatExistingError(""); setSeatLoading(true); setSeatSaving(false); setSeatLabelSaving(false); setSeatError(""); setOrganizationSearch(""); setSelectedOrganizationEmployeeId(null); setOrganizationError("");
+    const hasCustomSeatName = Object.prototype.hasOwnProperty.call(placement.seatLabels ?? {}, selectedSeatNumber);
+    setSeatPlacement(placement); setSeatNumber(selectedSeatNumber); setSeatWithoutName(!hasCustomSeatName); setSeatLabelDraft(hasCustomSeatName ? placement.seatLabels[selectedSeatNumber] : ""); setSeatNameEditorOpen(false); setSeatLabelError(""); setSeatTab("new"); setSeatGuest(null); setSeatExistingGuests([]); setSeatExistingSearch(""); setSeatExistingPage(1); setSeatExistingTotal(0); setSeatExistingError(""); setSeatLoading(true); setSeatSaving(false); setSeatLabelSaving(false); setSeatError(""); setOrganizationSearch(""); setSelectedOrganizationEmployeeId(null); setOrganizationError("");
     if (!canSeatGuests) { setSeatLoading(false); return; }
     if (!placement.groupId) { setSeatError("Для рассадки гостей укажите группу объекта."); setSeatLoading(false); return; }
     try {
@@ -261,6 +268,7 @@ export const PlacementsPage: React.FC = () => {
   const closeSeatForm = () => {
     const viewport = seatViewport.current;
     seatViewport.current = null;
+    setSeatNameEditorOpen(false);
     setSeatPlacement(null);
     setSeatNumber(null);
     if (!viewport) return;
@@ -305,23 +313,35 @@ export const PlacementsPage: React.FC = () => {
   };
   const persistSeatLabel = async () => {
     if (!seatPlacement || !seatNumber) return;
-    const currentLabel = seatLabel(seatPlacement, seatNumber);
-    const nextLabel = seatLabelDraft.trim() || defaultSeatLabel(seatPlacement, seatNumber);
-    if (nextLabel === currentLabel) return;
-    const list = await apiClient.updatePlacementSeatLabel(eventId, seatPlacement.id, seatNumber, nextLabel === defaultSeatLabel(seatPlacement, seatNumber) ? "" : seatLabelDraft);
+    const hasCustomSeatName = Object.prototype.hasOwnProperty.call(seatPlacement.seatLabels ?? {}, seatNumber);
+    const nextName = seatLabelDraft.trim();
+    if (seatWithoutName && !hasCustomSeatName) return;
+    if (!seatWithoutName && hasCustomSeatName && nextName === seatPlacement.seatLabels[seatNumber]) return;
+    if (!seatWithoutName && !nextName) return;
+    const list = await apiClient.updatePlacementSeatLabel(eventId, seatPlacement.id, seatNumber, seatWithoutName || nextName === defaultSeatLabel(seatPlacement, seatNumber) ? "" : nextName);
     const updatedPlacement = list.find(item => item.id === seatPlacement.id);
     setItems(list);
     if (updatedPlacement) {
+      const hasUpdatedCustomSeatName = Object.prototype.hasOwnProperty.call(updatedPlacement.seatLabels ?? {}, seatNumber);
       setSeatPlacement(updatedPlacement);
-      setSeatLabelDraft(seatLabel(updatedPlacement, seatNumber));
+      setSeatWithoutName(!hasUpdatedCustomSeatName);
+      setSeatLabelDraft(hasUpdatedCustomSeatName ? updatedPlacement.seatLabels[seatNumber] : "");
     }
   };
   const saveSeatLabel = async () => {
     if (!seatPlacement || !seatNumber || seatLabelSaving || seatSaving) return;
-    setSeatLabelSaving(true); setSeatError("");
-    try { await persistSeatLabel(); }
-    catch (err) { setSeatError(message(err)); }
+    setSeatLabelSaving(true); setSeatLabelError("");
+    try { await persistSeatLabel(); setSeatNameEditorOpen(false); }
+    catch (err) { setSeatLabelError(message(err)); }
     finally { setSeatLabelSaving(false); }
+  };
+  const openSeatNameEditor = () => {
+    if (!seatPlacement || !seatNumber || seatLabelSaving || seatSaving) return;
+    const hasCustomSeatName = Object.prototype.hasOwnProperty.call(seatPlacement.seatLabels ?? {}, seatNumber);
+    setSeatWithoutName(!hasCustomSeatName);
+    setSeatLabelDraft(hasCustomSeatName ? seatPlacement.seatLabels[seatNumber] : "");
+    setSeatLabelError("");
+    setSeatNameEditorOpen(true);
   };
   const assignExistingGuestToSeat = async (guest: GuestDto) => {
     if (!seatPlacement || !seatNumber || seatSaving) return;
@@ -590,6 +610,23 @@ export const PlacementsPage: React.FC = () => {
       });
       onFocused?.();
     });
+  };
+  const zoomPlacementAt = (nextZoom: number, anchorX: number, anchorY: number) => {
+    const el = canvas.current;
+    if (!el || nextZoom === zoom) return;
+    const worldX = (el.scrollLeft + anchorX) / zoom;
+    const worldY = (el.scrollTop + anchorY) / zoom;
+    setZoom(nextZoom);
+    window.requestAnimationFrame(() => {
+      el.scrollLeft = Math.max(0, worldX * nextZoom - anchorX);
+      el.scrollTop = Math.max(0, worldY * nextZoom - anchorY);
+    });
+  };
+  const zoomPlacementFromCenter = (direction: 1 | -1) => {
+    const el = canvas.current;
+    if (!el) return;
+    const nextZoom = Math.min(2, Math.max(.05, +(zoom + direction * .1).toFixed(2)));
+    zoomPlacementAt(nextZoom, el.clientWidth / 2, el.clientHeight / 2);
   };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -908,7 +945,7 @@ export const PlacementsPage: React.FC = () => {
               const angle = (Math.PI * 2 * i) / Math.min(p.quota!, 50) - Math.PI / 2;
               const seatStyle = isRow ? undefined : { left: `calc(50% + ${Math.cos(angle) * tableRadius}px - ${rowSeatWidth(p) / 2}px)`, top: `calc(50% + ${Math.sin(angle) * tableRadius}px - 14px)` };
               return <span key={i} className="placement-seat-wrap" style={seatStyle} onMouseEnter={() => { if (canSeatGuests && occupied) void showSeatPopover(p, selectedSeatNumber); }} onMouseLeave={() => hideSeatPopover(p.id, selectedSeatNumber)}>
-                <button type="button" className={`placement-seat${occupied ? " placement-seat-occupied" : ""}`} disabled={!canSeatGuests && !canEditSeatLabels} aria-label={canSeatGuests ? occupied ? `Редактировать гостя на месте ${selectedSeatLabel}` : `Добавить гостя на место ${selectedSeatLabel}` : `Изменить подпись места ${selectedSeatLabel}`} title={canSeatGuests ? `${selectedSeatLabel}: ${occupied ? "редактировать гостя" : "добавить гостя"}` : canEditSeatLabels ? `${selectedSeatLabel}: изменить подпись` : selectedSeatLabel} onClick={e => { e.stopPropagation(); void openSeatForm(p, selectedSeatNumber); }}>{selectedSeatLabel}</button>
+                <button type="button" className={`placement-seat${occupied ? " placement-seat-occupied" : ""}`} disabled={!canSeatGuests && !canEditSeatLabels} aria-label={canSeatGuests ? occupied ? `Редактировать гостя на месте ${selectedSeatLabel}` : `Добавить гостя на место ${selectedSeatLabel}` : `Изменить название места ${selectedSeatLabel}`} title={canSeatGuests ? `${selectedSeatLabel}: ${occupied ? "редактировать гостя" : "добавить гостя"}` : canEditSeatLabels ? `${selectedSeatLabel}: изменить название` : selectedSeatLabel} onClick={e => { e.stopPropagation(); void openSeatForm(p, selectedSeatNumber); }}>{selectedSeatLabel}</button>
                 {popoverVisible && <span className="placement-seat-popover" role="status"><strong>{seatPopover.guest.name}</strong><small>{seatPopover.guest.categoryName ?? "Без категории"}</small><button type="button" aria-label="Закрыть информацию о госте" title="Закрыть" onClick={e => { e.stopPropagation(); dismissedSeatPopover.current = seatPopoverKey(p.id, selectedSeatNumber); setSeatPopover(null); }}>×</button></span>}
               </span>;
             })}
@@ -1150,7 +1187,10 @@ export const PlacementsPage: React.FC = () => {
   };
 
   return <div className="tab-content">
-    <div className="section-heading">
+    <div className="section-heading canvas-section-heading">
+      <div className="section-title-row">
+        <h2>{placementMode === "schema" ? "Редактирование схемы размещения" : "Рассадка гостей"}</h2>
+      </div>
       <div className="section-actions placement-page-actions">
         {placementMode === "seating" && canManage && <button className="danger-button" disabled={busy} onClick={() => { seatViewport.current = null; setPlacementMode("schema"); setPlacementSelection(new Set()); setSeatPlacement(null); }}>Редактировать схему размещения</button>}
         {canEditStructure && <><button className="placement-reset-button" disabled={busy || !items.length} onClick={() => remove(null)}>Сбросить</button>
@@ -1186,7 +1226,7 @@ export const PlacementsPage: React.FC = () => {
           </div>}
         </aside>
         <div className="placement-canvas" ref={canvas}
-        onWheel={e => { e.preventDefault(); const el = e.currentTarget; const nextZoom = Math.min(2, Math.max(.05, +(zoom + (e.deltaY < 0 ? .1 : -.1)).toFixed(2))); if (nextZoom === zoom) return; const rect = el.getBoundingClientRect(); const cursorX = e.clientX - rect.left; const cursorY = e.clientY - rect.top; const worldX = (el.scrollLeft + cursorX) / zoom; const worldY = (el.scrollTop + cursorY) / zoom; setZoom(nextZoom); window.requestAnimationFrame(() => { el.scrollLeft = worldX * nextZoom - cursorX; el.scrollTop = worldY * nextZoom - cursorY; }); }}
+        onWheel={e => { e.preventDefault(); const el = e.currentTarget; const rect = el.getBoundingClientRect(); const nextZoom = Math.min(2, Math.max(.05, +(zoom + (e.deltaY < 0 ? .1 : -.1)).toFixed(2))); zoomPlacementAt(nextZoom, e.clientX - rect.left, e.clientY - rect.top); }}
         onDragOver={e => { if (canEditStructure && !busy && drag.current !== null) e.preventDefault(); }}
         onDrop={dropOnCanvas}
         onContextMenu={e => e.preventDefault()}
@@ -1201,7 +1241,7 @@ export const PlacementsPage: React.FC = () => {
           {selectionBox && <div className="placement-selection-box" style={selectionBox} />}
         </div>
         {canEditStructure && selectedPropertiesTarget && propertyFormKey === selectedPropertiesTarget.key && <aside className="placement-properties-panel" aria-label="Свойства объекта размещения">
-          <header className="placement-properties-header"><h2>{selectedPropertiesTarget.isRowBatch ? "Группа рядов" : selectedPropertiesTarget.isGroup ? "Свойства группы" : "Свойства объекта"}</h2></header>
+          {(selectedPropertiesTarget.isRowBatch || selectedPropertiesTarget.isGroup) && <header className="placement-properties-header"><h2>{selectedPropertiesTarget.isRowBatch ? "Группа рядов" : "Свойства группы"}</h2></header>}
           <div className="placement-properties-form">
             {(!selectedPropertiesTarget.isGroup || selectedPropertiesTarget.isRowBatch) && <label className="field"><span>{propertyForm.placementType === "label" ? "Надпись" : "Название"}</span><input maxLength={140} required disabled={!canManage || busy} value={propertyForm.name} onChange={e => changeProperties({ name: e.target.value })} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>}
         {propertyForm.placementType !== "label" && <label className="field"><span>Группа *</span><select required disabled={!canManage || busy} value={propertyForm.groupId} onChange={e => changeProperties({ groupId: e.target.value })}><option value="">Выберите группу</option>{flatGroups.map(group => <option key={group.id} value={group.id}>{"— ".repeat(group.level)}{group.name}</option>)}</select></label>}
@@ -1221,8 +1261,8 @@ export const PlacementsPage: React.FC = () => {
         <div className="placement-canvas-controls">
           <div className="groups-tree-zoom-actions" aria-label="Масштаб размещения">
             <button className="groups-tree-scroll-button placement-focus-button" type="button" disabled={!items.length} title="Показать всю схему" aria-label="Показать всю схему" onClick={() => focusAllPlacements()}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5m0 6v5h-5m-6 0H4v-5M9 9h6v6H9z" /></svg></button>
-            <button className="groups-tree-scroll-button" type="button" disabled={zoom >= 2} title="Увеличить масштаб" aria-label="Увеличить масштаб" onClick={() => setZoom(z => Math.min(2, +(z + .1).toFixed(2)))}>+</button>
-            <button className="groups-tree-scroll-button" type="button" disabled={zoom <= .05} title="Уменьшить масштаб" aria-label="Уменьшить масштаб" onClick={() => setZoom(z => Math.max(.05, +(z - .1).toFixed(2)))}>−</button>
+            <button className="groups-tree-scroll-button" type="button" disabled={zoom >= 2} title="Увеличить масштаб" aria-label="Увеличить масштаб" onClick={() => zoomPlacementFromCenter(1)}>+</button>
+            <button className="groups-tree-scroll-button" type="button" disabled={zoom <= .05} title="Уменьшить масштаб" aria-label="Уменьшить масштаб" onClick={() => zoomPlacementFromCenter(-1)}>−</button>
           </div>
           {canEditStructure && (canGroupSelection || selectedBatchIds.length > 0) && <div className="placement-selection-actions">
             {canGroupSelection && <button type="button" className="secondary-button" title="Сгруппировать" aria-label="Сгруппировать выбранные объекты" disabled={busy} onClick={() => void act(async () => { const groupedIds = [...selectedIds]; const list = await apiClient.groupPlacementRows(eventId, groupedIds); setItems(list); const batchId = list.find(item => groupedIds.includes(item.id))?.rowBatchId; setPlacementSelection(batchId ? new Set(list.filter(item => item.rowBatchId === batchId).map(item => item.id)) : new Set(groupedIds)); })}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" stroke-dasharray="3 3" /><rect x="7" y="7" width="6" height="6" rx="1.5" /><rect x="11" y="11" width="6" height="6" rx="1.5" /></svg></button>}
@@ -1274,16 +1314,12 @@ export const PlacementsPage: React.FC = () => {
       </div>}
     </Modal>}
 
-    {seatPlacement && <Modal className="guest-form-modal seat-guest-modal" title={seatGuest ? `Гость: ${seatGuest.name}` : `Место ${seatLabelDraft.trim() || seatNumber} в ${seatPlacement.name}`} description={seatGuest ? "Измените подпись места или данные занимающего его гостя." : canSeatGuests ? "Измените подпись места или разместите на нём гостя." : "Измените подпись выбранного места."} onClose={() => { if (!seatSaving && !seatLabelSaving) closeSeatForm(); }}>
+    {seatPlacement && <Modal className="guest-form-modal seat-guest-modal" title={`Место ${seatLabel(seatPlacement, seatNumber!) || seatNumber} в ${seatPlacement.name}`} headerActions={placementMode === "seating" ? <button type="button" className="secondary-button" disabled={seatSaving || seatLabelSaving} onClick={openSeatNameEditor}>Изменить название места</button> : undefined} onClose={() => { if (seatNameEditorOpen) { setSeatNameEditorOpen(false); return; } if (!seatSaving && !seatLabelSaving) closeSeatForm(); }}>
       {seatError && <div className="alert alert-error">{seatError}</div>}
       {seatLoading ? <div className="empty-state">Загрузка данных гостя...</div> : <>
-        {placementMode === "seating" && <div className="seat-label-editor">
-          <label className="field"><span>Подпись места</span><input maxLength={12} value={seatLabelDraft} disabled={seatSaving || seatLabelSaving} onChange={e => setSeatLabelDraft(e.target.value)} /><small>До 12 символов. Пустое значение вернёт подпись «{defaultSeatLabel(seatPlacement, seatNumber!)}».</small></label>
-          <button type="button" className="secondary-button" disabled={seatSaving || seatLabelSaving} onClick={() => void saveSeatLabel()}>{seatLabelSaving ? "Сохраняем..." : "Сохранить подпись"}</button>
-        </div>}
         {canSeatGuests && <>{!seatGuest && <div className="group-edit-tabs" aria-label="Способ добавления гостя">
-          <button className={`group-edit-tab${seatTab === "new" ? " active" : ""}`} type="button" aria-pressed={seatTab === "new"} onClick={() => setSeatTab("new")}>Новый гость</button>
-          <button className={`group-edit-tab${seatTab === "existing" ? " active" : ""}`} type="button" aria-pressed={seatTab === "existing"} onClick={() => setSeatTab("existing")}>Гости мероприятия</button>
+          <button className={`group-edit-tab${seatTab === "new" ? " active" : ""}`} type="button" aria-pressed={seatTab === "new"} onClick={() => setSeatTab("new")}>Выбрать из Оргструктуры/Новый</button>
+          <button className={`group-edit-tab${seatTab === "existing" ? " active" : ""}`} type="button" aria-pressed={seatTab === "existing"} onClick={() => setSeatTab("existing")}>Выбрать из гостей</button>
         </div>}
         {!seatGuest && seatTab === "existing" ? <div className="seat-existing-guests">
           <input type="search" value={seatExistingSearch} onChange={e => { setSeatExistingSearch(e.target.value); setSeatExistingPage(1); }} placeholder="Поиск по ФИО или email (от 2 символов)" aria-label="Поиск гостей мероприятия" disabled={seatSaving} />
@@ -1302,10 +1338,28 @@ export const PlacementsPage: React.FC = () => {
           <label className="field"><span>Группа</span><select required value={seatForm.groupId} disabled={seatSaving} onChange={e => setSeatForm({ ...seatForm, groupId: e.target.value })}>{flatGroups.filter(group => seatPlacement.groupId !== null && placementGroupScope(seatPlacement.groupId).has(group.id)).map(group => <option key={group.id} value={group.id}>{"— ".repeat(group.level)}{group.name}</option>)}</select></label>
           <label className="field"><span>Категория *</span><select required value={seatForm.categoryId} disabled={seatSaving} onChange={e => setSeatForm({ ...seatForm, categoryId: e.target.value })}><option value="">Выберите категорию</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select>{categories.length === 0 && <small>Сначала создайте категорию мероприятия.</small>}</label>
         </div>
-        <div className="modal-actions"><button className="secondary-button" type="button" disabled={seatSaving} onClick={closeSeatForm}>Закрыть</button><button className="primary-button" disabled={seatSaving || !seatForm.categoryId}>{seatSaving ? "Сохраняем..." : seatGuest ? "Сохранить" : "Добавить гостя"}</button></div>
+        <div className="modal-actions"><button className="primary-button" disabled={seatSaving || !seatForm.categoryId}>{seatSaving ? "Сохраняем..." : seatGuest ? "Сохранить" : "Добавить гостя"}</button></div>
       </form>}</>}
         {!canSeatGuests && <div className="empty-state">Редактирование гостей недоступно для вашей роли.</div>}
       </>}
+    </Modal>}
+
+    {seatNameEditorOpen && seatPlacement && seatNumber && <Modal className="seat-name-modal" title="Изменить название места" onClose={() => { if (!seatLabelSaving) setSeatNameEditorOpen(false); }}>
+      {seatLabelError && <div className="alert alert-error">{seatLabelError}</div>}
+      <form className="form seat-name-editor-form" onSubmit={e => { e.preventDefault(); void saveSeatLabel(); }}>
+        <div className="field placement-seat-name-field">
+          <span>Название места</span>
+          <label className="placement-seat-name-toggle">
+            <input type="checkbox" checked={seatWithoutName} disabled={seatLabelSaving} onChange={e => setSeatWithoutName(e.target.checked)} />
+            <span>Без названия</span>
+          </label>
+          <input aria-label="Название места" maxLength={60} required={!seatWithoutName} value={seatLabelDraft} disabled={seatLabelSaving || seatWithoutName} onChange={e => setSeatLabelDraft(e.target.value)} />
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" disabled={seatLabelSaving} onClick={() => setSeatNameEditorOpen(false)}>Закрыть</button>
+          <button className="primary-button" disabled={seatLabelSaving || (!seatWithoutName && !seatLabelDraft.trim())}>{seatLabelSaving ? "Сохраняем..." : "Сохранить"}</button>
+        </div>
+      </form>
     </Modal>}
 
     {templateMode && <Modal title={templateMode === "save" ? "Сохранить шаблон размещения" : "Загрузить шаблон размещения"} onClose={() => { if (!busy) setTemplateMode(null); }}>

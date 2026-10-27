@@ -188,15 +188,14 @@ export const EventInformationPage: React.FC = () => {
   };
 
   return (
-    <section className="event-information-panel panel">
-      <div className="event-information-heading">
-        <div>
-          <p className="eyebrow">Мероприятие</p>
-          <h1>О мероприятии</h1>
-          <p className="muted">Измените основную информацию и обложку мероприятия.</p>
+    <div className="tab-content">
+      <div className="section-heading event-information-page-heading canvas-section-heading">
+        <div className="section-title-row">
+          <h2>О мероприятии</h2>
         </div>
       </div>
 
+      <section className="event-information-panel panel">
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
       {isArchived && !loading && <div className="alert alert-info">Мероприятие завершено. Настройки доступны только для просмотра. Нажмите «Вернуть в активные», чтобы снова редактировать.</div>}
@@ -333,6 +332,7 @@ export const EventInformationPage: React.FC = () => {
           </div>
         </Modal>
       )}
-    </section>
+      </section>
+    </div>
   );
 };

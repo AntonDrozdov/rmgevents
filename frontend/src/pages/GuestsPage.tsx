@@ -7,6 +7,7 @@ import { GuestQrCode } from "../components/GuestQrCode";
 import { downloadGuestTicket } from "../utils/guestQr";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
+import { seatLabel } from "../utils/placementSeats";
 import {
   CategoryDto,
   GroupTreeDto,
@@ -226,6 +227,12 @@ export const GuestsPage: React.FC = () => {
   const isAdministrator = currentUser?.roleName.toLowerCase() === "administrator";
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
   const scopeIds = useMemo(() => collectScopeIds(groups, currentUser?.groupId), [groups, currentUser?.groupId]);
+  const editingGuestPlacement = editingGuest?.placementId
+    ? placements.find((placement) => placement.id === editingGuest.placementId)
+    : null;
+  const editingGuestPlaceName = editingGuestPlacement && editingGuest?.placementSeatNumber
+    ? `${editingGuestPlacement.name} · ${seatLabel(editingGuestPlacement, editingGuest.placementSeatNumber)}`
+    : "Без места";
   const isGuestEditDirty = editingGuest !== null && (
     (Number(formData.placementId) || null) !== (editingGuest.placementId ?? null) ||
     formData.name.trim() !== editingGuest.name ||
@@ -589,7 +596,8 @@ export const GuestsPage: React.FC = () => {
       groupId: Number(formData.groupId),
       categoryId: formData.categoryId ? Number(formData.categoryId) : null,
       tagIds: formData.tagIds.map(Number),
-      placementId: Number(formData.placementId) || null,
+      placementId: editingGuest ? editingGuest.placementId ?? null : Number(formData.placementId) || null,
+      placementSeatNumber: editingGuest?.placementSeatNumber ?? undefined,
     };
     try {
       const isCreatingGuest = !editingGuest;
@@ -738,7 +746,7 @@ export const GuestsPage: React.FC = () => {
   };
 
   return <div className="tab-content">
-    <div className="section-heading guests-heading"><div className="section-title-row"><h2>Гости</h2><span className="badge">Всего: {totalGuestCount}</span></div><div className="section-actions">{canCreate && <button className="primary-button create-action-button guest-create-button" onClick={openCreateModal}>Добавить гостя</button>}</div></div>
+    <div className="section-heading guests-heading canvas-section-heading"><div className="section-title-row"><h2>Гости</h2><span className="badge">Всего: {totalGuestCount}</span></div><div className="section-actions">{canCreate && <button className="primary-button create-action-button guest-create-button" onClick={openCreateModal}>Добавить гостя</button>}</div></div>
     {error && !isCreateModalOpen && !editingGuest && !deleteGuest && <div className="alert alert-error">{error}</div>}
     {isArchived && <div className="alert alert-info">Мероприятие завершено. Просмотр и поиск доступны, изменения — только после возврата в активные.</div>}
     <section className="panel guests-table-panel">
@@ -970,15 +978,17 @@ export const GuestsPage: React.FC = () => {
         <label className="field"><span>Имя</span><input value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={saving} required /></label>
         <label className="field"><span>Email</span><input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} disabled={saving} /></label>
         <label className="field"><span>Телефон</span><input type="tel" value={formData.phone} onChange={(event) => setFormData({ ...formData, phone: event.target.value })} disabled={saving} /></label>
-        <label className="field"><span>Группа</span><select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value, placementId: "" })} disabled={saving} required>{flatGroups.filter((group) => scopeIds.has(group.id)).map((group) => <option key={group.id} value={group.id}>{"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}</option>)}</select></label>
-        <label className="field guest-category-field">
-          <span>Размещение</span>
-          <select value={formData.placementId} disabled={saving} onChange={(event) => setFormData({ ...formData, placementId: event.target.value })}>
-            <option value="">Без размещения</option>
-            {placements.filter((p) => p.quota !== null && p.groupId !== null && collectScopeIds(groups, p.groupId).has(Number(formData.groupId)))
-              .map((p) => <option key={p.id} value={p.id} disabled={p.guestCount >= p.quota! && p.id !== editingGuest?.placementId}>{p.name} · {p.guestCount}/{p.quota}</option>)}
-          </select>
-        </label>
+        <label className="field"><span>Группа</span><select value={formData.groupId} onChange={(event) => setFormData({ ...formData, groupId: event.target.value, placementId: editingGuest ? formData.placementId : "" })} disabled={saving} required>{flatGroups.filter((group) => scopeIds.has(group.id)).map((group) => <option key={group.id} value={group.id}>{"- ".repeat(group.level)}{group.name} · свободно {group.availableQuota}</option>)}</select></label>
+        {!editingGuest && (
+          <label className="field guest-category-field">
+            <span>Размещение</span>
+            <select value={formData.placementId} disabled={saving} onChange={(event) => setFormData({ ...formData, placementId: event.target.value })}>
+              <option value="">Без размещения</option>
+              {placements.filter((p) => p.quota !== null && p.groupId !== null && collectScopeIds(groups, p.groupId).has(Number(formData.groupId)))
+                .map((p) => <option key={p.id} value={p.id} disabled={p.guestCount >= p.quota!}>{p.name} · {p.guestCount}/{p.quota}</option>)}
+            </select>
+          </label>
+        )}
         <label className="field guest-category-field">
           <span>Категория *</span>
           <select className="guest-category-select" value={formData.categoryId} onChange={(event) => setFormData({ ...formData, categoryId: event.target.value })} disabled={saving} required>
@@ -988,6 +998,12 @@ export const GuestsPage: React.FC = () => {
           {selectedCategory && <span className="category-arrow"><span className="category-dot" style={{ backgroundColor: selectedCategory.color }} aria-hidden="true" />{selectedCategory.name}</span>}
           {categories.length === 0 && <small>Сначала создайте категорию мероприятия.</small>}
         </label>
+        {editingGuest && (
+          <div className="field guest-placement-field">
+            <span>Место</span>
+            <div className="guest-placement-value" title={editingGuestPlaceName}>{editingGuestPlaceName}</div>
+          </div>
+        )}
         {isCreateModalOpen && !editingGuest && <div className="similar-employees similar-guests" aria-live="polite">
           <div className="similar-employees-heading">
             <strong>Похожие гости</strong>
@@ -1048,7 +1064,7 @@ export const GuestsPage: React.FC = () => {
               <span className="selected-category-empty">Без меток</span>
             ) : selectedTags.map((tag) => (
               <span className="tag-badge selected-tag-badge" key={tag.id}>
-                {tag.name}
+                <span className="tag-badge-text" title={tag.name}>{tag.name}</span>
                 <button className="tag-remove-button" type="button" disabled={saving}
                   aria-label={`Снять метку «${tag.name}» с гостя`}
                   onClick={() => setFormData((current) => ({ ...current, tagIds: current.tagIds.filter((id) => id !== String(tag.id)) }))}>
@@ -1082,7 +1098,7 @@ export const GuestsPage: React.FC = () => {
                   disabled={saving || (!selected && formData.tagIds.length >= 4)}
                 >
                   <span className="tag-badge">
-                    {tag.name}
+                    <span className="tag-badge-text" title={tag.name}>{tag.name}</span>
                   </span>
                 </button>
               );
