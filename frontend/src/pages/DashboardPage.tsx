@@ -3,6 +3,7 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { Modal } from "../components/Modal";
 import { RmgLogo } from "../components/RmgLogo";
+import { AIMode } from "../components/AIMode";
 import { UserMenu } from "../components/UserMenu";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
@@ -158,6 +159,7 @@ export const DashboardPage: React.FC = () => {
         <div className="dashboard-title-block">
           <div className="dashboard-mobile-brand">
             <RmgLogo />
+            <AIMode />
           </div>
         </div>
 

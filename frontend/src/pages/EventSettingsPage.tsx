@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Navigate, useNavigate, useParams } from "react-router-dom";
 import { RmgLogo } from "../components/RmgLogo";
+import { AIMode } from "../components/AIMode";
 import { UserMenu } from "../components/UserMenu";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -98,6 +99,7 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
     <main className="settings-page">
       <aside className="settings-sidebar">
         <RmgLogo />
+        <AIMode key={eventId} />
         {renderTabs()}
       </aside>
 
@@ -106,6 +108,7 @@ export const EventSettingsPage: React.FC<EventSettingsPageProps> = ({ children }
           <div className="settings-title-block">
             <div className="settings-mobile-brand">
               <RmgLogo />
+              <AIMode key={eventId} />
             </div>
             <button className="settings-dashboard-button" type="button" onClick={goToDashboard}>
               ← Дашборд

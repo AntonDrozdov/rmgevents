@@ -22,6 +22,7 @@ public static class DependencyInjection
             }));
         services.AddMemoryCache();
         services.AddScoped<PlacementService>();
+        services.AddScoped<PlacementEditLockService>();
         
         services.AddScoped<IImageRepository, ImageRepository>();
         services.AddScoped<IImageService, ImageService>();

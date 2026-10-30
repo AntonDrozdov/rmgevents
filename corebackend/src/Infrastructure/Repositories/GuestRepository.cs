@@ -9,12 +9,17 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
     private static string DigitsOnly(string value) =>
         new(value.Where(char.IsDigit).ToArray());
 
-    public async Task<Application.Entities.Guest?> GetByIdAsync(long id)
+    public async Task<Application.Entities.Guest?> GetByIdAsync(long id, bool includeDeleted = false)
     {
-        return await db.Guests
+        IQueryable<Application.Entities.Guest> query = db.Guests;
+        if (includeDeleted)
+            query = query.IgnoreQueryFilters();
+
+        return await query
             .Include(x => x.Group)
             .Include(x => x.CreatedByUser)
             .ThenInclude(x => x!.Role)
+            .Include(x => x.DeletedByUser)
             .Include(x => x.GuestCategory)
             .ThenInclude(x => x!.Category)
             .Include(x => x.GuestTags)
@@ -50,34 +55,53 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
     public async Task<(List<Application.Entities.Guest> Items, int TotalCount, int Page)> GetPageByEventIdAsync(
         long eventId,
         string? search,
-        string? status,
-        long? categoryId,
+        IReadOnlyCollection<string> statuses,
+        bool eligibleForSeating,
+        IReadOnlyCollection<long> categoryIds,
         IReadOnlyCollection<long> tagIds,
+        IReadOnlyCollection<long> groupIds,
+        IReadOnlyCollection<long> createdByUserIds,
+        bool includeDeleted,
+        string? sortBy,
+        bool sortDescending,
         int page,
         int pageSize)
     {
-        var query = db.Guests
-            .AsNoTracking()
-            .Where(guest => guest.EventId == eventId);
+        IQueryable<Application.Entities.Guest> query = db.Guests.AsNoTracking();
+        if (includeDeleted)
+            query = query.IgnoreQueryFilters();
+        query = query.Where(guest => guest.EventId == eventId);
 
-        if (!string.IsNullOrWhiteSpace(status))
+        if (statuses.Count > 0)
         {
-            query = query.Where(guest => guest.Status == status);
+            query = query.Where(guest => statuses.Contains(guest.Status));
         }
 
-        if (categoryId.HasValue)
+        if (eligibleForSeating)
+        {
+            query = query.Where(guest => guest.Status == "approved" || guest.Status == "invited");
+        }
+
+        if (categoryIds.Count > 0)
         {
             query = query.Where(guest =>
                 guest.GuestCategory != null &&
-                guest.GuestCategory.CategoryId == categoryId.Value);
+                categoryIds.Contains(guest.GuestCategory.CategoryId));
         }
 
         if (tagIds.Count > 0)
         {
-            foreach (var tagId in tagIds)
-            {
-                query = query.Where(guest => guest.GuestTags.Any(guestTag => guestTag.TagId == tagId));
-            }
+            query = query.Where(guest => guest.GuestTags.Any(guestTag => tagIds.Contains(guestTag.TagId)));
+        }
+
+        if (groupIds.Count > 0)
+        {
+            query = query.Where(guest => groupIds.Contains(guest.GroupId));
+        }
+
+        if (createdByUserIds.Count > 0)
+        {
+            query = query.Where(guest => createdByUserIds.Contains(guest.CreatedByUserId));
         }
 
         var trimmedSearch = search?.Trim();
@@ -94,6 +118,71 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
                     (hasPhoneDigits && EF.Functions.Like(
                         ApplicationDbContext.RegexpReplace(guest.Phone, "[^0-9]", "", "g"),
                         $"%{searchDigits}%")))));
+        }
+
+        if (sortBy == "name")
+        {
+            query = sortDescending
+                ? query.OrderByDescending(guest => guest.Name).ThenByDescending(guest => guest.Id)
+                : query.OrderBy(guest => guest.Name).ThenBy(guest => guest.Id);
+        }
+        else if (sortBy == "status")
+        {
+            query = sortDescending
+                ? query.OrderByDescending(guest => guest.Status == "saved" ? 0
+                    : guest.Status == "on_review" ? 1
+                    : guest.Status == "admin_review" ? 2
+                    : guest.Status == "approved" ? 3
+                    : guest.Status == "invited" ? 4
+                    : guest.Status == "rejected" ? 5 : 6)
+                    .ThenByDescending(guest => guest.CreatedAt)
+                : query.OrderBy(guest => guest.Status == "saved" ? 0
+                    : guest.Status == "on_review" ? 1
+                    : guest.Status == "admin_review" ? 2
+                    : guest.Status == "approved" ? 3
+                    : guest.Status == "invited" ? 4
+                    : guest.Status == "rejected" ? 5 : 6)
+                    .ThenBy(guest => guest.CreatedAt);
+        }
+        else if (sortBy == "category")
+        {
+            query = sortDescending
+                ? query.OrderBy(guest => guest.GuestCategory == null)
+                    .ThenByDescending(guest => guest.GuestCategory!.Category!.Name)
+                    .ThenByDescending(guest => guest.Id)
+                : query.OrderBy(guest => guest.GuestCategory == null)
+                    .ThenBy(guest => guest.GuestCategory!.Category!.Name)
+                    .ThenBy(guest => guest.Id);
+        }
+        else if (sortBy == "group")
+        {
+            query = sortDescending
+                ? query.OrderByDescending(guest => guest.Group!.Name).ThenByDescending(guest => guest.Id)
+                : query.OrderBy(guest => guest.Group!.Name).ThenBy(guest => guest.Id);
+        }
+        else if (sortBy == "placement")
+        {
+            query = sortDescending
+                ? query.OrderBy(guest => !guest.PlacementId.HasValue)
+                    .ThenByDescending(guest => db.Placements.Where(placement => placement.Id == guest.PlacementId).Select(placement => placement.Name).FirstOrDefault())
+                    .ThenByDescending(guest => guest.PlacementSeatNumber)
+                    .ThenByDescending(guest => guest.Id)
+                : query.OrderBy(guest => !guest.PlacementId.HasValue)
+                    .ThenBy(guest => db.Placements.Where(placement => placement.Id == guest.PlacementId).Select(placement => placement.Name).FirstOrDefault())
+                    .ThenBy(guest => guest.PlacementSeatNumber)
+                    .ThenBy(guest => guest.Id);
+        }
+        else if (sortBy == "createdBy")
+        {
+            query = sortDescending
+                ? query.OrderByDescending(guest => guest.CreatedByUser!.Surname)
+                    .ThenByDescending(guest => guest.CreatedByUser!.Name)
+                    .ThenByDescending(guest => guest.CreatedByUser!.AdditionalName)
+                    .ThenByDescending(guest => guest.Id)
+                : query.OrderBy(guest => guest.CreatedByUser!.Surname)
+                    .ThenBy(guest => guest.CreatedByUser!.Name)
+                    .ThenBy(guest => guest.CreatedByUser!.AdditionalName)
+                    .ThenBy(guest => guest.Id);
         }
 
         var totalCount = await query.CountAsync();
@@ -124,7 +213,7 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
                             $"%{searchDigits}%") ? 5 : 0))
                 .ThenByDescending(guest => guest.CreatedAt);
         }
-        else
+        else if (sortBy == null)
         {
             query = query.OrderByDescending(guest => guest.CreatedAt);
         }
@@ -135,6 +224,7 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .Include(guest => guest.Group)
             .Include(guest => guest.CreatedByUser)
             .ThenInclude(user => user!.Role)
+            .Include(guest => guest.DeletedByUser)
             .Include(guest => guest.GuestCategory)
             .ThenInclude(guestCategory => guestCategory!.Category)
             .Include(guest => guest.GuestTags)
@@ -144,6 +234,56 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .ToListAsync();
 
         return (items, totalCount, page);
+    }
+
+    public async Task<List<Application.Entities.Guest>> GetForBulkAsync(long eventId, GuestSelection selection)
+    {
+        IQueryable<Application.Entities.Guest> query = db.Guests.IgnoreQueryFilters()
+            .Where(guest => guest.EventId == eventId);
+
+        if (selection.SelectAllMatching)
+        {
+            if (!selection.IncludeDeleted)
+                query = query.Where(guest => !guest.IsDeleted);
+            if (selection.Statuses.Count > 0)
+                query = query.Where(guest => selection.Statuses.Contains(guest.Status));
+            if (selection.CategoryIds.Count > 0)
+                query = query.Where(guest => guest.GuestCategory != null && selection.CategoryIds.Contains(guest.GuestCategory.CategoryId));
+            if (selection.TagIds.Count > 0)
+                query = query.Where(guest => guest.GuestTags.Any(tag => selection.TagIds.Contains(tag.TagId)));
+            if (selection.GroupIds.Count > 0)
+                query = query.Where(guest => selection.GroupIds.Contains(guest.GroupId));
+            if (selection.CreatedByUserIds.Count > 0)
+                query = query.Where(guest => selection.CreatedByUserIds.Contains(guest.CreatedByUserId));
+            if (selection.ExcludedGuestIds.Count > 0)
+                query = query.Where(guest => !selection.ExcludedGuestIds.Contains(guest.Id));
+
+            var search = selection.Search?.Trim();
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var digits = DigitsOnly(search);
+                var hasDigits = digits.Length >= 2;
+                query = query.Where(guest =>
+                    EF.Functions.ILike(guest.Name, $"%{search}%") ||
+                    (guest.Email != null && EF.Functions.ILike(guest.Email, $"%{search}%")) ||
+                    (guest.Phone != null && (EF.Functions.ILike(guest.Phone, $"%{search}%") ||
+                        (hasDigits && EF.Functions.Like(ApplicationDbContext.RegexpReplace(guest.Phone, "[^0-9]", "", "g"), $"%{digits}%")))));
+            }
+        }
+        else
+        {
+            query = query.Where(guest => selection.GuestIds.Contains(guest.Id));
+        }
+
+        return await query
+            .Include(guest => guest.Group)
+            .Include(guest => guest.CreatedByUser).ThenInclude(user => user!.Role)
+            .Include(guest => guest.DeletedByUser)
+            .Include(guest => guest.GuestCategory).ThenInclude(category => category!.Category)
+            .Include(guest => guest.GuestTags).ThenInclude(tag => tag.Tag)
+            .Include(guest => guest.Decisions)
+            .AsSplitQuery()
+            .ToListAsync();
     }
     
     public async Task<List<Application.Entities.Guest>> GetByGroupIdAsync(long groupId)
@@ -289,15 +429,6 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             GuestId = guestId,
             TagId = tagId
         }));
-    }
-    
-    public async Task DeleteAsync(long id)
-    {
-        var guest = await db.Guests.FindAsync(id);
-        if (guest != null)
-        {
-            db.Guests.Remove(guest);
-        }
     }
     
     public async Task SaveChangesAsync()

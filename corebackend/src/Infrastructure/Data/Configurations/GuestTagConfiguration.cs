@@ -30,5 +30,7 @@ public sealed class GuestTagConfiguration : IEntityTypeConfiguration<GuestTag>
 
         builder.HasIndex(x => x.TagId)
             .HasDatabaseName("IX_guest_tags_tag_id");
+
+        builder.HasQueryFilter(x => x.Guest != null && !x.Guest.IsDeleted);
     }
 }

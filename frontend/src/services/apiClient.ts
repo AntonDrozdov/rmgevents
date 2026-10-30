@@ -1,5 +1,21 @@
-import { Placement, PlacementInput, PlacementGuest, PlacementTemplate } from "../types/placements";
+import { Placement, PlacementEditLockStatus, PlacementInput, PlacementGuest, PlacementTemplate } from "../types/placements";
 import axios, { AxiosInstance } from "axios";
+export interface AssistantAction {
+  id: string; eventId: number | null; title: string; expiresAt: string;
+  changes: { field: string; before: string; after: string }[];
+}
+export interface AssistantClientRequest { method: string; path: string; body?: unknown | null }
+export interface AssistantActionResult { status: string; message: string; request?: AssistantClientRequest | null }
+export interface AssistantModelOption {
+  costRank: number | null;
+  id: string;
+  name: string;
+  inputPricePerThousandTokens: number | null;
+  outputPricePerThousandTokens: number | null;
+  context: string | null;
+  recommendedUse: string | null;
+  ownedBy: string;
+}
 import {
   ApproveGuestRequest,
   ApplyGroupTemplateResultDto,
@@ -19,6 +35,9 @@ import {
   GroupTemplateDto,
   GroupTreeDto,
   GuestDto,
+  GuestBulkSelectionRequest,
+  GuestBulkSummaryDto,
+  GuestBulkActionResultDto,
   PublicGuestDto,
   GuestSearchResultDto,
   LoginRequest,
@@ -44,8 +63,31 @@ import {
 } from "../types";
 
 class ApiClient {
+  async getAssistantModels(): Promise<AssistantModelOption[]> {
+    return (await this.client.get("/assistant/models")).data;
+  }
+  async askAssistant(request: { messages: { role: "user" | "assistant"; content: string }[]; page: string; eventId: number | null; model: string }, signal: AbortSignal): Promise<{ answer: string; sources: string[]; actions?: AssistantAction[] }> {
+    return (await this.client.post("/assistant/ask", request, { signal, timeout: 60000 })).data;
+  }
+  async decideAssistantAction(id: string, eventId: number | null, confirm: boolean): Promise<AssistantActionResult> {
+    return (await this.client.post(`/assistant/actions/${id}/decision`, { eventId, confirm }, { timeout: 60000 })).data;
+  }
+  async executeAssistantRequest(actionId: string, request: AssistantClientRequest, eventId: number | null): Promise<unknown> {
+    const method = request.method.toUpperCase();
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) || !/^\/events(?:\/|\?|$)/.test(request.path))
+      throw new Error('AIMode вернул недопустимый запрос.');
+    const placementHeaders = eventId && request.path.includes('/placements') ? this.placementEditHeaders(eventId) : undefined;
+    return (await this.client.request({
+      method,
+      url: request.path,
+      data: request.body ?? undefined,
+      headers: { ...placementHeaders, 'X-Assistant-Action-Id': actionId },
+      timeout: 60000,
+    })).data;
+  }
   private client: AxiosInstance;
   private token: string | null = null;
+  private placementEditTokens = new Map<string, string>();
 
   constructor(baseURL: string = "/api") {
     this.client = axios.create({
@@ -69,21 +111,35 @@ class ApiClient {
     });
   }
 
+  private placementEditHeaders(eventId: string | number) {
+    const token = this.placementEditTokens.get(String(eventId));
+    return token ? { "X-Placement-Edit-Token": token } : undefined;
+  }
+  setPlacementEditToken(eventId: string | number, token?: string | null) {
+    if (token) this.placementEditTokens.set(String(eventId), token);
+    else this.placementEditTokens.delete(String(eventId));
+  }
   async getPlacements(eventId: string | number): Promise<Placement[]> { return (await this.client.get('/events/'+eventId+'/placements')).data; }
-  async createPlacements(eventId: string | number, input: PlacementInput): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements', input)).data; }
-  async updatePlacement(eventId: string | number, id: number, input: PlacementInput): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/'+id, input)).data; }
-  async rotatePlacementRows(eventId: string | number, updates: { id: number; rotation: number }[]): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/rows/rotation', updates)).data; }
+  async getPlacementEditLock(eventId: string | number): Promise<PlacementEditLockStatus> { return (await this.client.get('/events/'+eventId+'/placements/edit-lock')).data; }
+  async acquirePlacementEditLock(eventId: string | number): Promise<PlacementEditLockStatus> { return (await this.client.post('/events/'+eventId+'/placements/edit-lock/acquire')).data; }
+  async heartbeatPlacementEditLock(eventId: string | number): Promise<PlacementEditLockStatus> { return (await this.client.post('/events/'+eventId+'/placements/edit-lock/heartbeat', null, { headers: this.placementEditHeaders(eventId) })).data; }
+  async takeoverPlacementEditLock(eventId: string | number): Promise<PlacementEditLockStatus> { return (await this.client.post('/events/'+eventId+'/placements/edit-lock/takeover')).data; }
+  async releasePlacementEditLock(eventId: string | number): Promise<PlacementEditLockStatus> { return (await this.client.delete('/events/'+eventId+'/placements/edit-lock', { headers: this.placementEditHeaders(eventId) })).data; }
+  async createPlacements(eventId: string | number, input: PlacementInput): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements', input, { headers: this.placementEditHeaders(eventId) })).data; }
+  async updatePlacement(eventId: string | number, id: number, input: PlacementInput): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/'+id, input, { headers: this.placementEditHeaders(eventId) })).data; }
+  async rotatePlacementRows(eventId: string | number, updates: { id: number; rotation: number }[]): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/rows/rotation', updates, { headers: this.placementEditHeaders(eventId) })).data; }
   async updatePlacementSeatLabel(eventId: string | number, id: number, seatNumber: number, label: string): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/'+id+'/seats/'+seatNumber+'/label', { label })).data; }
-  async updatePlacementBatch(eventId: string | number, batchId: string, input: PlacementInput): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/batches/'+batchId, input)).data; }
-  async copyPlacements(eventId: string | number, ids: number[]): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/copy', { ids })).data; }
-  async groupPlacementRows(eventId: string | number, ids: number[]): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/rows/group', { ids })).data; }
-  async ungroupPlacementRows(eventId: string | number, batchId: string): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/rows/batches/'+batchId+'/ungroup')).data; }
-  async deletePlacement(eventId: string | number, id: number | null): Promise<void> { await this.client.delete('/events/'+eventId+'/placements'+(id === null ? '' : '/'+id), { params: { confirmed: true } }); }
+  async updatePlacementBatch(eventId: string | number, batchId: string, input: PlacementInput): Promise<Placement[]> { return (await this.client.put('/events/'+eventId+'/placements/batches/'+batchId, input, { headers: this.placementEditHeaders(eventId) })).data; }
+  async copyPlacements(eventId: string | number, ids: number[]): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/copy', { ids }, { headers: this.placementEditHeaders(eventId) })).data; }
+  async groupPlacementRows(eventId: string | number, ids: number[]): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/rows/group', { ids }, { headers: this.placementEditHeaders(eventId) })).data; }
+  async ungroupPlacementRows(eventId: string | number, batchId: string): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/rows/batches/'+batchId+'/ungroup', null, { headers: this.placementEditHeaders(eventId) })).data; }
+  async deletePlacement(eventId: string | number, id: number | null): Promise<void> { await this.client.delete('/events/'+eventId+'/placements'+(id === null ? '' : '/'+id), { params: { confirmed: true }, headers: this.placementEditHeaders(eventId) }); }
   async placementGuests(eventId: string | number, groupId: number): Promise<PlacementGuest[]> { return (await this.client.get('/events/'+eventId+'/placements/guests', { params: { groupId } })).data; }
+  async seatedPlacementGuests(eventId: string | number): Promise<PlacementGuest[]> { return (await this.client.get('/events/'+eventId+'/placements/seated-guests')).data; }
   async assignPlacement(eventId: string | number, id: number, guestId: number, remove = false): Promise<void> { await this.client.put('/events/'+eventId+'/placements/'+id+'/guests/'+guestId, { remove }); }
   async placementTemplates(eventId: string | number): Promise<PlacementTemplate[]> { return (await this.client.get('/events/'+eventId+'/placements/templates')).data; }
   async savePlacementTemplate(eventId: string | number, name: string): Promise<void> { await this.client.post('/events/'+eventId+'/placements/templates', { name }); }
-  async applyPlacementTemplate(eventId: string | number, id: number): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/templates/'+id+'/apply', null, { params: { confirmed: true } })).data; }
+  async applyPlacementTemplate(eventId: string | number, id: number): Promise<Placement[]> { return (await this.client.post('/events/'+eventId+'/placements/templates/'+id+'/apply', null, { params: { confirmed: true }, headers: this.placementEditHeaders(eventId) })).data; }
 
   setToken(token: string) {
     this.token = token;
@@ -330,7 +386,7 @@ class ApiClient {
 
   async getGuests(
     eventId: string | number,
-    query: { page?: number; pageSize?: number; search?: string; status?: string; categoryId?: number; tagIds?: number[] } = {}
+    query: { page?: number; pageSize?: number; search?: string; statuses?: string[]; eligibleForSeating?: boolean; categoryIds?: number[]; tagIds?: number[]; groupIds?: number[]; createdByUserIds?: number[]; includeDeleted?: boolean; sortBy?: string; sortDirection?: "asc" | "desc" } = {}
   ): Promise<PagedResultDto<GuestDto>> {
     const response = await this.client.get<PagedResultDto<GuestDto>>(`/events/${eventId}/guests`, {
       params: query,
@@ -384,6 +440,18 @@ class ApiClient {
 
   async deleteGuest(eventId: string | number, guestId: number): Promise<void> {
     await this.client.delete(`/events/${eventId}/guests/${guestId}`);
+  }
+
+  async restoreDeletedGuest(eventId: string | number, guestId: number): Promise<GuestDto> {
+    return (await this.client.post<GuestDto>(`/events/${eventId}/guests/${guestId}/restore`)).data;
+  }
+
+  async getGuestBulkSummary(eventId: string | number, selection: GuestBulkSelectionRequest): Promise<GuestBulkSummaryDto> {
+    return (await this.client.post<GuestBulkSummaryDto>(`/events/${eventId}/guests/bulk/summary`, selection)).data;
+  }
+
+  async executeGuestBulkAction(eventId: string | number, action: string, selection: GuestBulkSelectionRequest): Promise<GuestBulkActionResultDto> {
+    return (await this.client.post<GuestBulkActionResultDto>(`/events/${eventId}/guests/bulk/action`, { action, selection })).data;
   }
 
   async inviteGuest(eventId: string | number, guestId: number): Promise<GuestDto> {

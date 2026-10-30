@@ -16,13 +16,18 @@ public sealed record GuestDto(
     string? Email,
     string? Phone,
     string Status,
+    long CreatedByUserId,
     string? CreatedByName,
     string? CreatedByRoleName,
     DateTimeOffset CreatedAt,
     DateTimeOffset? ApprovedAt,
     List<GuestDecisionDto> Decisions,
     long? PlacementId,
-    int? PlacementSeatNumber);
+    int? PlacementSeatNumber,
+    bool IsDeleted,
+    DateTimeOffset? DeletedAt,
+    long? DeletedByUserId,
+    string? DeletedByName);
 
 public sealed record PublicGuestDto(
     string Name,
@@ -81,3 +86,21 @@ public sealed record UpdateGuestRequest(
     List<long>? TagIds,
     long? PlacementId = null,
     int? PlacementSeatNumber = null);
+
+public sealed record GuestBulkSelectionRequest(
+    bool SelectAllMatching,
+    List<long>? GuestIds,
+    List<long>? ExcludedGuestIds,
+    string? Search,
+    List<string>? Statuses,
+    bool IncludeDeleted,
+    List<long>? CategoryIds,
+    List<long>? TagIds,
+    List<long>? GroupIds,
+    List<long>? CreatedByUserIds);
+
+public sealed record GuestBulkActionRequest(string Action, GuestBulkSelectionRequest Selection);
+public sealed record GuestBulkActionOptionDto(string Action, string Label, int EligibleCount);
+public sealed record GuestBulkSummaryDto(int SelectedCount, List<GuestBulkActionOptionDto> Actions);
+public sealed record GuestBulkSkipReasonDto(string Reason, int Count);
+public sealed record GuestBulkActionResultDto(int SelectedCount, int ChangedCount, int SkippedCount, List<GuestBulkSkipReasonDto> Reasons);

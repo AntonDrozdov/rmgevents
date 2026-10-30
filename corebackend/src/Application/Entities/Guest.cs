@@ -16,11 +16,15 @@ public sealed class Guest
     public string? Meta { get; set; } // JSON metadata
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ApprovedAt { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTimeOffset? DeletedAt { get; set; }
+    public long? DeletedByUserId { get; set; }
     
     // Navigation properties
     public Event? Event { get; set; }
     public Group? Group { get; set; }
     public User? CreatedByUser { get; set; }
+    public User? DeletedByUser { get; set; }
     public GuestCategory? GuestCategory { get; set; }
     public ICollection<GuestTag> GuestTags { get; set; } = [];
     public ICollection<GuestDecision> Decisions { get; set; } = [];

@@ -6,12 +6,15 @@ using Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
+using WebApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.AddAssistant();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddInfrastructure(
     builder.Configuration.GetConnectionString("Postgres")
@@ -93,12 +96,9 @@ builder.Services.AddSwaggerGen(options =>
         BearerFormat = "SID",
         In = ParameterLocation.Header
     });
-    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
     {
-        [new OpenApiSecurityScheme
-        {
-            Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
-        }] = Array.Empty<string>()
+        [new OpenApiSecuritySchemeReference("Bearer", document)] = []
     });
 });
 
@@ -138,8 +138,14 @@ app.Use(async (context, next) =>
 
     await next();
 });
+app.UseMiddleware<AssistantIdempotencyMiddleware>();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.MapControllers();
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health", async (IDistributedCache cache, CancellationToken ct) =>
+{
+    await cache.GetAsync("rmgevents:health:assistant-cache", ct);
+    return Results.Ok(new { status = "ok", assistantCache = "memory" });
+});
 
 app.Run();

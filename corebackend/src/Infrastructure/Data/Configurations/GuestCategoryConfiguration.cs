@@ -30,5 +30,7 @@ public sealed class GuestCategoryConfiguration : IEntityTypeConfiguration<GuestC
 
         builder.HasIndex(x => x.CategoryId)
             .HasDatabaseName("IX_guest_categories_category_id");
+
+        builder.HasQueryFilter(x => x.Guest != null && !x.Guest.IsDeleted);
     }
 }

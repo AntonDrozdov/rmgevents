@@ -5,7 +5,7 @@ import { Modal } from "../components/Modal";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../services/apiClient";
 import { CategoryDto, GroupTreeDto, GuestDto, OrganizationDepartmentTreeItemDto, OrganizationEmployeeTreeItemDto, OrganizationStructureTreeDto } from "../types";
-import { Placement, PlacementGuest, PlacementTemplate } from "../types/placements";
+import { Placement, PlacementEditLockStatus, PlacementGuest, PlacementTemplate } from "../types/placements";
 import { defaultSeatLabel, seatLabel } from "../utils/placementSeats";
 import { flattenGroups } from "../utils/groups";
 
@@ -16,12 +16,15 @@ type PlacementMove = {
   positions: Map<number, { x: number; y: number }>;
   sourceItems: Map<number, Placement>;
   rootIds: Set<number>;
-  containerPositions: Map<number, { x: number; y: number }>;
-  containerSizes: Map<number, { width: number; height: number }>;
-  expandedContainerPositions: Map<number, { x: number; y: number }>;
-  expandedContainerSizes: Map<number, { width: number; height: number }>;
+  bounds: { x: number; y: number; width: number; height: number };
+  alignmentCandidates: Array<{ id: number; bounds: { x: number; y: number; width: number; height: number } }>;
+  appliedDx: number;
+  appliedDy: number;
   didMove: boolean;
 };
+type PlacementAlignmentGuide = { position: number; start: number; end: number; targetId: number };
+type PlacementAlignmentGuides = { vertical: PlacementAlignmentGuide | null; horizontal: PlacementAlignmentGuide | null };
+type KeyboardPlacementMove = PlacementMove & { saveTimer: number | null };
 type PlacementRotation = {
   item: Placement;
   members: Placement[];
@@ -35,6 +38,7 @@ type PlacementRotation = {
 };
 type PlacementResize = {
   item: Placement;
+  corner: "nw" | "ne" | "sw" | "se";
   pointerX: number;
   pointerY: number;
   containerX: number;
@@ -53,6 +57,7 @@ type PlacementPropertiesTarget = {
 const canvasOrigin = 4000;
 const canvasWorkspace = { width: 10000, height: 8000 };
 const defaultPlacementColor = "#2f6f87";
+const focusedPlacementZoom = 1;
 const blank = (parentId = "", placementType: PlacementFormType = "table") => ({ name: "", parentId, groupId: "", quota: "10", noQuota: placementType === "container" || placementType === "label", displayChildrenAsRows: placementType === "container", placementType, count: 1, startNumber: 1, color: "", fontSize: "18", seatStartNumber: "1", seatNumberingReversed: false, seatWithoutName: true, seatName: "" });
 type PlacementForm = ReturnType<typeof blank>;
 const SeatNumberingSettings: React.FC<{ form: PlacementForm; disabled: boolean; onChange: (patch: Partial<PlacementForm>) => void }> = ({ form, disabled, onChange }) => <>
@@ -74,10 +79,29 @@ const rowLabelWidthFor = (name: string) => {
   if (typeof document === "undefined") return name.length * 8;
   rowLabelMeasureContext ??= document.createElement("canvas").getContext("2d");
   if (!rowLabelMeasureContext) return name.length * 8;
-  rowLabelMeasureContext.font = '700 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  rowLabelMeasureContext.font = '700 11px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   return Math.ceil(rowLabelMeasureContext.measureText(name).width);
 };
 const rowSeatWidth = (_placement: Placement) => 28;
+const seatCountLabel = (count: number) => {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  return `${count} ${lastTwo >= 11 && lastTwo <= 14 ? "мест" : last === 1 ? "место" : last >= 2 && last <= 4 ? "места" : "мест"}`;
+};
+const renderedElementScale = (element: HTMLElement | null) => {
+  if (!element) return { x: 1, y: 1 };
+  const rect = element.getBoundingClientRect();
+  return {
+    x: rect.width / element.offsetWidth || 1,
+    y: rect.height / element.offsetHeight || 1
+  };
+};
+const resizeCornerLabels: Record<PlacementResize["corner"], string> = {
+  nw: "левый верхний угол",
+  ne: "правый верхний угол",
+  sw: "левый нижний угол",
+  se: "правый нижний угол"
+};
 const message = (err: unknown) => axios.isAxiosError(err) && typeof err.response?.data === "string" ? err.response.data : "Не удалось выполнить действие. Попробуйте ещё раз.";
 const normalizeSearch = (value: string) => value.trim().toLocaleLowerCase("ru-RU");
 
@@ -109,7 +133,12 @@ export const PlacementsPage: React.FC = () => {
   const canManage = !!currentUser?.permissions.includes("create_group") && !archived;
   const canCreateGuest = !!currentUser?.permissions.includes("create_guest") && !archived;
   const [placementMode, setPlacementMode] = useState<"schema" | "seating">("seating");
-  const canEditStructure = canManage && placementMode === "schema";
+  const [mobileOnlySeating, setMobileOnlySeating] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
+  const [placementEditLock, setPlacementEditLock] = useState<PlacementEditLockStatus | null>(null);
+  const [placementEditLockLoading, setPlacementEditLockLoading] = useState(false);
+  const [placementEditLockError, setPlacementEditLockError] = useState("");
+  const placementEditLockRef = useRef<PlacementEditLockStatus | null>(null);
+  const canEditStructure = canManage && placementMode === "schema" && !mobileOnlySeating && placementEditLock?.isOwnedByCurrentUser === true;
   const canSeatGuests = canCreateGuest && placementMode === "seating";
   const canEditSeatLabels = canManage && placementMode === "seating";
   const [items, setItems] = useState<Placement[]>([]);
@@ -119,6 +148,7 @@ export const PlacementsPage: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const autoFocusedSearchResultRef = useRef<number | null>(null);
   const [zoom, setZoom] = useState(1);
   const [objectListCollapsed, setObjectListCollapsed] = useState(false);
   const [depth, setDepth] = useState(0);
@@ -134,6 +164,12 @@ export const PlacementsPage: React.FC = () => {
   const [guestLoading, setGuestLoading] = useState(false);
   const [guestSearch, setGuestSearch] = useState("");
   const [guestVersion, setGuestVersion] = useState(0);
+  const [seatedGuests, setSeatedGuests] = useState<PlacementGuest[]>([]);
+  const [seatedGuestsLoading, setSeatedGuestsLoading] = useState(false);
+  const [seatedGuestsError, setSeatedGuestsError] = useState("");
+  const [focusedSeatedGuestId, setFocusedSeatedGuestId] = useState<number | null>(null);
+  const [focusedSeat, setFocusedSeat] = useState<{ placementId: number; seatNumber: number } | null>(null);
+  const autoFocusedSeatedGuestRef = useRef<number | null>(null);
   const [newGuest, setNewGuest] = useState({ name: "", email: "", phone: "", categoryId: "" });
   const [showNewGuest, setShowNewGuest] = useState(false);
   const [templates, setTemplates] = useState<PlacementTemplate[]>([]);
@@ -143,7 +179,6 @@ export const PlacementsPage: React.FC = () => {
   const [confirmation, setConfirmation] = useState<{ text: string; run: () => Promise<void> } | null>(null);
   const [seatPlacement, setSeatPlacement] = useState<Placement | null>(null);
   const [seatNumber, setSeatNumber] = useState<number | null>(null);
-  const [seatTab, setSeatTab] = useState<"new" | "existing">("new");
   const [seatGuest, setSeatGuest] = useState<GuestDto | null>(null);
   const [seatExistingGuests, setSeatExistingGuests] = useState<GuestDto[]>([]);
   const [seatExistingLoading, setSeatExistingLoading] = useState(false);
@@ -161,7 +196,9 @@ export const PlacementsPage: React.FC = () => {
   const [seatNameEditorOpen, setSeatNameEditorOpen] = useState(false);
   const [seatLabelError, setSeatLabelError] = useState("");
   const [seatError, setSeatError] = useState("");
-  const [seatForm, setSeatForm] = useState({ name: "", email: "", phone: "", groupId: "", categoryId: "", tagIds: [] as number[] });
+  const [seatForm, setSeatForm] = useState({ name: "", email: "", phone: "", groupId: "", categoryId: "", tagIds: [] as number[], placementId: "", placementSeatNumber: "" });
+  const [seatPlacementTreeCollapsed, setSeatPlacementTreeCollapsed] = useState<Set<number>>(new Set());
+  const seatPlacementMenu = useRef<HTMLDetailsElement>(null);
   const [organizationTree, setOrganizationTree] = useState<OrganizationStructureTreeDto | null>(null);
   const [organizationLoading, setOrganizationLoading] = useState(false);
   const [organizationError, setOrganizationError] = useState("");
@@ -169,6 +206,9 @@ export const PlacementsPage: React.FC = () => {
   const [selectedOrganizationEmployeeId, setSelectedOrganizationEmployeeId] = useState<number | null>(null);
   const [seatPopover, setSeatPopover] = useState<{ placementId: number; seatNumber: number; guest: PlacementGuest } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [focusedPlacementId, setFocusedPlacementId] = useState<number | null>(null);
+  const [placementFocusRequest, setPlacementFocusRequest] = useState<{ placementId: number; animate: boolean; sequence: number } | null>(null);
+  const [alignmentGuides, setAlignmentGuides] = useState<PlacementAlignmentGuides>({ vertical: null, horizontal: null });
   const selectedIdsRef = useRef<Set<number>>(new Set());
   const [selectionBox, setSelectionBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const canvas = useRef<HTMLDivElement>(null);
@@ -178,7 +218,9 @@ export const PlacementsPage: React.FC = () => {
   const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const selectionStart = useRef<{ x: number; y: number } | null>(null);
   const selectionBoxRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
+  const placementFocusSequence = useRef(0);
   const selectedMove = useRef<PlacementMove | null>(null);
+  const keyboardMove = useRef<KeyboardPlacementMove | null>(null);
   const placementRotation = useRef<PlacementRotation | null>(null);
   const placementResize = useRef<PlacementResize | null>(null);
   const dropContainer = useRef<number | null>(null);
@@ -188,6 +230,32 @@ export const PlacementsPage: React.FC = () => {
   const viewportInitializedFor = useRef<string | null>(null);
   const seatViewport = useRef<{ left: number; top: number; zoom: number } | null>(null);
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
+  useEffect(() => {
+    const closeSeatPlacementMenu = (event: PointerEvent) => {
+      const menu = seatPlacementMenu.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.removeAttribute("open");
+    };
+    document.addEventListener("pointerdown", closeSeatPlacementMenu);
+    return () => document.removeEventListener("pointerdown", closeSeatPlacementMenu);
+  }, []);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 820px)");
+    const syncMobileMode = () => setMobileOnlySeating(media.matches);
+    syncMobileMode();
+    media.addEventListener("change", syncMobileMode);
+    return () => media.removeEventListener("change", syncMobileMode);
+  }, []);
+  useEffect(() => {
+    if (!mobileOnlySeating || placementMode === "seating") return;
+    seatViewport.current = null;
+    setPlacementMode("seating");
+    setPlacementSelection(new Set());
+    setFormOpen(false);
+    setTemplateMode(null);
+    setConfirmation(null);
+    setSearch("");
+    setFocusedPlacementId(null);
+  }, [mobileOnlySeating, placementMode]);
   const setPlacementSelection = (ids: Set<number>) => {
     selectedIdsRef.current = ids;
     setSelectedIds(ids);
@@ -199,7 +267,100 @@ export const PlacementsPage: React.FC = () => {
     const [list, groupTree, cats] = await Promise.all([apiClient.getPlacements(eventId), apiClient.getGroupTree(eventId), apiClient.getCategories(eventId)]);
     setItems(list); setGroups(groupTree); setCategories(cats);
   };
+  const applyPlacementEditLock = (status: PlacementEditLockStatus) => {
+    const previous = placementEditLockRef.current;
+    const lostOwnership = previous?.isOwnedByCurrentUser === true && !status.isOwnedByCurrentUser;
+    const gainedOwnership = previous?.isOwnedByCurrentUser !== true && status.isOwnedByCurrentUser;
+    placementEditLockRef.current = status;
+    setPlacementEditLock(status);
+    apiClient.setPlacementEditToken(eventId, status.isOwnedByCurrentUser ? status.token : null);
+    if (status.isOwnedByCurrentUser) setPlacementEditLockError("");
+    if (lostOwnership) {
+      setPlacementEditLockError("Редактирование схемы было перехвачено другим пользователем. Последние несохранённые изменения отменены.");
+      setPlacementSelection(new Set());
+      setFormOpen(false);
+      setTemplateMode(null);
+      setConfirmation(null);
+      selectedMove.current = null;
+      keyboardMove.current = null;
+      placementRotation.current = null;
+      placementResize.current = null;
+      void load().catch(error => setError(message(error)));
+    } else if (gainedOwnership) {
+      void load().catch(error => setError(message(error)));
+    }
+  };
   useEffect(() => { setLoading(true); load().catch(e => setError(message(e))).finally(() => setLoading(false)); }, [eventId]);
+  useEffect(() => {
+    if (!eventId || placementMode !== "schema" || !canManage || mobileOnlySeating) {
+      placementEditLockRef.current = null;
+      setPlacementEditLock(null);
+      setPlacementEditLockLoading(false);
+      setPlacementEditLockError("");
+      apiClient.setPlacementEditToken(eventId, null);
+      return;
+    }
+
+    let active = true;
+    let requestRunning = false;
+    setPlacementEditLockLoading(true);
+    setPlacementEditLockError("");
+
+    const synchronize = async (initial = false) => {
+      if (requestRunning) return;
+      requestRunning = true;
+      try {
+        let status = initial
+          ? await apiClient.acquirePlacementEditLock(eventId)
+          : placementEditLockRef.current?.isOwnedByCurrentUser
+            ? await apiClient.heartbeatPlacementEditLock(eventId)
+            : await apiClient.getPlacementEditLock(eventId);
+        if (!initial && !status.isLocked) status = await apiClient.acquirePlacementEditLock(eventId);
+        if (active) applyPlacementEditLock(status);
+      } catch (lockError) {
+        if (active) setPlacementEditLockError(message(lockError));
+      } finally {
+        requestRunning = false;
+        if (active) setPlacementEditLockLoading(false);
+      }
+    };
+
+    void synchronize(true);
+    const timer = window.setInterval(() => void synchronize(), 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      const current = placementEditLockRef.current;
+      if (current?.isOwnedByCurrentUser && current.token) void apiClient.releasePlacementEditLock(eventId).catch(() => undefined);
+      apiClient.setPlacementEditToken(eventId, null);
+      placementEditLockRef.current = null;
+    };
+  }, [eventId, placementMode, canManage, mobileOnlySeating]);
+  useEffect(() => {
+    let active = true;
+    if (placementMode !== "seating") {
+      setSeatedGuestsLoading(false);
+      return;
+    }
+    setSeatedGuestsLoading(true);
+    setSeatedGuestsError("");
+    apiClient.seatedPlacementGuests(eventId)
+      .then(list => {
+        if (!active) return;
+        setSeatedGuests(list);
+        setFocusedSeatedGuestId(current => current !== null && list.some(guest => guest.id === current) ? current : null);
+      })
+      .catch(e => { if (active) setSeatedGuestsError(message(e)); })
+      .finally(() => { if (active) setSeatedGuestsLoading(false); });
+    return () => { active = false; };
+  }, [eventId, placementMode, guestVersion]);
+  useEffect(() => {
+    if (focusedSeatedGuestId === null) return;
+    const guest = seatedGuests.find(item => item.id === focusedSeatedGuestId);
+    setFocusedSeat(guest && guest.placementId !== null && guest.seatNumber !== null
+      ? { placementId: guest.placementId, seatNumber: guest.seatNumber }
+      : null);
+  }, [focusedSeatedGuestId, seatedGuests]);
   useEffect(() => {
     viewportInitializedFor.current = null;
     setZoom(1);
@@ -221,7 +382,25 @@ export const PlacementsPage: React.FC = () => {
   const act = async (action: () => Promise<void>) => {
     if (busy) return;
     setBusy(true); setError("");
-    try { await action(); } catch (e) { setError(message(e)); } finally { setBusy(false); }
+    try { await action(); } catch (e) {
+      setError(message(e));
+      if (placementMode === "schema" && axios.isAxiosError(e) && e.response?.status === 409) {
+        try { applyPlacementEditLock(await apiClient.getPlacementEditLock(eventId)); await load(); }
+        catch { /* The polling request will retry. */ }
+      }
+    } finally { setBusy(false); }
+  };
+  const requestPlacementEditTakeover = () => {
+    const editorName = placementEditLock?.editorName ?? "другой пользователь";
+    setConfirmation({
+      text: `${editorName} сейчас редактирует схему. После перехвата этот пользователь потеряет возможность сохранять изменения. Перехватить редактирование?`,
+      run: async () => {
+        const status = await apiClient.takeoverPlacementEditLock(eventId);
+        applyPlacementEditLock(status);
+        await load();
+        setConfirmation(null);
+      },
+    });
   };
   const open = (p: Placement | null, parentId = "") => {
     if (p) {
@@ -245,6 +424,68 @@ export const PlacementsPage: React.FC = () => {
     find(groups);
     return ids;
   };
+  const placementAcceptsGuestGroup = (placement: Placement, groupId: number) => placement.quota !== null
+    && placement.quota > 0
+    && placement.groupId !== null
+    && placementGroupScope(placement.groupId).has(groupId);
+  const availableSeatNumbersFor = (placement: Placement) => Array.from({ length: placement.quota ?? 0 }, (_, index) => index + 1)
+    .filter(number => !placement.occupiedSeatNumbers.includes(number)
+      || (seatGuest?.placementId === placement.id && seatGuest.placementSeatNumber === number));
+  const reseatingPlacements = seatGuest
+    ? items.filter(placement => placementAcceptsGuestGroup(placement, Number(seatForm.groupId)))
+    : [];
+  const reseatingPlacement = seatGuest ? reseatingPlacements.find(placement => placement.id === Number(seatForm.placementId)) ?? null : null;
+  const reseatingSeatNumbers = reseatingPlacement ? availableSeatNumbersFor(reseatingPlacement) : [];
+  const reseatingTree = (() => {
+    const byId = new Map(items.map(item => [item.id, item]));
+    const availableSeatsByPlacement = new Map<number, number[]>();
+    const visibleIds = new Set<number>();
+    for (const placement of reseatingPlacements) {
+      const availableSeats = availableSeatNumbersFor(placement);
+      if (availableSeats.length === 0) continue;
+      availableSeatsByPlacement.set(placement.id, availableSeats);
+      visibleIds.add(placement.id);
+      let parentId = placement.parentId;
+      const visited = new Set<number>();
+      while (parentId !== null && visited.add(parentId)) {
+        visibleIds.add(parentId);
+        parentId = byId.get(parentId)?.parentId ?? null;
+      }
+    }
+    const childrenByParent = new Map<number, Placement[]>();
+    const roots: Placement[] = [];
+    for (const placement of items) {
+      if (!visibleIds.has(placement.id)) continue;
+      if (placement.parentId === null || !visibleIds.has(placement.parentId)) {
+        roots.push(placement);
+        continue;
+      }
+      const children = childrenByParent.get(placement.parentId) ?? [];
+      children.push(placement);
+      childrenByParent.set(placement.parentId, children);
+    }
+    return { availableSeatsByPlacement, childrenByParent, roots };
+  })();
+  const reseatingValid = !seatGuest || (!!reseatingPlacement && reseatingSeatNumbers.includes(Number(seatForm.placementSeatNumber)));
+  const reseatingValue = reseatingPlacement && seatForm.placementSeatNumber
+    ? `${reseatingPlacement.name} · ${seatLabel(reseatingPlacement, Number(seatForm.placementSeatNumber))}`
+    : "Выберите место";
+  const seatGuestMoving = !!seatGuest && (seatGuest.placementId !== Number(seatForm.placementId) || seatGuest.placementSeatNumber !== Number(seatForm.placementSeatNumber));
+  const changeSeatGuestGroup = (groupId: string) => setSeatForm(current => {
+    if (!seatGuest) return { ...current, groupId };
+    const selectedPlacement = items.find(placement => placement.id === Number(current.placementId));
+    return selectedPlacement && placementAcceptsGuestGroup(selectedPlacement, Number(groupId))
+      ? { ...current, groupId }
+      : { ...current, groupId, placementId: "", placementSeatNumber: "" };
+  });
+  const selectReseatingSeat = (placementId: number, selectedSeatNumber: number) => {
+    setSeatForm(current => ({
+      ...current,
+      placementId: String(placementId),
+      placementSeatNumber: String(selectedSeatNumber)
+    }));
+    seatPlacementMenu.current?.removeAttribute("open");
+  };
   const openSeatForm = async (placement: Placement, selectedSeatNumber: number) => {
     if ((!canSeatGuests && !canEditSeatLabels) || seatLoading) return;
     const currentCanvas = canvas.current;
@@ -252,15 +493,15 @@ export const PlacementsPage: React.FC = () => {
       ? { left: currentCanvas.scrollLeft, top: currentCanvas.scrollTop, zoom }
       : null;
     const hasCustomSeatName = Object.prototype.hasOwnProperty.call(placement.seatLabels ?? {}, selectedSeatNumber);
-    setSeatPlacement(placement); setSeatNumber(selectedSeatNumber); setSeatWithoutName(!hasCustomSeatName); setSeatLabelDraft(hasCustomSeatName ? placement.seatLabels[selectedSeatNumber] : ""); setSeatNameEditorOpen(false); setSeatLabelError(""); setSeatTab("new"); setSeatGuest(null); setSeatExistingGuests([]); setSeatExistingSearch(""); setSeatExistingPage(1); setSeatExistingTotal(0); setSeatExistingError(""); setSeatLoading(true); setSeatSaving(false); setSeatLabelSaving(false); setSeatError(""); setOrganizationSearch(""); setSelectedOrganizationEmployeeId(null); setOrganizationError("");
+    setSeatPlacement(placement); setSeatNumber(selectedSeatNumber); setSeatWithoutName(!hasCustomSeatName); setSeatLabelDraft(hasCustomSeatName ? placement.seatLabels[selectedSeatNumber] : ""); setSeatNameEditorOpen(false); setSeatLabelError(""); setSeatGuest(null); setSeatExistingGuests([]); setSeatExistingSearch(""); setSeatExistingPage(1); setSeatExistingTotal(0); setSeatExistingError(""); setSeatLoading(true); setSeatSaving(false); setSeatLabelSaving(false); setSeatError(""); setSeatPlacementTreeCollapsed(new Set(items.map(item => item.id))); setOrganizationSearch(""); setSelectedOrganizationEmployeeId(null); setOrganizationError("");
     if (!canSeatGuests) { setSeatLoading(false); return; }
     if (!placement.groupId) { setSeatError("Для рассадки гостей укажите группу объекта."); setSeatLoading(false); return; }
     try {
-      const [eligibleGuests, tree] = await Promise.all([apiClient.placementGuests(eventId, placement.groupId), apiClient.getOrganizationStructureTree(eventId)]);
-      const occupantId = eligibleGuests.find(guest => guest.placementId === placement.id && guest.seatNumber === selectedSeatNumber)?.id;
+      const [currentSeatedGuests, tree] = await Promise.all([apiClient.seatedPlacementGuests(eventId), apiClient.getOrganizationStructureTree(eventId)]);
+      const occupantId = currentSeatedGuests.find(guest => guest.placementId === placement.id && guest.seatNumber === selectedSeatNumber)?.id;
       const guest = occupantId ? await apiClient.getGuest(eventId, occupantId) : null;
       setSeatGuest(guest);
-      setSeatForm(guest ? { name: guest.name, email: guest.email ?? "", phone: guest.phone ?? "", groupId: String(guest.groupId), categoryId: String(guest.categoryId ?? ""), tagIds: guest.tags.map(tag => tag.id) } : { name: "", email: "", phone: "", groupId: String(placement.groupId), categoryId: "", tagIds: [] });
+      setSeatForm(guest ? { name: guest.name, email: guest.email ?? "", phone: guest.phone ?? "", groupId: String(guest.groupId), categoryId: String(guest.categoryId ?? ""), tagIds: guest.tags.map(tag => tag.id), placementId: String(guest.placementId ?? placement.id), placementSeatNumber: String(guest.placementSeatNumber ?? selectedSeatNumber) } : { name: "", email: "", phone: "", groupId: String(placement.groupId), categoryId: "", tagIds: [], placementId: String(placement.id), placementSeatNumber: String(selectedSeatNumber) });
       setOrganizationTree(tree);
     } catch (err) { setSeatError(message(err)); }
     finally { setSeatLoading(false); }
@@ -280,13 +521,13 @@ export const PlacementsPage: React.FC = () => {
     });
   };
   useEffect(() => {
-    if (!seatPlacement || seatGuest || seatLoading || !canSeatGuests || seatTab !== "existing") return;
+    if (!seatPlacement || seatGuest || seatLoading || !canSeatGuests) return;
     let active = true;
     setSeatExistingLoading(true);
     setSeatExistingError("");
     const timer = window.setTimeout(async () => {
       try {
-        const result = await apiClient.getGuests(eventId, { page: seatExistingPage, pageSize: seatExistingPageSize, search: seatExistingSearch.trim() || undefined });
+        const result = await apiClient.getGuests(eventId, { page: seatExistingPage, pageSize: seatExistingPageSize, search: seatExistingSearch.trim() || undefined, eligibleForSeating: true });
         if (!active) return;
         setSeatExistingGuests(result.items);
         setSeatExistingTotal(result.totalCount);
@@ -296,12 +537,12 @@ export const PlacementsPage: React.FC = () => {
       } finally { if (active) setSeatExistingLoading(false); }
     }, seatExistingSearch.trim() ? 300 : 0);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [eventId, seatPlacement?.id, seatGuest?.id, seatLoading, canSeatGuests, seatTab, seatExistingPage, seatExistingSearch]);
+  }, [eventId, seatPlacement?.id, seatGuest?.id, seatLoading, canSeatGuests, seatExistingPage, seatExistingSearch]);
   const seatPopoverKey = (placementId: number, selectedSeatNumber: number) => `${placementId}:${selectedSeatNumber}`;
   const showSeatPopover = async (placement: Placement, selectedSeatNumber: number) => {
     if (!placement.groupId || dismissedSeatPopover.current === seatPopoverKey(placement.id, selectedSeatNumber)) return;
     try {
-      const guests = await apiClient.placementGuests(eventId, placement.groupId);
+      const guests = await apiClient.seatedPlacementGuests(eventId);
       const guest = guests.find(item => item.placementId === placement.id && item.seatNumber === selectedSeatNumber);
       if (guest && dismissedSeatPopover.current !== seatPopoverKey(placement.id, selectedSeatNumber)) setSeatPopover({ placementId: placement.id, seatNumber: selectedSeatNumber, guest });
     } catch { /* The seat remains usable if the preview cannot be loaded. */ }
@@ -356,11 +597,11 @@ export const PlacementsPage: React.FC = () => {
   };
   const saveSeatGuest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!seatPlacement || !seatForm.categoryId || seatSaving) return;
+    if (!seatPlacement || !seatForm.categoryId || seatSaving || !reseatingValid) return;
     setSeatSaving(true); setSeatError("");
     try {
       await persistSeatLabel();
-      const request = { name: seatForm.name.trim(), email: seatForm.email.trim() || undefined, phone: seatForm.phone.trim() || undefined, groupId: Number(seatForm.groupId), categoryId: Number(seatForm.categoryId), tagIds: seatForm.tagIds, placementId: seatPlacement.id, placementSeatNumber: seatNumber };
+      const request = { name: seatForm.name.trim(), email: seatForm.email.trim() || undefined, phone: seatForm.phone.trim() || undefined, groupId: Number(seatForm.groupId), categoryId: Number(seatForm.categoryId), tagIds: seatForm.tagIds, placementId: seatGuest ? Number(seatForm.placementId) : seatPlacement.id, placementSeatNumber: seatGuest ? Number(seatForm.placementSeatNumber) : seatNumber };
       if (seatGuest) await apiClient.updateGuest(eventId, seatGuest.id, request); else await apiClient.createGuest(eventId, request);
       const list = await apiClient.getPlacements(eventId);
       setItems(list); setGuestVersion(version => version + 1); closeSeatForm();
@@ -373,19 +614,28 @@ export const PlacementsPage: React.FC = () => {
     while (changed) { changed = false; for (const p of items) if (p.parentId !== null && ids.has(p.parentId) && !ids.has(p.id)) { ids.add(p.id); changed = true; } }
     return ids;
   };
+  const isTextPlacement = (placement: Placement) => placement.isLabel
+    || (!placement.isRow && !placement.displayChildrenAsRows && placement.quota === null);
   const placementFootprint = (placement: Placement) => {
-    if (placement.isLabel) {
+    if (isTextPlacement(placement)) {
       const size = placement.fontSize ?? 18;
       rowLabelWidthFor(placement.name);
       if (rowLabelMeasureContext) rowLabelMeasureContext.font = `800 ${size}px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
       return { width: Math.max(1, Math.ceil(rowLabelMeasureContext?.measureText(placement.name).width ?? placement.name.length * size * .6)), height: Math.ceil(size * 1.3) };
     }
-    if (placement.isRow) return { width: rowLabelWidthFor(placement.name) + 12 + Math.max(28, (placement.quota ?? 1) * (rowSeatWidth(placement) + 5) - 5), height: 28 + (placement.parentId !== null ? 40 : 0) };
+    if (placement.isRow) {
+      const groupName = flatGroups.find(group => group.id === placement.groupId)?.name ?? "Без группы";
+      const labelWidth = Math.min(220, Math.max(
+        rowLabelWidthFor(placementMode === "schema" ? `${placement.name} · ${seatCountLabel(placement.quota ?? 0)}` : placement.name),
+        placementMode === "schema" ? rowLabelWidthFor(groupName) : 0
+      ));
+      return { width: labelWidth + 12 + Math.max(28, (placement.quota ?? 1) * (rowSeatWidth(placement) + 5) - 5), height: 32 + (placement.parentId !== null ? 40 : 0) };
+    }
     if (placement.displayChildrenAsRows) return { width: 250, height: 92 };
     const radius = tableRadiusFor(placement.quota ?? 0, rowSeatWidth(placement));
     return { width: radius * 2 + 92, height: radius * 2 + 164 };
   };
-  const placementType = (placement: Placement): PlacementFormType => placement.isLabel ? "label" : placement.displayChildrenAsRows ? "container" : placement.isRow ? "row" : "table";
+  const placementType = (placement: Placement): PlacementFormType => isTextPlacement(placement) ? "label" : placement.displayChildrenAsRows ? "container" : placement.isRow ? "row" : "table";
   const batchMembers = (placement: Placement) => placement.rowBatchId
     ? items.filter(item => item.rowBatchId === placement.rowBatchId)
     : [placement];
@@ -404,7 +654,7 @@ export const PlacementsPage: React.FC = () => {
       name: isRowBatch ? placement.name.replace(/\s+\d+$/, "") : placement.name,
       displayChildrenAsRows: placement.displayChildrenAsRows,
       parentId: String(placement.parentId ?? ""),
-      groupId: String(placement.groupId ?? ""),
+      groupId: type === "label" ? "" : String(placement.groupId ?? ""),
       noQuota: placement.quota === null,
       quota: String(placement.quota ?? 10),
       color: placement.color ?? "",
@@ -456,12 +706,12 @@ export const PlacementsPage: React.FC = () => {
     && JSON.stringify(propertyForm) !== JSON.stringify(formForPlacement(selectedPropertiesTarget.placement, selectedPropertiesTarget.members));
   const saveProperties = (draft: PlacementForm, target: PlacementPropertiesTarget) => {
     if (!propertyFormValid) return;
-    const quota = draft.noQuota ? null : Number(draft.quota);
+    const quota = draft.placementType === "label" || draft.noQuota ? null : Number(draft.quota);
     const placement = target.placement;
     const inputFor = (member: Placement, preserveRowBatch = false) => ({
       name: target.isGroup && !target.isRowBatch ? member.name : draft.name.trim(),
       parentId: member.parentId,
-      groupId: Number(draft.groupId) || null,
+      groupId: draft.placementType === "label" ? null : Number(draft.groupId) || null,
       quota,
       displayChildrenAsRows: draft.placementType === "container",
       isRow: draft.placementType === "row",
@@ -559,35 +809,115 @@ export const PlacementsPage: React.FC = () => {
     return { width, height };
   };
   const focusPlacement = (placement: Placement) => {
+    viewportInitializedFor.current = `${eventId}:${placementMode}`;
+    const animate = focusedPlacementId !== null && zoom === focusedPlacementZoom;
+    setFocusedPlacementId(placement.id);
     if (canEditStructure) setPlacementSelection(new Set(batchMembers(placement).map(item => item.id)));
-    setSearch("");
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+    setZoom(focusedPlacementZoom);
+    setPlacementFocusRequest({ placementId: placement.id, animate, sequence: ++placementFocusSequence.current });
+  };
+  useEffect(() => {
+    if (!placementFocusRequest) return;
+    if (zoom !== focusedPlacementZoom) {
+      setPlacementFocusRequest(current => current ? { ...current, animate: false } : current);
+      setZoom(focusedPlacementZoom);
+      return;
+    }
+    const placement = items.find(item => item.id === placementFocusRequest.placementId);
+    if (!placement) return;
+    const layout = placementBounds(placement);
+    const request = placementFocusRequest;
+    let correctionFrame = 0;
+    let verificationFrame = 0;
+    let animationFrame = 0;
+    const renderedPlacementTarget = () => {
+      const el = canvas.current;
+      const node = el?.querySelector<HTMLElement>(`[data-placement-id="${request.placementId}"]`);
+      if (!el || !node) return null;
+      const canvasRect = el.getBoundingClientRect();
+      const nodeRect = node.getBoundingClientRect();
+      return {
+        left: Math.max(0, el.scrollLeft + nodeRect.left + nodeRect.width / 2 - canvasRect.left - el.clientWidth / 2),
+        top: Math.max(0, el.scrollTop + nodeRect.top + nodeRect.height / 2 - canvasRect.top - el.clientHeight / 2)
+      };
+    };
+    const centerRenderedPlacement = () => {
+      const el = canvas.current;
+      const target = renderedPlacementTarget();
+      if (el && target) el.scrollTo(target);
+    };
+    const frame = window.requestAnimationFrame(() => {
+      if (request.animate) {
+        const el = canvas.current;
+        const target = renderedPlacementTarget();
+        if (!el || !target) return;
+        const startLeft = el.scrollLeft;
+        const startTop = el.scrollTop;
+        const startedAt = performance.now();
+        const animateToPlacement = (now: number) => {
+          const progress = Math.min(1, (now - startedAt) / 320);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          el.scrollLeft = startLeft + (target.left - startLeft) * eased;
+          el.scrollTop = startTop + (target.top - startTop) * eased;
+          if (progress < 1) {
+            animationFrame = window.requestAnimationFrame(animateToPlacement);
+            return;
+          }
+          setPlacementFocusRequest(current => current?.sequence === request.sequence ? null : current);
+        };
+        animationFrame = window.requestAnimationFrame(animateToPlacement);
+        return;
+      }
       const el = canvas.current;
       if (!el) return;
-      if (!canEditStructure) {
-        const layout = placementBounds(placement);
-        el.scrollTo({
-          left: Math.max(0, (canvasOrigin + layout.x + layout.width / 2) * zoom - el.clientWidth / 2),
-          top: Math.max(0, (canvasOrigin + layout.y + layout.height / 2) * zoom - el.clientHeight / 2)
-        });
-        return;
-      }
-      const node = el.querySelector<HTMLElement>(`[data-placement-id="${placement.id}"]`);
-      if (node) {
-        const canvasRect = el.getBoundingClientRect();
-        const nodeRect = node.getBoundingClientRect();
-        el.scrollTo({
-          left: Math.max(0, el.scrollLeft + nodeRect.left - canvasRect.left + nodeRect.width / 2 - el.clientWidth / 2),
-          top: Math.max(0, el.scrollTop + nodeRect.top - canvasRect.top + nodeRect.height / 2 - el.clientHeight / 2)
-        });
-        return;
-      }
-      const layout = placementBounds(placement);
       el.scrollTo({
-        left: Math.max(0, (canvasOrigin + layout.x + layout.width / 2) * zoom - el.clientWidth / 2),
-        top: Math.max(0, (canvasOrigin + layout.y + layout.height / 2) * zoom - el.clientHeight / 2)
+        left: Math.max(0, (canvasOrigin + layout.x + layout.width / 2) * focusedPlacementZoom - el.clientWidth / 2),
+        top: Math.max(0, (canvasOrigin + layout.y + layout.height / 2) * focusedPlacementZoom - el.clientHeight / 2)
       });
-    }));
+      correctionFrame = window.requestAnimationFrame(() => {
+        centerRenderedPlacement();
+        verificationFrame = window.requestAnimationFrame(() => {
+          centerRenderedPlacement();
+          setPlacementFocusRequest(current => current?.sequence === request.sequence ? null : current);
+        });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(correctionFrame);
+      window.cancelAnimationFrame(verificationFrame);
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [items, placementFocusRequest, zoom]);
+  const focusSeatedGuest = (guest: PlacementGuest) => {
+    if (guest.placementId === null || guest.seatNumber === null) return;
+    const placement = items.find(item => item.id === guest.placementId);
+    if (!placement) return;
+    const layout = placementBounds(placement);
+    setFocusedSeatedGuestId(guest.id);
+    setFocusedSeat({ placementId: placement.id, seatNumber: guest.seatNumber });
+    setFocusedPlacementId(placement.id);
+    const nextZoom = focusedPlacementZoom;
+    if (nextZoom !== zoom) setZoom(nextZoom);
+    window.requestAnimationFrame(() => {
+      const el = canvas.current;
+      if (!el) return;
+      el.scrollTo({
+        left: Math.max(0, (canvasOrigin + layout.x + layout.width / 2) * nextZoom - el.clientWidth / 2),
+        top: Math.max(0, (canvasOrigin + layout.y + layout.height / 2) * nextZoom - el.clientHeight / 2)
+      });
+      window.requestAnimationFrame(() => {
+        const seat = el.querySelector<HTMLElement>(`[data-placement-id="${placement.id}"] [data-seat-number="${guest.seatNumber}"]`);
+        if (!seat) return;
+        const canvasRect = el.getBoundingClientRect();
+        const seatRect = seat.getBoundingClientRect();
+        el.scrollTo({
+          left: Math.max(0, el.scrollLeft + seatRect.left - canvasRect.left + seatRect.width / 2 - el.clientWidth / 2),
+          top: Math.max(0, el.scrollTop + seatRect.top - canvasRect.top + seatRect.height / 2 - el.clientHeight / 2),
+          behavior: "smooth"
+        });
+      });
+    });
   };
   const focusAllPlacements = (onFocused?: () => void) => {
     const el = canvas.current;
@@ -657,6 +987,7 @@ export const PlacementsPage: React.FC = () => {
     if (loading || !items.length || viewportInitializedFor.current === viewportKey) return;
     let nestedFrame = 0;
     const frame = window.requestAnimationFrame(() => {
+      if (viewportInitializedFor.current === viewportKey) return;
       nestedFrame = focusAllPlacements(() => { viewportInitializedFor.current = viewportKey; });
     });
     return () => { window.cancelAnimationFrame(frame); window.cancelAnimationFrame(nestedFrame); };
@@ -664,15 +995,39 @@ export const PlacementsPage: React.FC = () => {
   const detachFromContainer = (placement: Placement) => {
     const members = batchMembers(placement);
     const parent = items.find(item => item.id === placement.parentId);
-    const parentSize = parent ? containerFootprint(parent) : { width: 0, height: 0 };
     const memberIds = new Set(members.map(member => member.id));
     const roots = new Set(members.filter(member => member.parentId === null || !memberIds.has(member.parentId)).map(member => member.id));
     const movingIds = new Set([...roots].flatMap(id => [...descendants(id)]));
     const movingMembers = items.filter(item => movingIds.has(item.id));
+    if (!movingMembers.length) return;
     const minX = Math.min(...movingMembers.map(member => member.canvasX ?? 0));
     const minY = Math.min(...movingMembers.map(member => member.canvasY ?? 0));
-    const targetX = (parent?.canvasX ?? minX) + parentSize.width + 60;
-    const targetY = parent?.canvasY ?? minY;
+    const movingBounds = movingMembers.map(member => placementBounds(member));
+    const visualOffsetX = Math.min(...movingBounds.map(bounds => bounds.x)) - minX;
+    const visualOffsetY = Math.min(...movingBounds.map(bounds => bounds.y)) - minY;
+    const movingWidth = Math.max(...movingBounds.map(bounds => bounds.x + bounds.width)) - Math.min(...movingBounds.map(bounds => bounds.x));
+    const movingHeight = Math.max(...movingBounds.map(bounds => bounds.y + bounds.height)) - Math.min(...movingBounds.map(bounds => bounds.y));
+    const parentLayout = parent ? containerLayout(parent) : null;
+    let targetX = Math.max(0, Math.round((parentLayout ? parentLayout.x + parentLayout.width + 60 : minX) - visualOffsetX));
+    const targetY = Math.max(0, Math.round(minY));
+    const containerBounds = items
+      .filter(item => item.displayChildrenAsRows && !movingIds.has(item.id))
+      .map(item => containerLayout(item));
+    let overlappingContainer = true;
+    while (overlappingContainer) {
+      overlappingContainer = false;
+      const candidate = { x: targetX + visualOffsetX, y: targetY + visualOffsetY, width: movingWidth, height: movingHeight };
+      for (const bounds of containerBounds) {
+        const overlaps = candidate.x < bounds.x + bounds.width + 24
+          && candidate.x + candidate.width + 24 > bounds.x
+          && candidate.y < bounds.y + bounds.height + 24
+          && candidate.y + candidate.height + 24 > bounds.y;
+        if (!overlaps) continue;
+        targetX = Math.max(targetX, Math.ceil(bounds.x + bounds.width + 60 - visualOffsetX));
+        overlappingContainer = true;
+        break;
+      }
+    }
     void act(async () => {
       let list = items;
       for (const member of items.filter(item => movingIds.has(item.id))) {
@@ -681,6 +1036,7 @@ export const PlacementsPage: React.FC = () => {
         list = await apiClient.updatePlacement(eventId, member.id, { ...member, parentId: roots.has(member.id) ? null : member.parentId, canvasX: targetX + offsetX, canvasY: targetY + offsetY, preserveRowBatch: !!member.rowBatchId });
       }
       setItems(list);
+      setPlacementSelection(new Set(roots));
     });
   };
   const isRow = form.placementType === "row";
@@ -745,7 +1101,7 @@ export const PlacementsPage: React.FC = () => {
     const p = items.find(x => x.id === id);
     if (!p || p.parentId === parentId) return;
     if (parentId !== null && descendants(id).has(parentId)) { setError("Нельзя переносить объект в собственную ветку."); return; }
-    if (!p.isLabel && !p.groupId) { open(p); setForm(f => ({ ...f, parentId: String(parentId ?? "") })); setError("Для сохранения переноса укажите группу."); return; }
+    if (!isTextPlacement(p) && !p.groupId) { open(p); setForm(f => ({ ...f, parentId: String(parentId ?? "") })); setError("Для сохранения переноса укажите группу."); return; }
     void act(async () => setItems(await apiClient.updatePlacement(eventId, id, { ...p, parentId, preserveRowBatch: !!p.rowBatchId })));
   };
   const drop = (e: React.DragEvent, parentId: number | null) => {
@@ -770,10 +1126,8 @@ export const PlacementsPage: React.FC = () => {
     void act(async () => setItems(await apiClient.updatePlacement(eventId, placement.id, { ...placement, canvasX, canvasY, preserveRowBatch: !!placement.rowBatchId })));
   };
   const dragBranch = draggedId === null ? new Set<number>() : descendants(draggedId);
-  const invalidDrop = (target: number) => {
-    const source = items.find(p => p.id === draggedId);
-    return dragBranch.has(target) || (!!items.find(p => p.id === target)?.displayChildrenAsRows && !!source && (source.displayChildrenAsRows || (!source.isLabel && (source.quota === null || source.quota < 1))));
-  };
+  const invalidDrop = (target: number) => dragBranch.has(target)
+    || !items.find(item => item.id === target)?.displayChildrenAsRows;
   const hoverDrop = (e: React.DragEvent, target: number | "root") => {
     if (!canEditStructure || busy || drag.current === null) return;
     e.preventDefault();
@@ -790,6 +1144,111 @@ export const PlacementsPage: React.FC = () => {
     setConfirmation({ text: `Удалить ${id === null ? "всю структуру" : "объект и всю его ветку"}? Объектов: ${ids.size}. Гостей: ${guests}. Размещение гостей будет снято, сами гости сохранятся.`, run: async () => { await apiClient.deletePlacement(eventId, id); await load(); setConfirmation(null); } });
   };
   const query = search.trim().toLocaleLowerCase("ru-RU");
+  const filteredPlacements = query
+    ? items.filter(placement => placement.name.toLocaleLowerCase("ru-RU").includes(query))
+    : items;
+  const filteredSeatedGuests = query
+    ? seatedGuests.filter(guest => guest.name.toLocaleLowerCase("ru-RU").includes(query))
+    : seatedGuests;
+  const objectListHierarchy = useMemo(() => {
+    const byId = new Map(items.map(item => [item.id, item]));
+    const childrenByParent = new Map<number, Placement[]>();
+    const roots: Placement[] = [];
+    for (const item of items) {
+      if (item.parentId === null || !byId.has(item.parentId)) {
+        roots.push(item);
+        continue;
+      }
+      const children = childrenByParent.get(item.parentId) ?? [];
+      children.push(item);
+      childrenByParent.set(item.parentId, children);
+    }
+    const visibleIds = new Set((query
+      ? items.filter(item => item.name.toLocaleLowerCase("ru-RU").includes(query))
+      : items).map(item => item.id));
+    if (query) {
+      for (const id of [...visibleIds]) {
+        let parentId = byId.get(id)?.parentId ?? null;
+        const visited = new Set<number>();
+        while (parentId !== null && visited.add(parentId)) {
+          visibleIds.add(parentId);
+          parentId = byId.get(parentId)?.parentId ?? null;
+        }
+      }
+    }
+    return { childrenByParent, roots, visibleIds };
+  }, [items, query]);
+  const soleSearchResult = placementMode === "schema" && query && filteredPlacements.length === 1 ? filteredPlacements[0] : null;
+  const soleSeatedGuestResult = placementMode === "seating" && query && filteredSeatedGuests.length === 1 ? filteredSeatedGuests[0] : null;
+  useEffect(() => {
+    if (!soleSearchResult) {
+      autoFocusedSearchResultRef.current = null;
+      return;
+    }
+    if (autoFocusedSearchResultRef.current === soleSearchResult.id) return;
+    autoFocusedSearchResultRef.current = soleSearchResult.id;
+    focusPlacement(soleSearchResult);
+  }, [soleSearchResult?.id]);
+  useEffect(() => {
+    if (!soleSeatedGuestResult) {
+      autoFocusedSeatedGuestRef.current = null;
+      return;
+    }
+    if (autoFocusedSeatedGuestRef.current === soleSeatedGuestResult.id) return;
+    autoFocusedSeatedGuestRef.current = soleSeatedGuestResult.id;
+    focusSeatedGuest(soleSeatedGuestResult);
+  }, [soleSeatedGuestResult?.id]);
+  const renderObjectListPlacement = (placement: Placement, level = 0): React.ReactNode => {
+    if (!objectListHierarchy.visibleIds.has(placement.id)) return null;
+    const children = (objectListHierarchy.childrenByParent.get(placement.id) ?? [])
+      .filter(child => objectListHierarchy.visibleIds.has(child.id));
+    const hasChildren = children.length > 0;
+    const expanded = !!query || !collapsed.has(placement.id);
+    return <div className="placement-object-list-branch" key={placement.id}>
+      <div className="placement-object-list-row placement-object-list-tree-row" style={{ "--placement-list-depth": level } as React.CSSProperties}>
+        {hasChildren ? <button type="button" className={`placement-object-list-toggle${expanded ? " expanded" : ""}`} aria-expanded={expanded} aria-label={`${expanded ? "Свернуть" : "Развернуть"} ${placement.name}`} title={expanded ? "Свернуть" : "Развернуть"} onClick={() => setCollapsed(current => {
+          const next = new Set(current);
+          if (next.has(placement.id)) next.delete(placement.id); else next.add(placement.id);
+          return next;
+        })}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5" /></svg></button> : <span className="placement-object-list-toggle-spacer" />}
+        <button type="button" className={`placement-object-list-item${focusedPlacementId === placement.id || selectedIds.has(placement.id) ? " selected" : ""}`} onClick={() => focusPlacement(placement)}><span>{placement.name}</span><small>{isTextPlacement(placement) ? "Текст" : placement.displayChildrenAsRows ? "Контейнер" : placement.isRow ? "Ряд" : "Стол"}</small></button>
+        {canEditStructure && <button type="button" className="icon-button icon-button-danger placement-object-list-delete" disabled={busy} onClick={() => remove(placement.id)} aria-label={`Удалить ${placement.name}`} title="Удалить объект"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 0 1-2-2V6h14v13a2 2 0 0 1-2 2H7Zm1-3h2V9H8v9Zm6 0h2V9h-2v9ZM4 5V3h5l1-1h4l1 1h5v2H4Z" /></svg></button>}
+      </div>
+      {hasChildren && expanded && <div className="placement-object-list-children">{children.map(child => renderObjectListPlacement(child, level + 1))}</div>}
+    </div>;
+  };
+  const renderReseatingTreePlacement = (placement: Placement, level = 0): React.ReactNode => {
+    const children = reseatingTree.childrenByParent.get(placement.id) ?? [];
+    const availableSeats = reseatingTree.availableSeatsByPlacement.get(placement.id) ?? [];
+    const expanded = !seatPlacementTreeCollapsed.has(placement.id);
+    const selectedPlacement = Number(seatForm.placementId) === placement.id;
+    const objectType = isTextPlacement(placement) ? "Текст" : placement.displayChildrenAsRows ? "Контейнер" : placement.isRow ? "Ряд" : "Стол";
+    return <div className="placement-object-list-branch" key={placement.id}>
+      <div className="placement-object-list-row placement-object-list-tree-row" style={{ "--placement-list-depth": level } as React.CSSProperties}>
+        <button type="button" className={`placement-object-list-toggle${expanded ? " expanded" : ""}`} aria-expanded={expanded} aria-label={`${expanded ? "Свернуть" : "Развернуть"} ${placement.name}`} title={expanded ? "Свернуть" : "Развернуть"} onClick={() => setSeatPlacementTreeCollapsed(current => {
+          const next = new Set(current);
+          if (next.has(placement.id)) next.delete(placement.id); else next.add(placement.id);
+          return next;
+        })}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5" /></svg></button>
+        <button type="button" className={`placement-object-list-item${selectedPlacement ? " selected" : ""}`} disabled={seatSaving} onClick={() => setSeatPlacementTreeCollapsed(current => {
+          const next = new Set(current);
+          if (next.has(placement.id)) next.delete(placement.id); else next.add(placement.id);
+          return next;
+        })}><span>{placement.name}</span><small>{objectType}{availableSeats.length > 0 ? ` · свободно ${availableSeats.length}` : ""}</small></button>
+      </div>
+      {expanded && <div className="placement-object-list-children">
+        {availableSeats.map(availableSeatNumber => {
+          const selected = selectedPlacement && Number(seatForm.placementSeatNumber) === availableSeatNumber;
+          const current = seatGuest?.placementId === placement.id && seatGuest.placementSeatNumber === availableSeatNumber;
+          return <div className="placement-object-list-row placement-object-list-tree-row seat-reassignment-tree-seat-row" style={{ "--placement-list-depth": level + 1 } as React.CSSProperties} key={`${placement.id}:${availableSeatNumber}`}>
+            <span className="placement-object-list-toggle-spacer" />
+            <button type="button" className={`placement-object-list-item seat-reassignment-tree-seat${selected ? " selected" : ""}`} disabled={seatSaving} aria-pressed={selected} onClick={() => selectReseatingSeat(placement.id, availableSeatNumber)}><span>{seatLabel(placement, availableSeatNumber)}</span><small>{current ? "Текущее место" : "Свободное место"}</small></button>
+          </div>;
+        })}
+        {children.map(child => renderReseatingTreePlacement(child, level + 1))}
+      </div>}
+    </div>;
+  };
   const hasSeatPlacements = items.some(item => (item.quota ?? 0) > 0);
   const isInsideSelectedContainer = (placement: Placement) => {
     let parentId = placement.parentId;
@@ -810,6 +1269,43 @@ export const PlacementsPage: React.FC = () => {
     }
     return depth;
   };
+  const createPlacementMove = (requestedIds: Set<number>, pointerX = 0, pointerY = 0): PlacementMove | null => {
+    const rootIds = new Set([...requestedIds].filter(id => ![...requestedIds].some(parentId => parentId !== id && descendants(parentId).has(id))));
+    const ids = new Set([...rootIds].flatMap(id => [...descendants(id)]));
+    const sourceItems = new Map(items.map(item => [item.id, item]));
+    const positions = new Map([...ids].flatMap(id => {
+      const item = sourceItems.get(id);
+      if (!item) return [];
+      const layout = placementLayout(item);
+      return [[id, { x: layout.x, y: layout.y }] as const];
+    }));
+    if (!positions.size || !rootIds.size) return null;
+    const rootBounds = [...rootIds].flatMap(id => {
+      const item = sourceItems.get(id);
+      return item ? [placementBounds(item)] : [];
+    });
+    const left = Math.min(...rootBounds.map(bounds => bounds.x));
+    const top = Math.min(...rootBounds.map(bounds => bounds.y));
+    const right = Math.max(...rootBounds.map(bounds => bounds.x + bounds.width));
+    const bottom = Math.max(...rootBounds.map(bounds => bounds.y + bounds.height));
+    const rootParentIds = new Set([...rootIds].map(id => sourceItems.get(id)?.parentId ?? null));
+    const commonParentId = rootParentIds.size === 1 ? [...rootParentIds][0] : undefined;
+    const alignmentCandidates = commonParentId === undefined ? [] : items
+      .filter(item => !ids.has(item.id) && item.parentId === commonParentId)
+      .map(item => ({ id: item.id, bounds: placementBounds(item) }));
+    return {
+      x: pointerX,
+      y: pointerY,
+      positions,
+      sourceItems,
+      rootIds,
+      bounds: { x: left, y: top, width: right - left, height: bottom - top },
+      alignmentCandidates,
+      appliedDx: 0,
+      appliedDy: 0,
+      didMove: false
+    };
+  };
   const startPlacementMove = (e: React.PointerEvent<HTMLDivElement>, placement: Placement, members: Placement[]) => {
     if (e.button !== 0 || !canEditStructure || (e.target as HTMLElement).closest("[data-placement-control]")) return;
     e.stopPropagation();
@@ -827,24 +1323,11 @@ export const PlacementsPage: React.FC = () => {
     const requestedIds = currentSelection.has(placement.id)
       ? new Set([...currentSelection, ...members.map(member => member.id)])
       : new Set(members.map(member => member.id));
-    const rootIds = new Set([...requestedIds].filter(id => ![...requestedIds].some(parentId => parentId !== id && descendants(parentId).has(id))));
-    const ids = new Set([...rootIds].flatMap(id => [...descendants(id)]));
     if (!currentSelection.has(placement.id)) setPlacementSelection(requestedIds);
-    const positions = new Map([...ids].flatMap(id => {
-      const item = items.find(value => value.id === id);
-      return item ? [[id, { x: item.canvasX ?? 0, y: item.canvasY ?? 0 }] as const] : [];
-    }));
-    const sourceItems = new Map(items.map(item => [item.id, item]));
-    const containerPositions = new Map([...rootIds].flatMap(id => {
-      const parent = sourceItems.get(sourceItems.get(id)?.parentId ?? 0);
-      return parent?.displayChildrenAsRows ? [[parent.id, { x: parent.canvasX ?? 0, y: parent.canvasY ?? 0 }] as const] : [];
-    }));
-    const containerSizes = new Map([...containerPositions.keys()].flatMap(id => {
-      const container = sourceItems.get(id);
-      return container ? [[id, containerFootprint(container)] as const] : [];
-    }));
-    if (!positions.size) return;
-    selectedMove.current = { x: e.clientX, y: e.clientY, positions, sourceItems, rootIds, containerPositions, containerSizes, expandedContainerPositions: new Map(containerPositions), expandedContainerSizes: new Map(containerSizes), didMove: false };
+    const move = createPlacementMove(requestedIds, e.clientX, e.clientY);
+    if (!move) return;
+    setAlignmentGuides({ vertical: null, horizontal: null });
+    selectedMove.current = move;
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const startRowRotation = (e: React.PointerEvent<HTMLButtonElement>, placement: Placement) => {
@@ -865,12 +1348,13 @@ export const PlacementsPage: React.FC = () => {
     rotation.preview = new Map(rotation.members.map(item => [item.id, { ...item, rotation: (((item.rotation ?? 0) + delta) % 360 + 360) % 360 }]));
     return rotation.preview;
   };
-  const startContainerResize = (e: React.PointerEvent<HTMLButtonElement>, placement: Placement, layout: { x: number; y: number; width: number; height: number }) => {
+  const startContainerResize = (e: React.PointerEvent<HTMLButtonElement>, placement: Placement, layout: { x: number; y: number; width: number; height: number }, corner: PlacementResize["corner"]) => {
     if (e.button !== 0 || !canEditStructure || busy) return;
     e.preventDefault();
     e.stopPropagation();
     placementResize.current = {
       item: placement,
+      corner,
       pointerX: e.clientX,
       pointerY: e.clientY,
       containerX: layout.x,
@@ -882,42 +1366,159 @@ export const PlacementsPage: React.FC = () => {
     setPlacementSelection(new Set([placement.id]));
     canvas.current?.setPointerCapture(e.pointerId);
   };
-  const dropContainerAtPoint = (move: PlacementMove, clientX: number, clientY: number) => {
+  const dropContainerAtPoint = (move: PlacementMove, clientX: number, clientY: number, _dx = move.appliedDx, _dy = move.appliedDy) => {
+    const originalParentIds = new Set([...move.rootIds]
+      .map(id => move.sourceItems.get(id)?.parentId)
+      .filter((id): id is number => id !== null && id !== undefined));
     const directId = Number(document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>("[data-placement-id]")?.dataset.placementId);
     const direct = move.sourceItems.get(directId);
-    if (direct?.displayChildrenAsRows && !move.positions.has(direct.id)) return direct;
+    if (direct?.displayChildrenAsRows && !move.positions.has(direct.id) && !originalParentIds.has(direct.id)) return direct;
 
-    const candidates = Array.from(canvas.current?.querySelectorAll<HTMLElement>("[data-placement-id]") ?? [])
+    const nodes = Array.from(canvas.current?.querySelectorAll<HTMLElement>("[data-placement-id]") ?? []);
+    const movingRects = nodes
+      .filter(node => move.rootIds.has(Number(node.dataset.placementId)))
+      .map(node => node.getBoundingClientRect());
+    if (!movingRects.length) return null;
+    const movingBounds = movingRects.reduce((bounds, rect) => ({
+      left: Math.min(bounds.left, rect.left),
+      top: Math.min(bounds.top, rect.top),
+      right: Math.max(bounds.right, rect.right),
+      bottom: Math.max(bounds.bottom, rect.bottom)
+    }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+    const movingCenter = { x: (movingBounds.left + movingBounds.right) / 2, y: (movingBounds.top + movingBounds.bottom) / 2 };
+    const movingArea = Math.max(1, (movingBounds.right - movingBounds.left) * (movingBounds.bottom - movingBounds.top));
+    const candidates = nodes
       .flatMap(node => {
         const placement = move.sourceItems.get(Number(node.dataset.placementId));
         const rect = node.getBoundingClientRect();
-        return placement?.displayChildrenAsRows && !move.positions.has(placement.id)
-          && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
-          ? [placement]
-          : [];
+        if (!placement?.displayChildrenAsRows || move.positions.has(placement.id)) return [];
+        const cursorInside = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+        const centerInside = movingCenter.x >= rect.left && movingCenter.x <= rect.right
+          && movingCenter.y >= rect.top && movingCenter.y <= rect.bottom;
+        const intersectionWidth = Math.max(0, Math.min(movingBounds.right, rect.right) - Math.max(movingBounds.left, rect.left));
+        const intersectionHeight = Math.max(0, Math.min(movingBounds.bottom, rect.bottom) - Math.max(movingBounds.top, rect.top));
+        const containerArea = Math.max(1, rect.width * rect.height);
+        const overlap = intersectionWidth * intersectionHeight / Math.min(movingArea, containerArea);
+        return cursorInside || centerInside || overlap >= .1 ? [{ placement, overlap, originalParent: originalParentIds.has(placement.id) }] : [];
       })
-      .sort((left, right) => placementDepth(right) - placementDepth(left));
-    return candidates[0] ?? null;
+      .sort((left, right) => Number(left.originalParent) - Number(right.originalParent)
+        || placementDepth(right.placement) - placementDepth(left.placement)
+        || right.overlap - left.overlap);
+    return candidates[0]?.placement ?? null;
   };
-  const visibleIds = new Set<number>();
-  for (const p of items) if (!query || p.name.toLocaleLowerCase("ru-RU").includes(query)) {
-    let current: Placement | undefined = p;
-    while (current && !visibleIds.has(current.id)) { visibleIds.add(current.id); current = items.find(x => x.id === current!.parentId); }
-  }
+  const alignmentForMove = (move: PlacementMove, rawDx: number, rawDy: number, snap: boolean) => {
+    const minimumCanvasX = Math.min(...[...move.positions.values()].map(position => position.x));
+    const minimumCanvasY = Math.min(...[...move.positions.values()].map(position => position.y));
+    rawDx = Math.max(-minimumCanvasX, rawDx);
+    rawDy = Math.max(-minimumCanvasY, rawDy);
+    const threshold = (snap ? 6 : 0.75) / zoom;
+    const moving = {
+      left: move.bounds.x + rawDx,
+      top: move.bounds.y + rawDy,
+      right: move.bounds.x + move.bounds.width + rawDx,
+      bottom: move.bounds.y + move.bounds.height + rawDy
+    };
+    const movingX = [moving.left, (moving.left + moving.right) / 2, moving.right];
+    const movingY = [moving.top, (moving.top + moving.bottom) / 2, moving.bottom];
+    const intervalGap = (startA: number, endA: number, startB: number, endB: number) => Math.max(0, Math.max(startA, startB) - Math.min(endA, endB));
+    let vertical: (PlacementAlignmentGuide & { correction: number; distance: number; perpendicular: number }) | null = null;
+    let horizontal: (PlacementAlignmentGuide & { correction: number; distance: number; perpendicular: number }) | null = null;
+    for (const candidate of move.alignmentCandidates) {
+      const target = {
+        left: candidate.bounds.x,
+        top: candidate.bounds.y,
+        right: candidate.bounds.x + candidate.bounds.width,
+        bottom: candidate.bounds.y + candidate.bounds.height
+      };
+      for (const movingAnchor of movingX) for (const targetAnchor of [target.left, (target.left + target.right) / 2, target.right]) {
+        const correction = targetAnchor - movingAnchor;
+        const distance = Math.abs(correction);
+        const perpendicular = intervalGap(moving.top, moving.bottom, target.top, target.bottom);
+        if (distance <= threshold && (!vertical || distance < vertical.distance || (distance === vertical.distance && perpendicular < vertical.perpendicular))) {
+          vertical = { position: targetAnchor, start: Math.min(moving.top, target.top) - 12, end: Math.max(moving.bottom, target.bottom) + 12, targetId: candidate.id, correction, distance, perpendicular };
+        }
+      }
+      for (const movingAnchor of movingY) for (const targetAnchor of [target.top, (target.top + target.bottom) / 2, target.bottom]) {
+        const correction = targetAnchor - movingAnchor;
+        const distance = Math.abs(correction);
+        const perpendicular = intervalGap(moving.left, moving.right, target.left, target.right);
+        if (distance <= threshold && (!horizontal || distance < horizontal.distance || (distance === horizontal.distance && perpendicular < horizontal.perpendicular))) {
+          horizontal = { position: targetAnchor, start: Math.min(moving.left, target.left) - 12, end: Math.max(moving.right, target.right) + 12, targetId: candidate.id, correction, distance, perpendicular };
+        }
+      }
+    }
+    let dx = rawDx + (snap ? vertical?.correction ?? 0 : 0);
+    let dy = rawDy + (snap ? horizontal?.correction ?? 0 : 0);
+    if (dx < -minimumCanvasX) { dx = -minimumCanvasX; vertical = null; }
+    if (dy < -minimumCanvasY) { dy = -minimumCanvasY; horizontal = null; }
+    return {
+      dx,
+      dy,
+      guides: {
+        vertical: vertical ? { position: vertical.position, start: vertical.start, end: vertical.end, targetId: vertical.targetId } : null,
+        horizontal: horizontal ? { position: horizontal.position, start: horizontal.start, end: horizontal.end, targetId: horizontal.targetId } : null
+      } satisfies PlacementAlignmentGuides
+    };
+  };
+  const previewPlacementMove = (move: PlacementMove, dx: number, dy: number, target: Placement | null = null) => {
+    move.appliedDx = dx;
+    move.appliedDy = dy;
+    setItems(current => current.map(item => {
+      const position = move.positions.get(item.id);
+      if (position) {
+        const source = move.sourceItems.get(item.id);
+        return {
+          ...item,
+          parentId: move.rootIds.has(item.id) ? target?.id ?? source?.parentId ?? null : item.parentId,
+          canvasX: Math.max(0, Math.round(position.x + dx)),
+          canvasY: Math.max(0, Math.round(position.y + dy))
+        };
+      }
+      return item;
+    }));
+  };
+  const placementMoveUpdates = (move: PlacementMove, parentId: number | null) => {
+    const updates = new Map<number, Placement>();
+    for (const [id, position] of move.positions) {
+      const item = move.sourceItems.get(id);
+      if (!item) continue;
+      updates.set(id, {
+        ...item,
+        parentId: parentId !== null && move.rootIds.has(id) ? parentId : item.parentId,
+        canvasX: Math.max(0, Math.round(position.x + move.appliedDx)),
+        canvasY: Math.max(0, Math.round(position.y + move.appliedDy))
+      });
+    }
+    return updates;
+  };
+  const persistPlacementMove = async (move: PlacementMove, parentId: number | null) => {
+    const updates = placementMoveUpdates(move, parentId);
+    if (!updates.size) return;
+    try {
+      let list = [...move.sourceItems.values()];
+      for (const item of updates.values()) list = await apiClient.updatePlacement(eventId, item.id, { ...item, preserveRowBatch: !!item.rowBatchId });
+      setItems(list);
+    } catch (err) {
+      setItems([...move.sourceItems.values()]);
+      throw err;
+    }
+  };
+  const alignmentTargetIds = new Set([alignmentGuides.vertical?.targetId, alignmentGuides.horizontal?.targetId].filter((id): id is number => typeof id === "number"));
   const renderNodes = (): React.ReactNode => {
-    return <div className="placement-free-canvas">{items.filter(p => visibleIds.has(p.id)).map(p => {
+    return <div className="placement-free-canvas">{items.map(p => {
       const isRow = p.isRow;
-      const isLabelObject = p.isLabel;
+      const isLabelObject = isTextPlacement(p);
       const layout = placementLayout(p);
       const x = layout.x;
       const y = layout.y;
       const occupiedSeats = new Set(p.occupiedSeatNumbers ?? []);
       const tableRadius = tableRadiusFor(p.quota ?? 0, rowSeatWidth(p));
       const members = batchMembers(p);
+      const groupName = flatGroups.find(group => group.id === p.groupId)?.name ?? "Без группы";
       const isGrouped = members.length > 1;
       const isBatchLeader = isGrouped && members[0].id === p.id;
       const isSelected = selectedIds.has(p.id);
-      const isDragging = selectedMove.current?.didMove && selectedMove.current.positions.has(p.id);
+      const isDragging = (selectedMove.current?.didMove && selectedMove.current.positions.has(p.id)) || (keyboardMove.current?.didMove && keyboardMove.current.positions.has(p.id));
       const isAboveSelectedContainer = isInsideSelectedContainer(p);
       const layer = isDragging ? 200 + placementDepth(p) : isAboveSelectedContainer ? 101 : isSelected ? 100 : placementDepth(p) + 1;
       const containerSize = p.displayChildrenAsRows ? { width: layout.width, height: layout.height } : undefined;
@@ -925,43 +1526,51 @@ export const PlacementsPage: React.FC = () => {
         const memberLayout = placementBounds(member);
         return { left: Math.min(bounds.left, memberLayout.x), top: Math.min(bounds.top, memberLayout.y), right: Math.max(bounds.right, memberLayout.x + memberLayout.width), bottom: Math.max(bounds.bottom, memberLayout.y + memberLayout.height) };
       }, { left: x, top: y, right: x, bottom: y });
-      return <div key={p.id} data-placement-id={p.id} className={`placement-node placement-free-node ${isRow ? "placement-row-free" : ""} ${isLabelObject ? "placement-label" : p.quota === null ? "placement-hall" : isRow ? "" : "placement-table"}${p.color ? " placement-colored" : ""}${canEditStructure ? " placement-can-drag" : ""}${p.parentId !== null ? " placement-contained" : ""}${isAboveSelectedContainer ? " placement-above-selected-container" : ""}${isSelected ? " placement-selected" : ""}${isDragging ? " placement-dragging" : ""}${query && p.name.toLocaleLowerCase("ru-RU").includes(query) ? " placement-match" : ""}${dragBranch.has(p.id) ? " group-tree-node-drag-branch" : ""}${draggedId === p.id ? " group-tree-node-drag-source" : ""}${dropTarget === p.id ? invalidDrop(p.id) ? " group-tree-node-drop-disabled" : " group-tree-node-drop-target" : ""}`}
+      return <div key={p.id} data-placement-id={p.id} className={`placement-node placement-free-node ${isRow ? "placement-row-free" : ""} ${isLabelObject ? "placement-label" : p.quota === null ? "placement-hall" : isRow ? "" : "placement-table"}${p.color ? " placement-colored" : ""}${canEditStructure ? " placement-can-drag" : ""}${p.parentId !== null ? " placement-contained" : ""}${isAboveSelectedContainer ? " placement-above-selected-container" : ""}${isSelected ? " placement-selected" : ""}${alignmentTargetIds.has(p.id) ? " placement-alignment-target" : ""}${isDragging ? " placement-dragging" : ""}${dragBranch.has(p.id) ? " group-tree-node-drag-branch" : ""}${draggedId === p.id ? " group-tree-node-drag-source" : ""}${dropTarget === p.id ? invalidDrop(p.id) ? " group-tree-node-drop-disabled" : " group-tree-node-drop-target" : ""}`}
           onClick={e => {
             if (suppressNodeClick.current || !canEditStructure || e.ctrlKey || (e.target as HTMLElement).closest("[data-placement-control]")) return;
+            setFocusedPlacementId(p.id);
             setPlacementSelection(new Set(members.map(member => member.id)));
           }}
           style={{ left: x, top: y, zIndex: layer, transform: p.isRow ? `rotate(${p.rotation ?? 0}deg)` : undefined, transformOrigin: "center center", "--row-seat-width": `${rowSeatWidth(p)}px`, "--table-radius": `${tableRadius}px`, "--container-width": containerSize ? `${containerSize.width}px` : undefined, "--container-height": containerSize ? `${containerSize.height}px` : undefined, "--placement-font-size": `${p.fontSize ?? 18}px`, "--placement-color": p.color ?? undefined } as React.CSSProperties}
           draggable={false} onPointerDownCapture={e => startPlacementMove(e, p, members)}
           onDragOver={e => hoverDrop(e, p.id)} onDragLeave={leaveDrop} onDrop={e => drop(e, p.id)}>
           <div className="placement-node-content">
-            <button className="placement-node-title" type="button" title={p.name} disabled={!canEditStructure} onClick={e => { e.stopPropagation(); if (!suppressNodeClick.current) open(p); }}>{p.name}</button>
+            <button className="placement-node-title" type="button" title={placementMode === "schema" && !isLabelObject ? `${p.name} · Группа: ${groupName}${isRow || (!p.displayChildrenAsRows && p.quota !== null) ? ` · ${seatCountLabel(p.quota ?? 0)}` : ""}` : p.name} disabled={!canEditStructure} onClick={e => { e.stopPropagation(); if (!suppressNodeClick.current) open(p); }}>
+              <span className="placement-node-title-name"><span className="placement-node-primary-name">{p.name}</span>{placementMode === "schema" && isRow && <span className="placement-row-title-seat-count">{seatCountLabel(p.quota ?? 0)}</span>}</span>
+              {placementMode === "schema" && !isLabelObject && <span className="placement-node-meta"><span>{isRow ? groupName : `Группа: ${groupName}`}</span>{!isRow && !p.displayChildrenAsRows && p.quota !== null && <span className="placement-node-seat-count">{seatCountLabel(p.quota ?? 0)}</span>}</span>}
+            </button>
           </div>
           {p.quota !== null && p.quota > 0 && <div className={`placement-seats${isRow ? " placement-row-seats" : " placement-table-seats"}`} role="img" aria-label={`Места: занято ${p.guestCount} из ${p.quota}`} title={`Занято: ${p.guestCount}. Свободно: ${Math.max(0, p.quota - p.guestCount)}.`}>
             {Array.from({ length: Math.min(p.quota, 50) }, (_, i) => {
               const selectedSeatNumber = i + 1;
               const selectedSeatLabel = seatLabel(p, selectedSeatNumber);
               const occupied = occupiedSeats.has(selectedSeatNumber);
+              const isFocusedSeat = focusedSeat?.placementId === p.id && focusedSeat.seatNumber === selectedSeatNumber;
               const popoverVisible = seatPopover?.placementId === p.id && seatPopover.seatNumber === selectedSeatNumber;
               const angle = (Math.PI * 2 * i) / Math.min(p.quota!, 50) - Math.PI / 2;
               const seatStyle = isRow ? undefined : { left: `calc(50% + ${Math.cos(angle) * tableRadius}px - ${rowSeatWidth(p) / 2}px)`, top: `calc(50% + ${Math.sin(angle) * tableRadius}px - 14px)` };
               return <span key={i} className="placement-seat-wrap" style={seatStyle} onMouseEnter={() => { if (canSeatGuests && occupied) void showSeatPopover(p, selectedSeatNumber); }} onMouseLeave={() => hideSeatPopover(p.id, selectedSeatNumber)}>
-                <button type="button" className={`placement-seat${occupied ? " placement-seat-occupied" : ""}`} disabled={!canSeatGuests && !canEditSeatLabels} aria-label={canSeatGuests ? occupied ? `Редактировать гостя на месте ${selectedSeatLabel}` : `Добавить гостя на место ${selectedSeatLabel}` : `Изменить название места ${selectedSeatLabel}`} title={canSeatGuests ? `${selectedSeatLabel}: ${occupied ? "редактировать гостя" : "добавить гостя"}` : canEditSeatLabels ? `${selectedSeatLabel}: изменить название` : selectedSeatLabel} onClick={e => { e.stopPropagation(); void openSeatForm(p, selectedSeatNumber); }}>{selectedSeatLabel}</button>
+                <button type="button" data-seat-number={selectedSeatNumber} className={`placement-seat${occupied ? " placement-seat-occupied" : ""}${isFocusedSeat ? " placement-seat-focused" : ""}`} disabled={!canSeatGuests && !canEditSeatLabels} aria-label={canSeatGuests ? occupied ? `Редактировать гостя на месте ${selectedSeatLabel}` : `Добавить гостя на место ${selectedSeatLabel}` : `Изменить название места ${selectedSeatLabel}`} title={canSeatGuests ? `${selectedSeatLabel}: ${occupied ? "редактировать гостя" : "добавить гостя"}` : canEditSeatLabels ? `${selectedSeatLabel}: изменить название` : selectedSeatLabel} onClick={e => { e.stopPropagation(); void openSeatForm(p, selectedSeatNumber); }}>{selectedSeatLabel}</button>
                 {popoverVisible && <span className="placement-seat-popover" role="status"><strong>{seatPopover.guest.name}</strong><small>{seatPopover.guest.categoryName ?? "Без категории"}</small><button type="button" aria-label="Закрыть информацию о госте" title="Закрыть" onClick={e => { e.stopPropagation(); dismissedSeatPopover.current = seatPopoverKey(p.id, selectedSeatNumber); setSeatPopover(null); }}>×</button></span>}
               </span>;
             })}
             {isRow && p.quota > 50 && <span className="placement-seats-more">Ещё {p.quota - 50} мест</span>}
           </div>}
           {canEditStructure && isSelected && p.isRow && <button type="button" className="placement-container-resize-handle placement-row-rotate-handle" data-placement-control title="Повернуть ряд" aria-label={`Повернуть ряд ${p.name}`} onPointerDown={e => startRowRotation(e, p)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2 6M20 4v7h-7" /></svg></button>}
-          {canEditStructure && isSelected && p.displayChildrenAsRows && <button type="button" className="placement-container-resize-handle" data-placement-control title="Изменить размер контейнера" aria-label={`Изменить размер контейнера ${p.name}`} onPointerDown={e => startContainerResize(e, p, layout)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9 4 4m0 0h5M4 4v5m11 6 5 5m0 0h-5m5 0v-5" /></svg></button>}
+          {canEditStructure && isSelected && p.displayChildrenAsRows && (["nw", "ne", "sw", "se"] as const).map(corner => <button key={corner} type="button" className={`placement-container-resize-handle placement-container-resize-${corner}`} data-placement-control title={`Изменить размер: ${resizeCornerLabels[corner]}`} aria-label={`Изменить размер контейнера ${p.name}: ${resizeCornerLabels[corner]}`} onPointerDown={e => startContainerResize(e, p, layout, corner)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9 4 4m0 0h5M4 4v5m11 6 5 5m0 0h-5m5 0v-5" /></svg></button>)}
           {canEditStructure && isSelected && (!isGrouped || isBatchLeader) && <div className={`group-tree-node-actions placement-node-actions${isGrouped ? " placement-group-actions" : ""}`} data-placement-control style={isGrouped ? { left: groupBounds.left + (groupBounds.right - groupBounds.left) / 2 - x, top: groupBounds.bottom - y + 8 } : undefined}>
               <button className="icon-button icon-button-danger" type="button" onPointerDown={e => e.stopPropagation()} onClick={() => remove(p.id)} aria-label={`Удалить объект ${p.name}`} title="Удалить объект">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 0 1-2-2V6h14v13a2 2 0 0 1-2 2H7Zm1-3h2V9H8v9Zm6 0h2V9h-2v9ZM4 5V3h5l1-1h4l1 1h5v2H4Z" /></svg>
               </button>
-              {p.parentId !== null && (!isGrouped || isBatchLeader) && <button className="icon-button" data-placement-control type="button" onPointerDown={e => e.stopPropagation()} onClick={() => detachFromContainer(p)} aria-label={`Вынести ${p.name} из контейнера`} title="Вынести из контейнера"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13v7h16v-7M12 16V3m0 0L7 8m5-5 5 5" /></svg></button>}
+              {p.parentId !== null && (!isGrouped || isBatchLeader) && <button className="icon-button" data-placement-control type="button" onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); detachFromContainer(p); }} aria-label={`Вынести ${p.name} из контейнера`} title="Вынести из контейнера"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13v7h16v-7M12 16V3m0 0L7 8m5-5 5 5" /></svg></button>}
               {isGrouped && <button type="button" className="icon-button placement-ungroup-button" aria-label="Разгруппировать объекты" title="Разгруппировать" onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); void act(async () => { setItems(await apiClient.ungroupPlacementRows(eventId, p.rowBatchId!)); }); }}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /><path d="M14 4h6v6m0-6-7 7M4 14v6h6m-6 0 7-7" /></svg></button>}
           </div>}
       </div>;
-    })}</div>;
+    })}
+      {alignmentGuides.vertical && <div className="placement-alignment-guide placement-alignment-guide-vertical" style={{ left: alignmentGuides.vertical.position, top: alignmentGuides.vertical.start, height: Math.max(1, alignmentGuides.vertical.end - alignmentGuides.vertical.start) }} />}
+      {alignmentGuides.horizontal && <div className="placement-alignment-guide placement-alignment-guide-horizontal" style={{ left: alignmentGuides.horizontal.start, top: alignmentGuides.horizontal.position, width: Math.max(1, alignmentGuides.horizontal.end - alignmentGuides.horizontal.start) }} />}
+    </div>;
   };
 
   const canvasPointAtPointer = (element: HTMLDivElement, clientX: number, clientY: number) => {
@@ -979,13 +1588,24 @@ export const PlacementsPage: React.FC = () => {
     return { left: Math.min(start.x, x), top: Math.min(start.y, y), width: Math.abs(x - start.x), height: Math.abs(y - start.y) };
   };
 
-  const resizedContainerAtPointer = (resize: PlacementResize, clientX: number, clientY: number): Placement => ({
-    ...resize.item,
-    canvasX: resize.containerX,
-    canvasY: resize.containerY,
-    canvasWidth: Math.max(250, Math.round(resize.width + (clientX - resize.pointerX) / zoom)),
-    canvasHeight: Math.max(92, Math.round(resize.height + (clientY - resize.pointerY) / zoom))
-  });
+  const resizedContainerAtPointer = (resize: PlacementResize, clientX: number, clientY: number): Placement => {
+    const renderedScale = renderedElementScale(canvas.current);
+    const dx = (clientX - resize.pointerX) / (zoom * renderedScale.x);
+    const dy = (clientY - resize.pointerY) / (zoom * renderedScale.y);
+    const right = resize.containerX + resize.width;
+    const bottom = resize.containerY + resize.height;
+    const resizeFromLeft = resize.corner === "nw" || resize.corner === "sw";
+    const resizeFromTop = resize.corner === "nw" || resize.corner === "ne";
+    const canvasX = resizeFromLeft ? Math.max(0, Math.min(right - 250, Math.round(resize.containerX + dx))) : resize.containerX;
+    const canvasY = resizeFromTop ? Math.max(0, Math.min(bottom - 92, Math.round(resize.containerY + dy))) : resize.containerY;
+    return {
+      ...resize.item,
+      canvasX,
+      canvasY,
+      canvasWidth: resizeFromLeft ? right - canvasX : Math.max(250, Math.round(resize.width + dx)),
+      canvasHeight: resizeFromTop ? bottom - canvasY : Math.max(92, Math.round(resize.height + dy))
+    };
+  };
 
   const handleCanvasPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = canvas.current;
@@ -1002,9 +1622,7 @@ export const PlacementsPage: React.FC = () => {
     }
     const resize = placementResize.current;
     if (resize) {
-      const dx = (e.clientX - resize.pointerX) / zoom;
-      const dy = (e.clientY - resize.pointerY) / zoom;
-      if (resize.didResize || Math.hypot(dx, dy) >= 4) {
+      if (resize.didResize || Math.hypot(e.clientX - resize.pointerX, e.clientY - resize.pointerY) >= 4) {
         resize.didResize = true;
         const resized = resizedContainerAtPointer(resize, e.clientX, e.clientY);
         setItems(current => current.map(item => item.id === resized.id ? resized : item));
@@ -1014,53 +1632,17 @@ export const PlacementsPage: React.FC = () => {
 
     const move = selectedMove.current;
     if (move) {
-      const dx = (e.clientX - move.x) / zoom;
-      const dy = (e.clientY - move.y) / zoom;
-      if (move.didMove || Math.hypot(dx, dy) >= 6) {
+      const renderedScale = renderedElementScale(el);
+      const rawDx = (e.clientX - move.x) / (zoom * renderedScale.x);
+      const rawDy = (e.clientY - move.y) / (zoom * renderedScale.y);
+      if (move.didMove || Math.hypot(e.clientX - move.x, e.clientY - move.y) >= 6) {
         move.didMove = true;
-        const target = dropContainerAtPoint(move, e.clientX, e.clientY);
+        const aligned = alignmentForMove(move, rawDx, rawDy, true);
+        const target = dropContainerAtPoint(move, e.clientX, e.clientY, aligned.dx, aligned.dy);
         dropContainer.current = target?.id ?? null;
         setDropTarget(dropContainer.current);
-
-        const parentIds = [...move.rootIds]
-          .map(id => move.sourceItems.get(id)?.parentId)
-          .filter((id): id is number => id !== null && id !== undefined);
-        const uniqueParentIds = [...new Set(parentIds)];
-        const currentContainerId = uniqueParentIds.length === 1 && move.containerPositions.has(uniqueParentIds[0])
-          ? uniqueParentIds[0]
-          : null;
-        const movingToAnotherContainer = !!target?.displayChildrenAsRows && target.id !== currentContainerId;
-        let expandedContainer: { id: number; x: number; y: number; width: number; height: number } | null = null;
-
-        if (currentContainerId !== null && !movingToAnotherContainer) {
-          const roots = [...move.rootIds].flatMap(id => {
-            const position = move.positions.get(id);
-            return position ? [{ x: Math.max(0, Math.round(position.x + dx)), y: Math.max(0, Math.round(position.y + dy)) }] : [];
-          });
-          if (roots.length) {
-            const initialPosition = move.containerPositions.get(currentContainerId)!;
-            const initialSize = move.containerSizes.get(currentContainerId)!;
-            const previous = move.expandedContainerPositions.get(currentContainerId)!;
-            const next = {
-              x: Math.max(0, Math.min(previous.x, Math.min(...roots.map(root => root.x)) - 24)),
-              y: Math.max(0, Math.min(previous.y, Math.min(...roots.map(root => root.y)) - 112))
-            };
-            const nextSize = {
-              width: initialSize.width + initialPosition.x - next.x,
-              height: initialSize.height + initialPosition.y - next.y
-            };
-            move.expandedContainerPositions.set(currentContainerId, next);
-            move.expandedContainerSizes.set(currentContainerId, nextSize);
-            expandedContainer = { id: currentContainerId, ...next, ...nextSize };
-          }
-        }
-
-        setItems(current => current.map(item => {
-          const position = move.positions.get(item.id);
-          if (position) return { ...item, canvasX: Math.max(0, Math.round(position.x + dx)), canvasY: Math.max(0, Math.round(position.y + dy)) };
-          if (expandedContainer && item.id === expandedContainer.id) return { ...item, canvasX: expandedContainer.x, canvasY: expandedContainer.y, canvasWidth: expandedContainer.width, canvasHeight: expandedContainer.height };
-          return item;
-        }));
+        setAlignmentGuides(aligned.guides);
+        previewPlacementMove(move, aligned.dx, aligned.dy, target);
       }
     }
 
@@ -1070,8 +1652,9 @@ export const PlacementsPage: React.FC = () => {
       setSelectionBox(nextSelectionBox);
     }
     if (pan.current) {
-      el.scrollLeft = pan.current.left - (e.clientX - pan.current.x);
-      el.scrollTop = pan.current.top - (e.clientY - pan.current.y);
+      const renderedScale = renderedElementScale(el);
+      el.scrollLeft = pan.current.left - (e.clientX - pan.current.x) / renderedScale.x;
+      el.scrollTop = pan.current.top - (e.clientY - pan.current.y) / renderedScale.y;
     }
   };
 
@@ -1107,39 +1690,19 @@ export const PlacementsPage: React.FC = () => {
     }
 
     const moved = selectedMove.current;
-    const parentId = dropContainer.current;
+    const finalTarget = moved?.didMove ? dropContainerAtPoint(moved, e.clientX, e.clientY) : null;
+    // Pointer capture on a rotated node can change the element reported under the
+    // cursor on pointerup. Keep the target that was already validated and shown.
+    const parentId = dropContainer.current ?? finalTarget?.id ?? null;
     selectedMove.current = null;
     dropContainer.current = null;
     setDropTarget(null);
+    setAlignmentGuides({ vertical: null, horizontal: null });
 
     if (moved?.didMove) {
       suppressNodeClick.current = true;
       window.setTimeout(() => { suppressNodeClick.current = false; }, 0);
-      const dx = (e.clientX - moved.x) / zoom;
-      const dy = (e.clientY - moved.y) / zoom;
-      const updates = new Map<number, Placement>();
-
-      for (const [id, position] of moved.positions) {
-        const item = moved.sourceItems.get(id);
-        if (!item) continue;
-        updates.set(id, {
-          ...item,
-          parentId: parentId !== null && moved.rootIds.has(id) ? parentId : item.parentId,
-          canvasX: Math.max(0, Math.round(position.x + dx)),
-          canvasY: Math.max(0, Math.round(position.y + dy))
-        });
-      }
-      for (const [id, position] of moved.expandedContainerPositions) {
-        const item = moved.sourceItems.get(id);
-        const size = moved.expandedContainerSizes.get(id);
-        if (item && size) updates.set(id, { ...item, canvasX: position.x, canvasY: position.y, canvasWidth: size.width, canvasHeight: size.height });
-      }
-
-      if (updates.size) void act(async () => {
-        let list = [...moved.sourceItems.values()];
-        for (const item of updates.values()) list = await apiClient.updatePlacement(eventId, item.id, { ...item, preserveRowBatch: !!item.rowBatchId });
-        setItems(list);
-      });
+      void act(() => persistPlacementMove(moved, parentId));
     }
     const currentSelectionBox = selectionStart.current && canvas.current
       ? selectionBoxAtPointer(canvas.current, selectionStart.current, e.clientX, e.clientY)
@@ -1183,8 +1746,52 @@ export const PlacementsPage: React.FC = () => {
     selectionStart.current = null;
     selectionBoxRef.current = null;
     setSelectionBox(null);
+    setAlignmentGuides({ vertical: null, horizontal: null });
     pan.current = null;
   };
+
+  useEffect(() => {
+    const onPlacementArrowKey = (event: KeyboardEvent) => {
+      if (!canEditStructure || busy || !selectedIds.size || event.ctrlKey || event.metaKey || event.altKey || formOpen || templateMode || confirmation || seatPlacement) return;
+      const direction = event.key === "ArrowLeft" ? { x: -1, y: 0 }
+        : event.key === "ArrowRight" ? { x: 1, y: 0 }
+          : event.key === "ArrowUp" ? { x: 0, y: -1 }
+            : event.key === "ArrowDown" ? { x: 0, y: 1 }
+              : null;
+      if (!direction) return;
+      const target = event.target as HTMLElement | null;
+      const interactive = target?.closest("input, textarea, select, button, a, [contenteditable='true']");
+      if (interactive && !target?.closest(".placement-object-list-item")) return;
+      event.preventDefault();
+      const step = event.shiftKey ? 10 : 1;
+      let move = keyboardMove.current;
+      if (!move) {
+        const created = createPlacementMove(new Set(selectedIds));
+        if (!created) return;
+        move = { ...created, saveTimer: null };
+        keyboardMove.current = move;
+      }
+      move.didMove = true;
+      const nextDx = move.appliedDx + direction.x * step;
+      const nextDy = move.appliedDy + direction.y * step;
+      const aligned = alignmentForMove(move, nextDx, nextDy, false);
+      setAlignmentGuides(aligned.guides);
+      previewPlacementMove(move, aligned.dx, aligned.dy);
+      if (move.saveTimer !== null) window.clearTimeout(move.saveTimer);
+      move.saveTimer = window.setTimeout(() => {
+        if (keyboardMove.current !== move) return;
+        keyboardMove.current = null;
+        setAlignmentGuides({ vertical: null, horizontal: null });
+        void act(() => persistPlacementMove(move, null));
+      }, 280);
+    };
+    window.addEventListener("keydown", onPlacementArrowKey);
+    return () => window.removeEventListener("keydown", onPlacementArrowKey);
+  }, [busy, canEditStructure, confirmation, formOpen, items, seatPlacement, selectedIds, templateMode, zoom]);
+  useEffect(() => () => {
+    const timer = keyboardMove.current?.saveTimer;
+    if (timer !== null && timer !== undefined) window.clearTimeout(timer);
+  }, []);
 
   return <div className="tab-content">
     <div className="section-heading canvas-section-heading">
@@ -1192,15 +1799,20 @@ export const PlacementsPage: React.FC = () => {
         <h2>{placementMode === "schema" ? "Редактирование схемы размещения" : "Рассадка гостей"}</h2>
       </div>
       <div className="section-actions placement-page-actions">
-        {placementMode === "seating" && canManage && <button className="danger-button" disabled={busy} onClick={() => { seatViewport.current = null; setPlacementMode("schema"); setPlacementSelection(new Set()); setSeatPlacement(null); }}>Редактировать схему размещения</button>}
-        {canEditStructure && <><button className="placement-reset-button" disabled={busy || !items.length} onClick={() => remove(null)}>Сбросить</button>
-          <button className="danger-button" disabled={busy} onClick={() => { setPlacementMode("seating"); setPlacementSelection(new Set()); setFormOpen(false); }}>Вернуться к рассадке</button></>}
+        {placementMode === "seating" && canManage && !mobileOnlySeating && <button className="danger-button" disabled={busy} onClick={() => { seatViewport.current = null; setPlacementMode("schema"); setPlacementSelection(new Set()); setSeatPlacement(null); setSearch(""); setFocusedSeatedGuestId(null); setFocusedSeat(null); }}>Редактировать схему размещения</button>}
+        {placementMode === "schema" && <>{canEditStructure && <button className="placement-reset-button" disabled={busy || !items.length} onClick={() => remove(null)}>Сбросить</button>}
+          <button className="danger-button" disabled={busy} onClick={() => { setPlacementMode("seating"); setPlacementSelection(new Set()); setFormOpen(false); setSearch(""); setFocusedPlacementId(null); }}>Вернуться к рассадке</button></>}
       </div>
     </div>
+    {placementMode === "schema" && canManage && <div className={`placement-edit-lock-banner${placementEditLock?.isOwnedByCurrentUser ? " owned" : " blocked"}`}>
+      <div><strong>{placementEditLockLoading && !placementEditLock ? "Получаем доступ к редактированию..." : placementEditLock?.isOwnedByCurrentUser ? "Вы редактируете схему" : placementEditLock?.isLocked ? `Схему редактирует ${placementEditLock.editorName ?? "другой пользователь"}` : "Ожидаем освобождения схемы"}</strong>{placementEditLock?.isOwnedByCurrentUser && <small>Доступ продлевается автоматически, пока открыта эта вкладка.</small>}</div>
+      {!placementEditLockLoading && placementEditLock?.isLocked && !placementEditLock.isOwnedByCurrentUser && <button type="button" className="danger-button" disabled={busy} onClick={requestPlacementEditTakeover}>Перехватить редактирование</button>}
+    </div>}
+    {placementMode === "schema" && placementEditLockError && <div className="alert alert-error" role="alert">{placementEditLockError}</div>}
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {archived && <div className="alert alert-info">Мероприятие завершено. Структура доступна для просмотра.</div>}
     <section className="panel">
-      <div className="placement-toolbar"><input className="placement-search-input" type="search" placeholder="Поиск по названию" aria-label="Поиск объектов" value={search} onChange={e => setSearch(e.target.value)} />
+      <div className="placement-toolbar"><input className="placement-search-input" type="search" placeholder={placementMode === "schema" ? "Поиск по названию" : "Поиск по гостям"} aria-label={placementMode === "schema" ? "Поиск объектов" : "Поиск посаженных гостей"} value={search} onChange={e => setSearch(e.target.value)} />
         {canEditStructure && <div className="group-template-actions placement-template-actions">
           <button type="button" className="icon-button placement-template-icon-button" title="Сохранить схему как шаблон" aria-label="Сохранить схему как шаблон" disabled={busy || loading || !items.length} onClick={() => { setTemplateName(""); setTemplateMode("save"); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5V3Z" /><path d="M8 3v6h8V4M8 21v-7h8v7" /></svg></button>
           <button type="button" className="icon-button placement-template-icon-button" title="Загрузить схему из шаблона" aria-label="Загрузить схему из шаблона" disabled={busy} onClick={() => void act(async () => { setTemplates(await apiClient.placementTemplates(eventId)); setTemplateId(""); setTemplateMode("load"); })}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v12H3V6Z" /><path d="M12 11v6m0 0-3-3m3 3 3-3" /></svg></button>
@@ -1211,39 +1823,53 @@ export const PlacementsPage: React.FC = () => {
           <button type="button" className="icon-button" title="Создать контейнер" aria-label="Создать контейнер" onClick={() => openCreate("container")}><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3.5" y="5" width="25" height="22" rx="3" /><path d="M8 10h16M9 16h5v5H9zm9 0h5v5h-5z" /></svg></button>
           <button type="button" className="icon-button" title="Создать ряд" aria-label="Создать ряд" onClick={() => openCreate("row")}><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 22h24M6 22v4m20-4v4" /><rect x="5" y="10" width="5" height="8" rx="1.5" /><rect x="13.5" y="10" width="5" height="8" rx="1.5" /><rect x="22" y="10" width="5" height="8" rx="1.5" /></svg></button>
           <button type="button" className="icon-button" title="Создать стол" aria-label="Создать стол" onClick={() => openCreate("table")}><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="7" /><rect x="13" y="2.5" width="6" height="5" rx="1.5" /><rect x="13" y="24.5" width="6" height="5" rx="1.5" /><rect x="2.5" y="13" width="5" height="6" rx="1.5" /><rect x="24.5" y="13" width="5" height="6" rx="1.5" /></svg></button>
-          <button type="button" className="icon-button" title="Создать надпись" aria-label="Создать надпись" onClick={() => openCreate("label")}><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M6 8h20M16 8v17M10 25h12" /><path d="M11 8 7 15m14-7 4 7" /></svg></button>
+          <button type="button" className="icon-button" title="Создать текст" aria-label="Создать текст" onClick={() => openCreate("label")}><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M6 8h20M16 8v17M10 25h12" /><path d="M11 8 7 15m14-7 4 7" /></svg></button>
         </aside>}
-        <aside className={`placement-object-list${canEditStructure ? " placement-object-list-with-toolbar" : ""}${objectListCollapsed ? " collapsed" : ""}`} aria-label="Объекты на схеме">
+        {placementMode === "schema" ? <aside className={`placement-object-list placement-object-list-with-toolbar${objectListCollapsed ? " collapsed" : ""}`} aria-label="Объекты на схеме">
           <div className="placement-object-list-header">
-            {!objectListCollapsed && <strong>Объекты: {items.length}</strong>}
+            {!objectListCollapsed && <strong>Объекты: {filteredPlacements.length}</strong>}
             <button type="button" className="icon-button" title={objectListCollapsed ? "Развернуть список объектов" : "Свернуть список объектов"} aria-label={objectListCollapsed ? "Развернуть список объектов" : "Свернуть список объектов"} onClick={() => setObjectListCollapsed(value => !value)}>{objectListCollapsed ? "›" : "‹"}</button>
           </div>
           {!objectListCollapsed && <div className="placement-object-list-items">
-            {items.map(placement => <div className="placement-object-list-row" key={placement.id}>
-              <button type="button" className={`placement-object-list-item${selectedIds.has(placement.id) ? " selected" : ""}`} onClick={() => focusPlacement(placement)}><span>{placement.name}</span><small>{placement.isLabel ? "Надпись" : placement.displayChildrenAsRows ? "Контейнер" : placement.isRow ? "Ряд" : "Стол"}</small></button>
-              {canEditStructure && <button type="button" className="icon-button icon-button-danger placement-object-list-delete" disabled={busy} onClick={() => remove(placement.id)} aria-label={`Удалить ${placement.name}`} title="Удалить объект"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 0 1-2-2V6h14v13a2 2 0 0 1-2 2H7Zm1-3h2V9H8v9Zm6 0h2V9h-2v9ZM4 5V3h5l1-1h4l1 1h5v2H4Z" /></svg></button>}
-            </div>)}
+            {objectListHierarchy.roots.map(placement => renderObjectListPlacement(placement))}
           </div>}
-        </aside>
+        </aside> : <aside className={`placement-object-list${objectListCollapsed ? " collapsed" : ""}`} aria-label="Посаженные гости">
+          <div className="placement-object-list-header">
+            {!objectListCollapsed && <strong>Посажено: {filteredSeatedGuests.length}</strong>}
+            <button type="button" className="icon-button" title={objectListCollapsed ? "Развернуть список гостей" : "Свернуть список гостей"} aria-label={objectListCollapsed ? "Развернуть список гостей" : "Свернуть список гостей"} onClick={() => setObjectListCollapsed(value => !value)}>{objectListCollapsed ? "›" : "‹"}</button>
+          </div>
+          {!objectListCollapsed && <div className="placement-object-list-items">
+            {seatedGuestsLoading && <div className="placement-object-list-status">Загрузка гостей...</div>}
+            {!seatedGuestsLoading && seatedGuestsError && <div className="placement-object-list-status placement-object-list-error" role="alert">{seatedGuestsError}</div>}
+            {!seatedGuestsLoading && !seatedGuestsError && filteredSeatedGuests.map(guest => {
+              const placement = items.find(item => item.id === guest.placementId);
+              if (!placement || guest.seatNumber === null) return null;
+              return <div className="placement-object-list-row" key={guest.id}>
+                <button type="button" className={`placement-object-list-item${focusedSeatedGuestId === guest.id ? " selected" : ""}`} onClick={() => focusSeatedGuest(guest)}><span>{guest.name}</span><small>{placement.name} · {seatLabel(placement, guest.seatNumber)}</small></button>
+              </div>;
+            })}
+          </div>}
+        </aside>}
         <div className="placement-canvas" ref={canvas}
         onWheel={e => { e.preventDefault(); const el = e.currentTarget; const rect = el.getBoundingClientRect(); const nextZoom = Math.min(2, Math.max(.05, +(zoom + (e.deltaY < 0 ? .1 : -.1)).toFixed(2))); zoomPlacementAt(nextZoom, e.clientX - rect.left, e.clientY - rect.top); }}
         onDragOver={e => { if (canEditStructure && !busy && drag.current !== null) e.preventDefault(); }}
         onDrop={dropOnCanvas}
         onContextMenu={e => e.preventDefault()}
-        onPointerDown={e => { const el = canvas.current!; if (e.button === 2) { pan.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }; el.setPointerCapture(e.pointerId); return; } if ((e.target as HTMLElement).closest(".placement-node")) return; if (e.button === 0 && canEditStructure) { selectionStart.current = canvasPointAtPointer(el, e.clientX, e.clientY); const initialSelectionBox = { left: selectionStart.current.x, top: selectionStart.current.y, width: 0, height: 0 }; selectionBoxRef.current = initialSelectionBox; setSelectionBox(initialSelectionBox); } el.setPointerCapture(e.pointerId); }}
+        onPointerDown={e => { const el = canvas.current!; const target = e.target as HTMLElement; if ((e.pointerType === "touch" && !target.closest(".placement-seat")) || e.button === 2) { pan.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }; el.setPointerCapture(e.pointerId); return; } if (target.closest(".placement-node")) return; if (e.button === 0 && canEditStructure) { selectionStart.current = canvasPointAtPointer(el, e.clientX, e.clientY); const initialSelectionBox = { left: selectionStart.current.x, top: selectionStart.current.y, width: 0, height: 0 }; selectionBoxRef.current = initialSelectionBox; setSelectionBox(initialSelectionBox); } el.setPointerCapture(e.pointerId); }}
         onPointerMove={handleCanvasPointerMove}
         onPointerUp={handleCanvasPointerUp}
         onPointerCancel={handleCanvasPointerCancel}>
-          {loading ? <div className="empty-state">Загрузка...</div> : items.length === 0 ? <div className="empty-state">Создайте первый объект или загрузите шаблон.</div> : visibleIds.size === 0 ? <div className="empty-state">Объекты не найдены.</div> : <>
+          {loading ? <div className="empty-state">Загрузка...</div> : items.length === 0 ? <div className="empty-state">Создайте первый объект или загрузите шаблон.</div> : <>
             <div className="placement-tree placement-free-tree" style={{ zoom }}>{renderNodes()}</div>
-            {placementMode === "seating" && !hasSeatPlacements && <div className="placement-seating-empty-note">Схема размещения пока не содержит мест. Перейдите к редактированию схемы размещения, чтобы добавить объекты.</div>}
+            {placementMode === "seating" && !hasSeatPlacements && <div className="placement-seating-empty-note">{mobileOnlySeating ? "Схема размещения пока не содержит мест." : "Схема размещения пока не содержит мест. Перейдите к редактированию схемы размещения, чтобы добавить объекты."}</div>}
           </>}
           {selectionBox && <div className="placement-selection-box" style={selectionBox} />}
         </div>
         {canEditStructure && selectedPropertiesTarget && propertyFormKey === selectedPropertiesTarget.key && <aside className="placement-properties-panel" aria-label="Свойства объекта размещения">
           {(selectedPropertiesTarget.isRowBatch || selectedPropertiesTarget.isGroup) && <header className="placement-properties-header"><h2>{selectedPropertiesTarget.isRowBatch ? "Группа рядов" : "Свойства группы"}</h2></header>}
           <div className="placement-properties-form">
-            {(!selectedPropertiesTarget.isGroup || selectedPropertiesTarget.isRowBatch) && <label className="field"><span>{propertyForm.placementType === "label" ? "Надпись" : "Название"}</span><input maxLength={140} required disabled={!canManage || busy} value={propertyForm.name} onChange={e => changeProperties({ name: e.target.value })} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>}
+            {propertyForm.placementType === "label" && <div className="placement-properties-object-type">Тип объекта: <strong>Текст</strong></div>}
+            {(!selectedPropertiesTarget.isGroup || selectedPropertiesTarget.isRowBatch) && <label className="field"><span>{propertyForm.placementType === "label" ? "Текст" : "Название"}</span><input maxLength={140} required disabled={!canManage || busy} value={propertyForm.name} onChange={e => changeProperties({ name: e.target.value })} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>}
         {propertyForm.placementType !== "label" && <label className="field"><span>Группа *</span><select required disabled={!canManage || busy} value={propertyForm.groupId} onChange={e => changeProperties({ groupId: e.target.value })}><option value="">Выберите группу</option>{flatGroups.map(group => <option key={group.id} value={group.id}>{"— ".repeat(group.level)}{group.name}</option>)}</select></label>}
             <div className="field placement-color-field"><span>{propertyForm.placementType === "label" ? "Цвет текста" : "Цвет объекта"}</span><div className="placement-color-picker-row">
               <input className="placement-color-input" type="color" value={propertyForm.color || (propertyForm.placementType === "label" ? "#34405a" : defaultPlacementColor)} disabled={!canManage || busy} aria-label="Выбрать цвет объекта" onChange={e => changeProperties({ color: e.target.value })} />
@@ -1278,17 +1904,17 @@ export const PlacementsPage: React.FC = () => {
       {error && <div className="alert alert-error">{error}</div>}
       {tab === "main" || !showGuestsTab ? <form className="form" onSubmit={save}>
         {showGuestsTab && <div className="placement-form-header-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setTab("guests")}>Гости ({editing?.guestCount ?? 0})</button></div>}
-        <label className="field"><span>{isLabel ? "Надпись" : "Название"}</span><input maxLength={140} required value={form.name} disabled={!canManage || busy} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
+        <label className="field"><span>{isLabel ? "Текст" : "Название"}</span><input maxLength={140} required value={form.name} disabled={!canManage || busy} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
         {!isLabel && <label className="field"><span>Группа *</span><select required disabled={!canManage || busy} value={form.groupId} onChange={e => setForm({ ...form, groupId: e.target.value })}><option value="">Выберите группу</option>{flatGroups.map(g => <option key={g.id} value={g.id}>{"— ".repeat(g.level)}{g.name}</option>)}</select></label>}
         <div className="field placement-color-field"><span>{isLabel ? "Цвет текста" : "Цвет объекта"}</span><div className="placement-color-picker-row">
           <input className="placement-color-input" type="color" value={form.color || (isLabel ? "#34405a" : defaultPlacementColor)} disabled={!canManage || busy} aria-label="Выбрать цвет объекта" onChange={e => setForm({ ...form, color: e.target.value })} />
           <button type="button" className="secondary-button" disabled={!canManage || busy || !form.color} onClick={() => setForm({ ...form, color: "" })}>Стандартный</button>
         </div></div>
-        {creationType ? <div className="placement-type-note">Тип объекта: {creationType === "container" ? "контейнер без мест" : creationType === "row" ? "ряд" : creationType === "label" ? "надпись" : "стол"}</div> : <fieldset className="placement-type-flags" disabled={!canManage || busy}><legend>Тип объекта</legend>
+        {creationType ? <div className="placement-type-note">Тип объекта: {creationType === "container" ? "контейнер без мест" : creationType === "row" ? "ряд" : creationType === "label" ? "текст" : "стол"}</div> : <fieldset className="placement-type-flags" disabled={!canManage || busy}><legend>Тип объекта</legend>
           <label><input type="radio" name="placement-type" disabled={!!editing && isRow} checked={form.placementType === "container"} onChange={() => setForm({ ...form, placementType: "container", displayChildrenAsRows: true, noQuota: true, count: 1, startNumber: 1 })} /> Контейнер (без мест)</label>
           <label><input type="radio" name="placement-type" checked={form.placementType === "row"} onChange={() => setForm({ ...form, placementType: "row", displayChildrenAsRows: false, noQuota: false, quota: Number(form.quota) > 0 ? form.quota : "10" })} /> Тип ряд</label>
           <label><input type="radio" name="placement-type" checked={form.placementType === "table"} onChange={() => setForm({ ...form, placementType: "table", displayChildrenAsRows: false, noQuota: false, quota: Number(form.quota) > 0 ? form.quota : "10" })} /> Тип стол</label>
-          <label><input type="radio" name="placement-type" checked={form.placementType === "label"} onChange={() => setForm({ ...form, placementType: "label", displayChildrenAsRows: false, noQuota: true, count: 1, startNumber: 1 })} /> Надпись</label>
+          <label><input type="radio" name="placement-type" checked={form.placementType === "label"} onChange={() => setForm({ ...form, placementType: "label", displayChildrenAsRows: false, noQuota: true, count: 1, startNumber: 1 })} /> Текст</label>
         </fieldset>}
         {isLabel && <label className="field"><span>Размер шрифта, px</span><input type="number" min={8} max={200} required disabled={busy} value={form.fontSize} onChange={e => setForm({ ...form, fontSize: e.target.value })} /></label>}
         {!isLabel && <section className={`placement-seat-settings${isHall ? " placement-seat-settings-disabled" : ""}`} aria-disabled={isHall}>
@@ -1317,13 +1943,9 @@ export const PlacementsPage: React.FC = () => {
     {seatPlacement && <Modal className="guest-form-modal seat-guest-modal" title={`Место ${seatLabel(seatPlacement, seatNumber!) || seatNumber} в ${seatPlacement.name}`} headerActions={placementMode === "seating" ? <button type="button" className="secondary-button" disabled={seatSaving || seatLabelSaving} onClick={openSeatNameEditor}>Изменить название места</button> : undefined} onClose={() => { if (seatNameEditorOpen) { setSeatNameEditorOpen(false); return; } if (!seatSaving && !seatLabelSaving) closeSeatForm(); }}>
       {seatError && <div className="alert alert-error">{seatError}</div>}
       {seatLoading ? <div className="empty-state">Загрузка данных гостя...</div> : <>
-        {canSeatGuests && <>{!seatGuest && <div className="group-edit-tabs" aria-label="Способ добавления гостя">
-          <button className={`group-edit-tab${seatTab === "new" ? " active" : ""}`} type="button" aria-pressed={seatTab === "new"} onClick={() => setSeatTab("new")}>Выбрать из Оргструктуры/Новый</button>
-          <button className={`group-edit-tab${seatTab === "existing" ? " active" : ""}`} type="button" aria-pressed={seatTab === "existing"} onClick={() => setSeatTab("existing")}>Выбрать из гостей</button>
-        </div>}
-        {!seatGuest && seatTab === "existing" ? <div className="seat-existing-guests">
+        {canSeatGuests && <>{!seatGuest ? <div className="seat-existing-guests">
           <input type="search" value={seatExistingSearch} onChange={e => { setSeatExistingSearch(e.target.value); setSeatExistingPage(1); }} placeholder="Поиск по ФИО или email (от 2 символов)" aria-label="Поиск гостей мероприятия" disabled={seatSaving} />
-          <div className="seat-existing-guests-table-wrap"><table className="seat-existing-guests-table"><thead><tr><th>ФИО</th><th>Email</th><th></th></tr></thead><tbody>{(!seatExistingLoading && !seatExistingError ? seatExistingGuests : []).map(guest => <tr key={guest.id}><td>{guest.name}</td><td>{guest.email ?? "—"}</td><td><button type="button" className="secondary-button" disabled={seatSaving || !guest.categoryId} title={!guest.categoryId ? "У гостя не указана категория" : undefined} onClick={() => void assignExistingGuestToSeat(guest)}>{guest.placementId ? "Пересадить" : "Добавить"}</button></td></tr>)}{seatExistingLoading ? <tr><td colSpan={3}>Загрузка гостей...</td></tr> : seatExistingError ? <tr><td colSpan={3} role="alert">{seatExistingError}</td></tr> : seatExistingGuests.length === 0 && <tr><td colSpan={3}>{seatExistingSearch.trim() ? "Гости не найдены." : "Гостей мероприятия пока нет."}</td></tr>}</tbody></table></div>
+          <div className="seat-existing-guests-table-wrap"><table className="seat-existing-guests-table"><thead><tr><th>ФИО</th><th>Email</th><th></th></tr></thead><tbody>{(!seatExistingLoading && !seatExistingError ? seatExistingGuests : []).map(guest => <tr key={guest.id}><td>{guest.name}</td><td>{guest.email ?? "—"}</td><td><button type="button" className="secondary-button" disabled={seatSaving || !guest.categoryId} title={!guest.categoryId ? "У гостя не указана категория" : undefined} onClick={() => void assignExistingGuestToSeat(guest)}>{guest.placementId ? "Пересадить" : "Добавить"}</button></td></tr>)}{seatExistingLoading ? <tr><td colSpan={3}>Загрузка гостей...</td></tr> : seatExistingError ? <tr><td colSpan={3} role="alert">{seatExistingError}</td></tr> : seatExistingGuests.length === 0 && <tr><td colSpan={3}>{seatExistingSearch.trim() ? "Согласованные гости не найдены." : "Нет согласованных гостей, доступных для рассадки."}</td></tr>}</tbody></table></div>
           <div className="pagination-row"><span className="muted">{seatExistingLoading ? "Загрузка..." : `Всего: ${seatExistingTotal}`}</span><div className="pagination-actions"><button className="secondary-button pagination-button" type="button" disabled={seatSaving || seatExistingLoading || seatExistingPage <= 1} onClick={() => setSeatExistingPage(page => page - 1)}>Назад</button><span className="pagination-current">Страница {seatExistingPage} из {seatExistingTotalPages}</span><button className="secondary-button pagination-button" type="button" disabled={seatSaving || seatExistingLoading || seatExistingPage >= seatExistingTotalPages} onClick={() => setSeatExistingPage(page => page + 1)}>Вперёд</button></div></div>
         </div> : <form className="form guest-edit-form seat-guest-form" onSubmit={saveSeatGuest}>
         <aside className="organization-picker seat-organization-picker" aria-label="Оригинальная структура">
@@ -1335,10 +1957,17 @@ export const PlacementsPage: React.FC = () => {
           <label className="field"><span>Имя</span><input required value={seatForm.name} disabled={seatSaving} onChange={e => setSeatForm({ ...seatForm, name: e.target.value })} /></label>
           <label className="field"><span>Email</span><input type="email" value={seatForm.email} disabled={seatSaving} onChange={e => setSeatForm({ ...seatForm, email: e.target.value })} /></label>
           <label className="field"><span>Телефон</span><input type="tel" value={seatForm.phone} disabled={seatSaving} onChange={e => setSeatForm({ ...seatForm, phone: e.target.value })} /></label>
-          <label className="field"><span>Группа</span><select required value={seatForm.groupId} disabled={seatSaving} onChange={e => setSeatForm({ ...seatForm, groupId: e.target.value })}>{flatGroups.filter(group => seatPlacement.groupId !== null && placementGroupScope(seatPlacement.groupId).has(group.id)).map(group => <option key={group.id} value={group.id}>{"— ".repeat(group.level)}{group.name}</option>)}</select></label>
+          <label className="field"><span>Группа</span><select required value={seatForm.groupId} disabled={seatSaving} onChange={e => changeSeatGuestGroup(e.target.value)}>{flatGroups.filter(group => seatPlacement.groupId !== null && placementGroupScope(seatPlacement.groupId).has(group.id)).map(group => <option key={group.id} value={group.id}>{"— ".repeat(group.level)}{group.name}</option>)}</select></label>
           <label className="field"><span>Категория *</span><select required value={seatForm.categoryId} disabled={seatSaving} onChange={e => setSeatForm({ ...seatForm, categoryId: e.target.value })}><option value="">Выберите категорию</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select>{categories.length === 0 && <small>Сначала создайте категорию мероприятия.</small>}</label>
+          <section className="seat-reassignment-fields" aria-labelledby="seat-reassignment-title">
+            <h3 id="seat-reassignment-title">Размещение</h3>
+            <div className="field seat-reassignment-picker"><span>Место</span><details ref={seatPlacementMenu} onKeyDown={event => { if (event.key === "Escape") { seatPlacementMenu.current?.removeAttribute("open"); event.currentTarget.querySelector<HTMLElement>("summary")?.focus(); } }}>
+              <summary className={seatForm.placementId ? "" : "placeholder"} aria-label={`Выбранное место: ${reseatingValue}`} onClick={event => { if (seatSaving) event.preventDefault(); }}><span>{reseatingValue}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5" /></svg></summary>
+              <div className="seat-reassignment-dropdown">{reseatingTree.roots.length > 0 ? <div className="seat-reassignment-tree placement-object-list-items" aria-label="Доступные места">{reseatingTree.roots.map(placement => renderReseatingTreePlacement(placement))}</div> : <div className="seat-reassignment-empty">Для группы гостя нет доступных свободных мест.</div>}</div>
+            </details></div>
+          </section>
         </div>
-        <div className="modal-actions"><button className="primary-button" disabled={seatSaving || !seatForm.categoryId}>{seatSaving ? "Сохраняем..." : seatGuest ? "Сохранить" : "Добавить гостя"}</button></div>
+        <div className="modal-actions"><button className="primary-button" disabled={seatSaving || !seatForm.categoryId || !reseatingValid}>{seatSaving ? "Сохраняем..." : seatGuestMoving ? "Сохранить и пересадить" : "Сохранить"}</button></div>
       </form>}</>}
         {!canSeatGuests && <div className="empty-state">Редактирование гостей недоступно для вашей роли.</div>}
       </>}

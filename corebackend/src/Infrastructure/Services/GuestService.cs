@@ -23,6 +23,15 @@ public sealed class GuestService(
         "invited",
         "rejected"
     };
+    private static readonly HashSet<string> KnownSortFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "name",
+        "status",
+        "category",
+        "group",
+        "placement",
+        "createdBy"
+    };
 
     public Task<Application.Entities.Guest> CreateGuestAsync(long eventId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null)
         => placements.Transaction(eventId, () => CreateGuestCoreAsync(eventId, loginId, name, email, phone, groupId, categoryId, tagIds, placementId, placementSeatNumber));
@@ -99,9 +108,9 @@ public sealed class GuestService(
         return await guestRepository.GetByIdAsync(guest.Id) ?? guest;
     }
     
-    public async Task<Application.Entities.Guest?> GetGuestAsync(long guestId)
+    public async Task<Application.Entities.Guest?> GetGuestAsync(long guestId, bool includeDeleted = false)
     {
-        return await guestRepository.GetByIdAsync(guestId);
+        return await guestRepository.GetByIdAsync(guestId, includeDeleted);
     }
 
     public Task<Application.Entities.Guest?> GetGuestByPublicIdAsync(Guid publicId) => guestRepository.GetByPublicIdAsync(publicId);
@@ -116,9 +125,15 @@ public sealed class GuestService(
         int page,
         int pageSize,
         string? search,
-        string? status = null,
-        long? categoryId = null,
-        IReadOnlyCollection<long>? tagIds = null)
+        IReadOnlyCollection<string>? statuses = null,
+        bool eligibleForSeating = false,
+        IReadOnlyCollection<long>? categoryIds = null,
+        IReadOnlyCollection<long>? tagIds = null,
+        IReadOnlyCollection<long>? groupIds = null,
+        IReadOnlyCollection<long>? createdByUserIds = null,
+        bool includeDeleted = false,
+        string? sortBy = null,
+        string? sortDirection = null)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
@@ -127,23 +142,50 @@ public sealed class GuestService(
         if (normalizedSearch is not { Length: >= 2 })
             normalizedSearch = null;
 
-        var normalizedStatus = status?.Trim();
-        if (string.IsNullOrWhiteSpace(normalizedStatus) || !KnownStatuses.Contains(normalizedStatus))
-            normalizedStatus = null;
-        else
-            normalizedStatus = normalizedStatus.ToLowerInvariant();
+        var normalizedStatuses = statuses?
+            .Select(status => status.Trim().ToLowerInvariant())
+            .Where(status => KnownStatuses.Contains(status))
+            .Distinct()
+            .ToList() ?? [];
+
+        var normalizedCategoryIds = categoryIds?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList() ?? [];
 
         var normalizedTagIds = tagIds?
             .Where(id => id > 0)
             .Distinct()
             .ToList() ?? [];
 
+        var normalizedGroupIds = groupIds?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList() ?? [];
+
+        var normalizedCreatedByUserIds = createdByUserIds?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList() ?? [];
+
+        var normalizedSortBy = sortBy?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedSortBy) || !KnownSortFields.Contains(normalizedSortBy))
+            normalizedSortBy = null;
+        var sortDescending = normalizedSortBy != null
+            && string.Equals(sortDirection?.Trim(), "desc", StringComparison.OrdinalIgnoreCase);
+
         var result = await guestRepository.GetPageByEventIdAsync(
             eventId,
             normalizedSearch,
-            normalizedStatus,
-            categoryId,
+            normalizedStatuses,
+            eligibleForSeating,
+            normalizedCategoryIds,
             normalizedTagIds,
+            normalizedGroupIds,
+            normalizedCreatedByUserIds,
+            includeDeleted,
+            normalizedSortBy,
+            sortDescending,
             page,
             pageSize);
 
@@ -494,7 +536,13 @@ public sealed class GuestService(
         var guestEmail = guest.Email;
         var guestPhone = guest.Phone;
 
-        await guestRepository.DeleteAsync(guestId);
+        var actor = await GetActorAsync(loginId, guest.EventId);
+        guest.IsDeleted = true;
+        guest.DeletedAt = DateTimeOffset.UtcNow;
+        guest.DeletedByUserId = actor.Id;
+        guest.PlacementId = null;
+        guest.PlacementSeatNumber = null;
+        await guestRepository.UpdateAsync(guest);
         await guestRepository.SaveChangesAsync();
 
         await eventLogService.AddAsync(
@@ -505,6 +553,168 @@ public sealed class GuestService(
             guestId,
             "Удалён гость",
             BuildGuestDescription(guestName, guestEmail, guestPhone));
+    }
+
+    public async Task RestoreDeletedGuestAsync(long guestId, long loginId)
+    {
+        var guest = await guestRepository.GetByIdAsync(guestId, includeDeleted: true);
+        if (guest == null)
+            throw new InvalidOperationException($"Guest {guestId} not found");
+        if (!guest.IsDeleted)
+            throw new InvalidOperationException("Guest is not deleted");
+
+        await eventStateGuard.EnsureActiveAsync(guest.EventId);
+        await EnsureCanManageGuestAsync(guest, loginId);
+
+        guest.IsDeleted = false;
+        guest.DeletedAt = null;
+        guest.DeletedByUserId = null;
+        await guestRepository.UpdateAsync(guest);
+        await guestRepository.SaveChangesAsync();
+
+        await eventLogService.AddAsync(
+            guest.EventId,
+            loginId,
+            "restored",
+            "Guest",
+            guest.Id,
+            "Гость восстановлен",
+            BuildGuestDescription(guest.Name, guest.Email, guest.Phone));
+    }
+
+    public async Task<GuestBulkSummary> GetBulkSummaryAsync(
+        long eventId,
+        long loginId,
+        GuestSelection selection)
+    {
+        var guests = await guestRepository.GetForBulkAsync(eventId, NormalizeSelection(selection));
+        var actions = new[]
+        {
+            (Action: "submit", Label: "Отправить на согласование"),
+            (Action: "approve", Label: "Согласовать"),
+            (Action: "reject", Label: "Отклонить"),
+            (Action: "invite", Label: "Пригласить"),
+            (Action: "restore_to_saved", Label: "Вернуть в сохранённые"),
+            (Action: "delete", Label: "Удалить"),
+            (Action: "restore_deleted", Label: "Восстановить")
+        };
+
+        var options = new List<GuestBulkActionOption>();
+        foreach (var action in actions)
+        {
+            var eligible = 0;
+            foreach (var guest in guests)
+            {
+                if (await GetBulkActionErrorAsync(guest, loginId, action.Action) == null)
+                    eligible++;
+            }
+
+            if (eligible > 0)
+                options.Add(new GuestBulkActionOption(action.Action, action.Label, eligible));
+        }
+
+        return new GuestBulkSummary(guests.Count, options);
+    }
+
+    public async Task<GuestBulkActionResult> ExecuteBulkActionAsync(
+        long eventId,
+        long loginId,
+        string action,
+        GuestSelection selection)
+    {
+        action = action.Trim().ToLowerInvariant();
+        var normalized = NormalizeSelection(selection);
+        var guests = await guestRepository.GetForBulkAsync(eventId, normalized);
+        var reasons = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var changed = 0;
+
+        foreach (var guest in guests)
+        {
+            var error = await GetBulkActionErrorAsync(guest, loginId, action);
+            if (error != null)
+            {
+                reasons[error] = reasons.GetValueOrDefault(error) + 1;
+                continue;
+            }
+
+            try
+            {
+                switch (action)
+                {
+                    case "submit": await SubmitGuestForReviewAsync(guest.Id, loginId); break;
+                    case "approve": await ApproveGuestAsync(guest.Id, loginId); break;
+                    case "reject": await RejectGuestAsync(guest.Id, loginId); break;
+                    case "invite": await InviteGuestAsync(guest.Id, loginId); break;
+                    case "restore_to_saved": await RestoreGuestToSavedAsync(guest.Id, loginId); break;
+                    case "delete": await DeleteGuestAsync(guest.Id, loginId); break;
+                    case "restore_deleted": await RestoreDeletedGuestAsync(guest.Id, loginId); break;
+                    default: throw new InvalidOperationException("Unknown bulk action");
+                }
+                changed++;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+            {
+                reasons[ex.Message] = reasons.GetValueOrDefault(ex.Message) + 1;
+            }
+        }
+
+        var skipped = guests.Count - changed;
+        return new GuestBulkActionResult(
+            guests.Count,
+            changed,
+            skipped,
+            reasons.Select(item => new GuestBulkSkipReason(item.Key, item.Value)).ToList());
+    }
+
+    private static GuestSelection NormalizeSelection(GuestSelection selection) => selection with
+    {
+        GuestIds = selection.GuestIds.Where(id => id > 0).Distinct().ToList(),
+        ExcludedGuestIds = selection.ExcludedGuestIds.Where(id => id > 0).Distinct().ToList(),
+        Search = selection.Search?.Trim() is { Length: >= 2 } search ? search : null,
+        Statuses = selection.Statuses.Where(KnownStatuses.Contains).Select(value => value.ToLowerInvariant()).Distinct().ToList(),
+        CategoryIds = selection.CategoryIds.Where(id => id > 0).Distinct().ToList(),
+        TagIds = selection.TagIds.Where(id => id > 0).Distinct().ToList(),
+        GroupIds = selection.GroupIds.Where(id => id > 0).Distinct().ToList(),
+        CreatedByUserIds = selection.CreatedByUserIds.Where(id => id > 0).Distinct().ToList()
+    };
+
+    private async Task<string?> GetBulkActionErrorAsync(Application.Entities.Guest guest, long loginId, string action)
+    {
+        var requiresApproval = action is "approve" or "reject" or "restore_to_saved";
+        var permission = requiresApproval ? "approve_guest" : "create_guest";
+        if (!await permissionService.HasPermissionAsync(loginId, guest.EventId, permission))
+            return "Недостаточно прав";
+
+        try
+        {
+            if (requiresApproval)
+                await EnsureGuestIsInApproverScopeAsync(guest, loginId);
+            else
+                await EnsureCanManageGuestAsync(guest, loginId);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            return "Гость находится вне доступной группы";
+        }
+
+        if (guest.IsDeleted)
+            return action == "restore_deleted" ? null : "Гость удалён";
+        if (action == "restore_deleted") return "Гость не удалён";
+        if (action == "submit" && guest.Status != "saved") return "Неверный текущий статус";
+        if (action == "invite" && guest.Status != "approved") return "Неверный текущий статус";
+        if (action == "restore_to_saved" && guest.Status != "rejected") return "Неверный текущий статус";
+        if (action == "reject" && guest.Status is "saved" or "rejected") return "Неверный текущий статус";
+        if (action == "approve")
+        {
+            var actor = await GetActorAsync(loginId, guest.EventId);
+            var isAdministrator = string.Equals(actor.Role?.Name, "Administrator", StringComparison.OrdinalIgnoreCase);
+            if (guest.Status != "on_review" && !(guest.Status == "admin_review" && isAdministrator))
+                return "Неверный текущий статус";
+        }
+        if (action is not ("submit" or "approve" or "reject" or "invite" or "restore_to_saved" or "delete" or "restore_deleted"))
+            return "Неизвестное действие";
+
+        return null;
     }
 
     private async Task EnsureCanManageGuestAsync(Application.Entities.Guest guest, long loginId)

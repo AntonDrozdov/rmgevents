@@ -4,6 +4,9 @@ services:
   corebackend:
     image: rmgevents-corebackend:${APP_VERSION:?Set APP_VERSION in deploy/.env}
     container_name: rmgevents-corebackend
+    env_file:
+      - path: ./.env.ai
+        required: false
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=rmgevents;Username=postgres;Password=Tgbyhn123
@@ -36,3 +39,4 @@ networks:
   danetwork:
     name: danetwork
     external: true
+

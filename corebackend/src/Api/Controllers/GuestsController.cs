@@ -46,6 +46,7 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
             guest.Email,
             guest.Phone,
             guest.Status,
+            guest.CreatedByUserId,
             FormatUserName(guest.CreatedByUser),
             guest.CreatedByUser?.Role?.Name,
             guest.CreatedAt,
@@ -58,7 +59,23 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
                     item.Action,
                     item.ActorName,
                     item.CreatedAt))
-                .ToList(), guest.PlacementId, guest.PlacementSeatNumber);
+                .ToList(), guest.PlacementId, guest.PlacementSeatNumber,
+            guest.IsDeleted,
+            guest.DeletedAt,
+            guest.DeletedByUserId,
+            FormatUserName(guest.DeletedByUser));
+
+    private static Application.Repositories.GuestSelection MapSelection(GuestBulkSelectionRequest request) => new(
+        request.SelectAllMatching,
+        request.GuestIds ?? [],
+        request.ExcludedGuestIds ?? [],
+        request.Search,
+        request.Statuses ?? [],
+        request.IncludeDeleted,
+        request.CategoryIds ?? [],
+        request.TagIds ?? [],
+        request.GroupIds ?? [],
+        request.CreatedByUserIds ?? []);
 
     [HttpGet]
     public async Task<ActionResult<PagedResultDto<GuestDto>>> GetGuests(
@@ -66,11 +83,17 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null,
-        [FromQuery] string? status = null,
-        [FromQuery] long? categoryId = null,
-        [FromQuery(Name = "tagIds")] List<long>? tagIds = null)
+        [FromQuery(Name = "statuses")] List<string>? statuses = null,
+        [FromQuery] bool eligibleForSeating = false,
+        [FromQuery(Name = "categoryIds")] List<long>? categoryIds = null,
+        [FromQuery(Name = "tagIds")] List<long>? tagIds = null,
+        [FromQuery(Name = "groupIds")] List<long>? groupIds = null,
+        [FromQuery(Name = "createdByUserIds")] List<long>? createdByUserIds = null,
+        [FromQuery] bool includeDeleted = false,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDirection = null)
     {
-        var guests = await guestService.GetGuestsPageByEventAsync(eventId, page, pageSize, search, status, categoryId, tagIds);
+        var guests = await guestService.GetGuestsPageByEventAsync(eventId, page, pageSize, search, statuses, eligibleForSeating, categoryIds, tagIds, groupIds, createdByUserIds, includeDeleted, sortBy, sortDirection);
         var result = guests.Items.Select(MapGuest).ToList();
 
         return Ok(new PagedResultDto<GuestDto>(
@@ -84,7 +107,7 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
     [HttpGet("{guestId:long}")]
     public async Task<ActionResult<GuestDto>> GetGuest(long eventId, long guestId)
     {
-        var guest = await guestService.GetGuestAsync(guestId);
+        var guest = await guestService.GetGuestAsync(guestId, includeDeleted: true);
         return guest == null || guest.EventId != eventId ? NotFound() : Ok(MapGuest(guest));
     }
 
@@ -298,5 +321,47 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
         {
             return BadRequest(ex.Message);
         }
+    }
+
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpPost("{guestId}/restore")]
+    public async Task<ActionResult<GuestDto>> RestoreDeletedGuest(long eventId, long guestId)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        try
+        {
+            await guestService.RestoreDeletedGuestAsync(guestId, loginId);
+            var guest = await guestService.GetGuestAsync(guestId, includeDeleted: true);
+            return guest == null || guest.EventId != eventId ? NotFound() : Ok(MapGuest(guest));
+        }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+    }
+
+    [HttpPost("bulk/summary")]
+    public async Task<ActionResult<GuestBulkSummaryDto>> GetBulkSummary(long eventId, GuestBulkSelectionRequest request)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var result = await guestService.GetBulkSummaryAsync(eventId, loginId, MapSelection(request));
+        return Ok(new GuestBulkSummaryDto(
+            result.SelectedCount,
+            result.Actions.Select(action => new GuestBulkActionOptionDto(action.Action, action.Label, action.EligibleCount)).ToList()));
+    }
+
+    [HttpPost("bulk/action")]
+    public async Task<ActionResult<GuestBulkActionResultDto>> ExecuteBulkAction(long eventId, GuestBulkActionRequest request)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        try
+        {
+            var result = await guestService.ExecuteBulkActionAsync(eventId, loginId, request.Action, MapSelection(request.Selection));
+            return Ok(new GuestBulkActionResultDto(
+                result.SelectedCount,
+                result.ChangedCount,
+                result.SkippedCount,
+                result.Reasons.Select(reason => new GuestBulkSkipReasonDto(reason.Reason, reason.Count)).ToList()));
+        }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
     }
 }

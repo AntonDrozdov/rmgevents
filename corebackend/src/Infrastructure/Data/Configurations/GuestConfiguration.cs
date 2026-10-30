@@ -67,6 +67,12 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
         builder.Property(x => x.ApprovedAt)
             .HasColumnName("approved_at");
 
+        builder.Property(x => x.IsDeleted)
+            .HasColumnName("is_deleted")
+            .HasDefaultValue(false);
+        builder.Property(x => x.DeletedAt).HasColumnName("deleted_at");
+        builder.Property(x => x.DeletedByUserId).HasColumnName("deleted_by_user_id");
+
         builder.HasOne(x => x.Event)
             .WithMany(x => x.Guests)
             .HasForeignKey(x => x.EventId)
@@ -82,11 +88,21 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
             .HasForeignKey(x => x.CreatedByUserId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(x => x.DeletedByUser)
+            .WithMany()
+            .HasForeignKey(x => x.DeletedByUserId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasQueryFilter(x => !x.IsDeleted);
+
         builder.HasIndex(x => new { x.EventId, x.CreatedAt })
             .HasDatabaseName("IX_guests_event_id_created_at");
 
         builder.HasIndex(x => new { x.EventId, x.Status, x.CreatedAt })
             .HasDatabaseName("IX_guests_event_id_status_created_at");
+
+        builder.HasIndex(x => new { x.EventId, x.IsDeleted })
+            .HasDatabaseName("IX_guests_event_id_is_deleted");
 
         builder.HasIndex(x => new { x.PlacementId, x.PlacementSeatNumber })
             .IsUnique()

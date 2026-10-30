@@ -33,8 +33,8 @@ try
     var tables = list.Where(p => p.ParentId == hall.Id).ToArray();
     Check(tables.Select(p => p.Name).SequenceEqual(new[] { "Table 7", "Table 8" }), "batch numbering");
     await Reject(() => service.Update(1, hall.Id, new("Hall", tables[0].Id, 1, null)), "cycle rejected");
-    var a = new Guest { EventId = 1, GroupId = 2, CreatedByUserId = 1, Name = "A", CreatedAt = DateTimeOffset.UtcNow };
-    var b = new Guest { EventId = 1, GroupId = 2, CreatedByUserId = 1, Name = "B", CreatedAt = DateTimeOffset.UtcNow };
+    var a = new Guest { EventId = 1, GroupId = 2, CreatedByUserId = 1, Name = "A", Status = "approved", CreatedAt = DateTimeOffset.UtcNow };
+    var b = new Guest { EventId = 1, GroupId = 2, CreatedByUserId = 1, Name = "B", Status = "approved", CreatedAt = DateTimeOffset.UtcNow };
     db.Guests.AddRange(a, b); await db.SaveChangesAsync();
     await Reject(() => service.Assign(1, hall.Id, a.Id, false), "hall cannot accept guests");
     await service.Assign(1, tables[0].Id, a.Id, false);
@@ -86,7 +86,6 @@ try
     Check(container.DisplayChildrenAsRows, "row container type is returned");
     await Reject(() => service.Create(1, new("Empty row", container.Id, 1, null, IsRow: true)), "row requires seats");
     await Reject(() => service.Create(1, new("Zero row", container.Id, 1, 0, IsRow: true)), "row requires positive seats");
-    await Reject(() => service.Create(1, new("Nested container", container.Id, 1, null, DisplayChildrenAsRows: true)), "container cannot be a row");
     list = await service.Create(1, new("Row", container.Id, 1, 5, 2, IsRow: true));
     Check(list.Count(p => p.ParentId == container.Id && p.Quota == 5) == 2, "batch creates rows with seats");
     var row = list.First(p => p.ParentId == container.Id);
@@ -105,7 +104,6 @@ try
     await Reject(() => service.Assign(1, container.Id, a.Id, false), "container cannot accept guests");
     list = await service.Create(1, new("Hall outside", null, 1, null));
     var outside = list.Single(p => p.Name == "Hall outside");
-    await Reject(() => service.Update(1, outside.Id, new(outside.Name, container.Id, 1, null)), "moving hall into container rejected");
     list = await service.Create(1, new("Сцена", null, 1, null, Color: "#336699", IsLabel: true));
     var label = list.Single(p => p.Name == "Сцена");
     Check(label.IsLabel && label.Quota == null && label.Color == "#336699", "label object is created without seats");

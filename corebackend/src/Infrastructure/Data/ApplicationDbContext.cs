@@ -16,6 +16,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<User> Users => Set<User>();
     public DbSet<Guest> Guests => Set<Guest>();
     public DbSet<Placement> Placements => Set<Placement>();
+    public DbSet<PlacementEditLock> PlacementEditLocks => Set<PlacementEditLock>();
     public DbSet<PlacementTemplate> PlacementTemplates => Set<PlacementTemplate>();
     public DbSet<TicketTemplate> TicketTemplates => Set<TicketTemplate>();
     public DbSet<Category> Categories => Set<Category>();

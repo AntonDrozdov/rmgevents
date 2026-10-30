@@ -29,5 +29,7 @@ public sealed class GuestDecisionConfiguration : IEntityTypeConfiguration<GuestD
             .WithMany(x => x.GuestDecisions)
             .HasForeignKey(x => x.ActorUserId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasQueryFilter(x => x.Guest != null && !x.Guest.IsDeleted);
     }
 }

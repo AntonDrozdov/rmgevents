@@ -54,3 +54,5 @@ logs/
 .env.local
 .env.*.local
 .vscode-server/
+deploy/releases/
+deploy/.env.ai

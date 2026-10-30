@@ -332,11 +332,39 @@ export interface GuestDto {
   email?: string | null;
   phone?: string | null;
   status: "saved" | "on_review" | "admin_review" | "approved" | "invited" | "rejected" | string;
+  createdByUserId: number;
   createdByName?: string | null;
   createdByRoleName?: string | null;
   createdAt: string;
   approvedAt?: string | null;
   decisions: GuestDecisionDto[];
+  isDeleted: boolean;
+  deletedAt?: string | null;
+  deletedByUserId?: number | null;
+  deletedByName?: string | null;
+}
+
+export interface GuestBulkSelectionRequest {
+  selectAllMatching: boolean;
+  guestIds: number[];
+  excludedGuestIds: number[];
+  search?: string;
+  statuses: string[];
+  includeDeleted: boolean;
+  categoryIds: number[];
+  tagIds: number[];
+  groupIds: number[];
+  createdByUserIds: number[];
+}
+
+export interface GuestBulkActionOptionDto { action: string; label: string; eligibleCount: number; }
+export interface GuestBulkSummaryDto { selectedCount: number; actions: GuestBulkActionOptionDto[]; }
+export interface GuestBulkSkipReasonDto { reason: string; count: number; }
+export interface GuestBulkActionResultDto {
+  selectedCount: number;
+  changedCount: number;
+  skippedCount: number;
+  reasons: GuestBulkSkipReasonDto[];
 }
 
 export interface PublicGuestDto {

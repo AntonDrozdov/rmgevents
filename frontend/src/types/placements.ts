@@ -47,4 +47,12 @@ export interface PlacementInput {
 export interface PlacementGuest {
   id: number; name: string; categoryName: string | null; groupId: number; groupName: string; placementId: number | null; seatNumber: number | null;
 }
+export interface PlacementEditLockStatus {
+  isLocked: boolean;
+  isOwnedByCurrentUser: boolean;
+  editorUserId?: number | null;
+  editorName?: string | null;
+  expiresAt?: string | null;
+  token?: string | null;
+}
 export interface PlacementTemplate { id: number; name: string; createdAt: string }

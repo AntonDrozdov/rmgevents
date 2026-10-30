@@ -12,15 +12,23 @@ public sealed record PlacementGuest(long Id, string Name, string? CategoryName, 
 
 public sealed class PlacementService(ApplicationDbContext db, IPermissionService permissions, IEventStateGuard guard)
 {
-    public async Task<T> Transaction<T>(long eventId, Func<Task<T>> action)
+    private static readonly string[] SeatingEligibleStatuses = ["approved", "invited"];
+
+    public async Task<T> Transaction<T>(long eventId, Func<Task<T>> action, bool validateSeatNames = false)
     {
-        if (db.Database.CurrentTransaction != null) return await action();
+        if (db.Database.CurrentTransaction != null)
+        {
+            var nestedResult = await action();
+            if (validateSeatNames) await EnsureUniqueSeatNames(eventId);
+            return nestedResult;
+        }
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
             await using var tx = await db.Database.BeginTransactionAsync();
             // Serialize placement/quota mutations within an event, including guest form saves.
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({eventId})");
             var result = await action();
+            if (validateSeatNames) await EnsureUniqueSeatNames(eventId);
             await tx.CommitAsync();
             return result;
         });
@@ -67,6 +75,16 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
     public async Task<int?> ResolveSeat(long eventId, long groupId, long? placementId, long? guestId = null, int? requestedSeatNumber = null)
     {
         if (!placementId.HasValue) return null;
+        var seatingGuest = guestId.HasValue
+            ? await db.Guests.AsNoTracking()
+                .Where(guest => guest.Id == guestId.Value && guest.EventId == eventId)
+                .Select(guest => new { guest.Status, guest.PlacementId, guest.PlacementSeatNumber })
+                .FirstOrDefaultAsync()
+            : null;
+        var keepsExistingSeat = seatingGuest?.PlacementId == placementId
+            && seatingGuest.PlacementSeatNumber == requestedSeatNumber;
+        if (seatingGuest == null || (!SeatingEligibleStatuses.Contains(seatingGuest.Status) && !keepsExistingSeat))
+            throw new InvalidOperationException("На место можно посадить только согласованного или приглашённого гостя.");
         var p = await db.Placements.AsNoTracking().FirstOrDefaultAsync(x => x.Id == placementId && x.EventId == eventId)
             ?? throw new InvalidOperationException("Объект размещения не найден.");
         if (!p.Quota.HasValue || !p.GroupId.HasValue) throw new InvalidOperationException("Для размещения укажите количество мест и группу.");
@@ -120,10 +138,6 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         var all = await db.Placements.AsNoTracking().Where(x => x.EventId == eventId).ToDictionaryAsync(x => x.Id);
         if (input.IsRow && (!input.Quota.HasValue || input.Quota <= 0))
             throw new InvalidOperationException("Ряд должен содержать хотя бы одно место.");
-        if (input.ParentId.HasValue && !input.IsRow && !input.IsLabel && !input.Quota.HasValue)
-            throw new InvalidOperationException("В контейнер можно поместить только объект с местами.");
-        if (input.ParentId.HasValue && input.DisplayChildrenAsRows)
-            throw new InvalidOperationException("Контейнер рядов нельзя поместить внутрь другого контейнера.");
         if (input.DisplayChildrenAsRows && input.Quota.HasValue)
             throw new InvalidOperationException("Контейнер рядов не может иметь места.");
         if (input.ParentId.HasValue && (!all.TryGetValue(input.ParentId.Value, out var directParent) || !directParent.DisplayChildrenAsRows))
@@ -169,6 +183,115 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         return JsonSerializer.Serialize(normalized);
     }
 
+    private static string NormalizeSeatNamePart(string value) => string.Join(" ", value
+        .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    private static string DefaultSeatLabel(Placement placement, int seatNumber)
+    {
+        var quota = placement.Quota ?? 0;
+        var offset = placement.SeatNumberingReversed
+            ? placement.IsRow
+                ? quota - seatNumber
+                : (quota - seatNumber + 1) % quota
+            : seatNumber - 1;
+        var number = placement.SeatStartNumber + offset;
+        return string.IsNullOrWhiteSpace(placement.SeatName)
+            ? number.ToString()
+            : $"{placement.SeatName.Trim()} {number}";
+    }
+
+    private async Task EnsureUniqueSeatNames(long eventId)
+    {
+        var placements = await db.Placements.AsNoTracking()
+            .Where(placement => placement.EventId == eventId)
+            .ToListAsync();
+        var byId = placements.ToDictionary(placement => placement.Id);
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var placement in placements.Where(placement => placement.Quota is > 0))
+        {
+            var path = new Stack<string>();
+            var current = placement;
+            var visited = new HashSet<long>();
+            while (visited.Add(current.Id))
+            {
+                path.Push(NormalizeSeatNamePart(current.Name));
+                if (!current.ParentId.HasValue || !byId.TryGetValue(current.ParentId.Value, out var parent)) break;
+                current = parent;
+            }
+
+            var labels = ParseSeatLabels(placement.SeatLabelsJson);
+            for (var seatNumber = 1; seatNumber <= placement.Quota!.Value; seatNumber++)
+            {
+                var seatLabel = labels.TryGetValue(seatNumber, out var customLabel)
+                    ? customLabel
+                    : DefaultSeatLabel(placement, seatNumber);
+                var nameParts = path.Append(NormalizeSeatNamePart(seatLabel)).ToArray();
+                var key = string.Join('\u001F', nameParts);
+                if (usedNames.Add(key)) continue;
+
+                throw new InvalidOperationException(
+                    $"Название места «{string.Join(" / ", nameParts)}» уже используется. Измените название контейнера, объекта или места.");
+            }
+        }
+    }
+
+    private async Task PreserveGuestSeatNumbersAfterDirectionChange(
+        long eventId,
+        IReadOnlyCollection<Placement> placements,
+        int? nextQuota,
+        int nextSeatStartNumber,
+        bool nextSeatNumberingReversed)
+    {
+        if (!nextQuota.HasValue || nextQuota <= 0) return;
+
+        var changedPlacements = placements
+            .Where(placement => placement.SeatNumberingReversed != nextSeatNumberingReversed
+                && placement.Quota == nextQuota
+                && placement.SeatStartNumber == nextSeatStartNumber)
+            .ToDictionary(placement => placement.Id);
+        if (changedPlacements.Count == 0) return;
+
+        var placementIds = changedPlacements.Keys.ToArray();
+        var assignments = await db.Guests.AsNoTracking()
+            .Where(guest => guest.EventId == eventId
+                && guest.PlacementId.HasValue
+                && placementIds.Contains(guest.PlacementId.Value)
+                && guest.PlacementSeatNumber.HasValue)
+            .Select(guest => new
+            {
+                guest.Id,
+                PlacementId = guest.PlacementId!.Value,
+                SeatNumber = guest.PlacementSeatNumber!.Value
+            })
+            .ToListAsync();
+        if (assignments.Count == 0) return;
+
+        var remappedSeats = assignments.ToDictionary(
+            assignment => assignment.Id,
+            assignment =>
+            {
+                var placement = changedPlacements[assignment.PlacementId];
+                return placement.IsRow
+                    ? nextQuota.Value - assignment.SeatNumber + 1
+                    : assignment.SeatNumber == 1
+                        ? 1
+                        : nextQuota.Value - assignment.SeatNumber + 2;
+            });
+        var guestIds = remappedSeats.Keys.ToArray();
+
+        // Move every occupied slot out of the positive range first so swapped seats
+        // do not temporarily violate the unique placement/seat constraint.
+        await db.Guests
+            .Where(guest => guestIds.Contains(guest.Id))
+            .ExecuteUpdateAsync(update => update.SetProperty(
+                guest => guest.PlacementSeatNumber,
+                guest => guest.PlacementSeatNumber * -1));
+
+        var guests = await db.Guests.Where(guest => guestIds.Contains(guest.Id)).ToListAsync();
+        foreach (var guest in guests) guest.PlacementSeatNumber = remappedSeats[guest.Id];
+    }
+
     public Task<List<PlacementView>> Create(long eventId, PlacementInput input) => Transaction(eventId, async () =>
     {
         await ValidateInput(eventId, input);
@@ -199,7 +322,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         }
         await db.SaveChangesAsync();
         return await List(eventId);
-    });
+    }, validateSeatNames: true);
 
     public sealed record RowRotation(long Id, int Rotation);
 
@@ -231,6 +354,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         var seatNamingChanged = p.SeatStartNumber != nextSeatStartNumber
             || p.SeatNumberingReversed != nextSeatNumberingReversed
             || !string.Equals(p.SeatName, nextSeatName, StringComparison.Ordinal);
+        await PreserveGuestSeatNumbersAfterDirectionChange(eventId, [p], input.Quota, nextSeatStartNumber, nextSeatNumberingReversed);
         p.ParentId = input.ParentId; p.GroupId = input.GroupId; p.Quota = input.Quota;
         p.DisplayChildrenAsRows = input.DisplayChildrenAsRows; p.CanvasX = input.CanvasX; p.CanvasY = input.CanvasY; p.CanvasWidth = input.CanvasWidth; p.CanvasHeight = input.CanvasHeight; p.Color = NormalizeColor(input.Color); p.SeatStartNumber = nextSeatStartNumber; p.SeatNumberingReversed = nextSeatNumberingReversed; p.SeatName = nextSeatName; p.IsRow = input.IsRow; p.Rotation = input.IsRow ? input.Rotation : 0; p.IsLabel = input.IsLabel; p.FontSize = input.IsLabel ? input.FontSize ?? 18 : null;
         p.SeatLabelsJson = seatNamingChanged ? SerializeSeatLabels(null) : SerializeSeatLabels(ParseSeatLabels(p.SeatLabelsJson), input.Quota);
@@ -254,7 +378,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         }
         await db.SaveChangesAsync();
         return await List(eventId);
-    });
+    }, validateSeatNames: true);
 
     public Task<List<PlacementView>> UpdateRowBatch(long eventId, Guid batchId, PlacementInput input) => Transaction(eventId, async () =>
     {
@@ -274,6 +398,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
             db.Placements.RemoveRange(removed);
             rows = rows.Take(input.Count).ToList();
         }
+        await PreserveGuestSeatNumbersAfterDirectionChange(eventId, rows, input.Quota, input.SeatStartNumber, input.SeatNumberingReversed);
         for (var i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
@@ -292,7 +417,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         });
         await db.SaveChangesAsync();
         return await List(eventId);
-    });
+    }, validateSeatNames: true);
 
     public Task<List<PlacementView>> GroupRows(long eventId, IReadOnlyCollection<long> ids) => Transaction(eventId, async () =>
     {
@@ -371,7 +496,7 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         }
 
         return await List(eventId);
-    });
+    }, validateSeatNames: true);
 
     public Task<List<PlacementView>> UngroupRows(long eventId, Guid batchId) => Transaction(eventId, async () =>
     {
@@ -397,13 +522,19 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
         placement.SeatLabelsJson = SerializeSeatLabels(labels, placement.Quota);
         await db.SaveChangesAsync();
         return await List(eventId);
-    });
+    }, validateSeatNames: true);
 
     public async Task<List<PlacementGuest>> Guests(long eventId, long groupId) {
         var scope = await GroupScope(eventId, groupId);
-        return await db.Guests.AsNoTracking().Where(g => g.EventId == eventId && scope.Contains(g.GroupId)).OrderBy(g => g.Name)
+        return await db.Guests.AsNoTracking().Where(g => g.EventId == eventId && scope.Contains(g.GroupId) && SeatingEligibleStatuses.Contains(g.Status)).OrderBy(g => g.Name)
             .Select(g => new PlacementGuest(g.Id, g.Name, g.GuestCategory == null ? null : g.GuestCategory.Category!.Name, g.GroupId, g.Group!.Name, g.PlacementId, g.PlacementSeatNumber)).ToListAsync();
     }
+
+    public async Task<List<PlacementGuest>> SeatedGuests(long eventId) => await db.Guests.AsNoTracking()
+        .Where(g => g.EventId == eventId && g.PlacementId.HasValue && g.PlacementSeatNumber.HasValue)
+        .OrderBy(g => g.Name)
+        .Select(g => new PlacementGuest(g.Id, g.Name, g.GuestCategory == null ? null : g.GuestCategory.Category!.Name, g.GroupId, g.Group!.Name, g.PlacementId, g.PlacementSeatNumber))
+        .ToListAsync();
 
     public Task<bool> Assign(long eventId, long id, long guestId, bool remove) => Transaction(eventId, async () =>
     {
@@ -459,5 +590,5 @@ public sealed class PlacementService(ApplicationDbContext db, IPermissionService
             }
         }
         return await List(eventId);
-    });
+    }, validateSeatNames: true);
 }
