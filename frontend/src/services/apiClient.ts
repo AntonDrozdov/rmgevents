@@ -2,10 +2,14 @@ import { Placement, PlacementEditLockStatus, PlacementInput, PlacementGuest, Pla
 import axios, { AxiosInstance } from "axios";
 export interface AssistantAction {
   id: string; eventId: number | null; title: string; expiresAt: string;
+  compactSummary?: string | null;
+  items?: string[] | null;
+  requiresPlacementEditLock?: boolean;
   changes: { field: string; before: string; after: string }[];
 }
-export interface AssistantClientRequest { method: string; path: string; body?: unknown | null }
-export interface AssistantActionResult { status: string; message: string; request?: AssistantClientRequest | null }
+export interface AssistantClientRequest { method: string; path: string; body?: unknown | null; requiresPlacementEditLock?: boolean }
+export interface AssistantActionResult { status: string; message: string; request?: AssistantClientRequest | null; requests?: AssistantClientRequest[] | null }
+export interface AssistantTokenUsage { inputTokens: number; outputTokens: number; totalTokens: number }
 export interface AssistantModelOption {
   costRank: number | null;
   id: string;
@@ -66,22 +70,23 @@ class ApiClient {
   async getAssistantModels(): Promise<AssistantModelOption[]> {
     return (await this.client.get("/assistant/models")).data;
   }
-  async askAssistant(request: { messages: { role: "user" | "assistant"; content: string }[]; page: string; eventId: number | null; model: string }, signal: AbortSignal): Promise<{ answer: string; sources: string[]; actions?: AssistantAction[] }> {
+  async askAssistant(request: { messages: { role: "user" | "assistant"; content: string }[]; page: string; eventId: number | null; model: string }, signal: AbortSignal): Promise<{ answer: string; sources: string[]; actions?: AssistantAction[]; usage?: AssistantTokenUsage | null }> {
     return (await this.client.post("/assistant/ask", request, { signal, timeout: 60000 })).data;
   }
   async decideAssistantAction(id: string, eventId: number | null, confirm: boolean): Promise<AssistantActionResult> {
     return (await this.client.post(`/assistant/actions/${id}/decision`, { eventId, confirm }, { timeout: 60000 })).data;
   }
-  async executeAssistantRequest(actionId: string, request: AssistantClientRequest, eventId: number | null): Promise<unknown> {
+  async executeAssistantRequest(actionId: string, request: AssistantClientRequest, eventId: number | null, index = 0, total = 1): Promise<unknown> {
     const method = request.method.toUpperCase();
     if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) || !/^\/events(?:\/|\?|$)/.test(request.path))
       throw new Error('AIMode вернул недопустимый запрос.');
     const placementHeaders = eventId && request.path.includes('/placements') ? this.placementEditHeaders(eventId) : undefined;
+    const requestId = total <= 1 ? actionId : `${actionId.slice(0, 40)}${(index + 1).toString(16).padStart(8, '0')}`;
     return (await this.client.request({
       method,
       url: request.path,
       data: request.body ?? undefined,
-      headers: { ...placementHeaders, 'X-Assistant-Action-Id': actionId },
+      headers: { ...placementHeaders, 'X-Assistant-Action-Id': requestId },
       timeout: 60000,
     })).data;
   }
@@ -119,6 +124,7 @@ class ApiClient {
     if (token) this.placementEditTokens.set(String(eventId), token);
     else this.placementEditTokens.delete(String(eventId));
   }
+  hasPlacementEditToken(eventId: string | number) { return this.placementEditTokens.has(String(eventId)); }
   async getPlacements(eventId: string | number): Promise<Placement[]> { return (await this.client.get('/events/'+eventId+'/placements')).data; }
   async getPlacementEditLock(eventId: string | number): Promise<PlacementEditLockStatus> { return (await this.client.get('/events/'+eventId+'/placements/edit-lock')).data; }
   async acquirePlacementEditLock(eventId: string | number): Promise<PlacementEditLockStatus> { return (await this.client.post('/events/'+eventId+'/placements/edit-lock/acquire')).data; }

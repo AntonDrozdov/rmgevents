@@ -666,7 +666,9 @@ export const GroupsPage = () => {
     startY: number;
     scrollLeft: number;
     scrollTop: number;
+    didMove: boolean;
   } | null>(null);
+  const suppressGroupTreeClickRef = useRef(false);
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1200,16 +1202,20 @@ export const GroupsPage = () => {
   };
 
   const handleGroupTreePanStart = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 2) return;
+    const mobileMousePan = event.button === 0
+      && window.matchMedia("(max-width: 820px)").matches;
+    if (event.button !== 2 && !mobileMousePan) return;
+    if (mobileMousePan && (event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
 
     event.preventDefault();
-    event.stopPropagation();
+    if (mobileMousePan) event.stopPropagation();
 
     groupsTreePanRef.current = {
       startX: event.clientX,
       startY: event.clientY,
       scrollLeft: event.currentTarget.scrollLeft,
       scrollTop: event.currentTarget.scrollTop,
+      didMove: false,
     };
     setIsGroupTreePanning(true);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1220,12 +1226,19 @@ export const GroupsPage = () => {
     const container = groupsTreeScrollRef.current;
     if (!panState || !container) return;
 
+    if (!panState.didMove && Math.hypot(event.clientX - panState.startX, event.clientY - panState.startY) >= 4) {
+      panState.didMove = true;
+    }
     event.preventDefault();
     container.scrollLeft = panState.scrollLeft - (event.clientX - panState.startX);
     container.scrollTop = panState.scrollTop - (event.clientY - panState.startY);
   };
 
   const stopGroupTreePanning = () => {
+    if (groupsTreePanRef.current?.didMove) {
+      suppressGroupTreeClickRef.current = true;
+      window.setTimeout(() => { suppressGroupTreeClickRef.current = false; }, 0);
+    }
     groupsTreePanRef.current = null;
     setIsGroupTreePanning(false);
   };
@@ -1908,6 +1921,11 @@ export const GroupsPage = () => {
                 onPointerMove={handleGroupTreePanMove}
                 onPointerUp={stopGroupTreePanning}
                 onPointerCancel={stopGroupTreePanning}
+                onClickCapture={(event) => {
+                  if (!suppressGroupTreeClickRef.current) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
               >
                 <ul
                   className="groups-tree"

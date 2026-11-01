@@ -169,6 +169,12 @@ export const UsersPage: React.FC = () => {
   const [groups, setGroups] = useState<GroupTreeDto[]>([]);
   const [roles, setRoles] = useState<RoleDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userSearch, setUserSearch] = useState("");
+  const [isUserFiltersOpen, setIsUserFiltersOpen] = useState(false);
+  const [roleFilters, setRoleFilters] = useState<string[]>([]);
+  const [groupFilters, setGroupFilters] = useState<string[]>([]);
+  const [draftRoleFilters, setDraftRoleFilters] = useState<string[]>([]);
+  const [draftGroupFilters, setDraftGroupFilters] = useState<string[]>([]);
   const [referencesLoading, setReferencesLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -202,6 +208,20 @@ export const UsersPage: React.FC = () => {
   const isArchived = selectedEvent?.isArchived ?? false;
   const canCreate = hasCreatePermission && !isArchived;
   const flatGroups = useMemo(() => flattenGroups(groups), [groups]);
+  const userRoleOptions = useMemo<[string, string][]>(() => [...new Map<string, string>(users.filter((user) => user.roleName).map((user) => [String(user.roleId), user.roleName!] as [string, string])).entries()], [users]);
+  const userGroupOptions = useMemo<[string, string][]>(() => [...new Map<string, string>(users.filter((user) => user.groupName).map((user) => [String(user.groupId), user.groupName!] as [string, string])).entries()], [users]);
+  const activeUserFiltersCount = Number(roleFilters.length > 0) + Number(groupFilters.length > 0);
+  const filteredUsers = useMemo(() => {
+    const query = normalizeSearch(userSearch);
+    return users.filter((user) => {
+      const matchesSearch = !query || normalizeSearch([
+        formatUserName(user), user.login, user.email, user.tel, user.roleName, user.groupName, user.createdByName,
+      ].filter(Boolean).join(" ")).includes(query);
+      const matchesRole = roleFilters.length === 0 || roleFilters.includes(String(user.roleId));
+      const matchesGroup = groupFilters.length === 0 || groupFilters.includes(String(user.groupId));
+      return matchesSearch && matchesRole && matchesGroup;
+    });
+  }, [users, userSearch, roleFilters, groupFilters]);
   const rootGroupId = String(groups[0]?.id ?? "");
   const isAdministratorRole = (roleId: string) =>
     isAdministratorRoleName(roles.find((role) => String(role.id) === roleId)?.name);
@@ -621,6 +641,24 @@ export const UsersPage: React.FC = () => {
     }
   };
 
+  const toggleFilterValue = (values: string[], setValues: (next: string[]) => void, value: string) => {
+    setValues(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
+  };
+
+  const openUserFilters = () => {
+    setDraftRoleFilters(roleFilters);
+    setDraftGroupFilters(groupFilters);
+    setIsUserFiltersOpen(true);
+  };
+
+  const resetUserFilters = () => {
+    setRoleFilters([]);
+    setGroupFilters([]);
+    setDraftRoleFilters([]);
+    setDraftGroupFilters([]);
+    setIsUserFiltersOpen(false);
+  };
+
   return (
     <div className="tab-content">
       <div className="section-heading users-heading canvas-section-heading">
@@ -641,10 +679,26 @@ export const UsersPage: React.FC = () => {
       {isArchived && <div className="alert alert-info">Мероприятие завершено. Список сотрудников доступен только для просмотра. Для изменений верните мероприятие в активные.</div>}
 
       <section className="panel">
+        <div className="guest-search-row users-search-row">
+          <label className="field guest-search-field">
+            <input type="search" value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Поиск" aria-label="Поиск сотрудников по ФИО, email, телефону, логину, роли или группе" />
+          </label>
+          <button className={`secondary-button filter-modal-button${activeUserFiltersCount ? " active" : ""}`} type="button" onClick={openUserFilters} disabled={loading}>
+            Фильтровать{activeUserFiltersCount ? ` (${activeUserFiltersCount})` : ""}
+          </button>
+        </div>
+        {(userSearch.trim() || activeUserFiltersCount > 0) && <div className="active-guest-filters" aria-live="polite">
+          {userSearch.trim() && <span>Поиск: {userSearch.trim()} <button type="button" onClick={() => setUserSearch("")} aria-label="Очистить поиск">×</button></span>}
+          {roleFilters.map((id) => <span key={`role-${id}`}>Роль: {userRoleOptions.find(([optionId]) => optionId === id)?.[1] ?? id} <button type="button" onClick={() => setRoleFilters((current) => current.filter((value) => value !== id))} aria-label="Убрать фильтр роли">×</button></span>)}
+          {groupFilters.map((id) => <span key={`group-${id}`}>Группа: {userGroupOptions.find(([optionId]) => optionId === id)?.[1] ?? id} <button type="button" onClick={() => setGroupFilters((current) => current.filter((value) => value !== id))} aria-label="Убрать фильтр группы">×</button></span>)}
+          <strong>Найдено: {filteredUsers.length} из {users.length}</strong>
+        </div>}
         {loading ? (
           <div className="empty-state compact">Загрузка...</div>
         ) : users.length === 0 ? (
           <div className="empty-state compact">Сотрудники пока не найдены.</div>
+        ) : filteredUsers.length === 0 ? (
+          <div className="empty-state compact">Поиск и фильтры ничего не нашли.</div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -660,7 +714,7 @@ export const UsersPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
+                {filteredUsers.map((user) => (
                   <tr
                     className={`table-hover-row${canCreate ? " table-editable-row" : ""}`}
                     key={user.id}
@@ -726,6 +780,62 @@ export const UsersPage: React.FC = () => {
           </div>
         )}
       </section>
+
+      {isUserFiltersOpen && <Modal className="filters-modal employee-filters-modal" title="Фильтры сотрудников" description="Выберите роли и группы, используемые в списке сотрудников." onClose={() => setIsUserFiltersOpen(false)}>
+        <div className="filters-form">
+          <section className="filter-section employee-role-filter-section">
+            <div className="selected-filter-row selected-tags-row">
+              <span>Роли</span>
+              {draftRoleFilters.length === 0
+                ? <span className="selected-category-empty">Все роли</span>
+                : draftRoleFilters.map((id) => {
+                  const name = userRoleOptions.find(([optionId]) => optionId === id)?.[1] ?? id;
+                  return <span className="filter-value-with-remove" key={id}>
+                    <span className="filter-value-cloud" title={name}>{name}</span>
+                    <button type="button" aria-label={`Убрать роль ${name}`} onClick={() => toggleFilterValue(draftRoleFilters, setDraftRoleFilters, id)}>×</button>
+                  </span>;
+                })}
+            </div>
+            <details className="filter-checklist employee-role-filter-checklist">
+              <summary>Выбрать роли <span>{draftRoleFilters.length ? `Выбрано: ${draftRoleFilters.length}` : "Все"}</span></summary>
+              <div className="filter-checklist-menu" role="group" aria-label="Роли сотрудников">
+                {userRoleOptions.length ? userRoleOptions.map(([id, name]) => <label key={id}><input type="checkbox" checked={draftRoleFilters.includes(id)} onChange={() => toggleFilterValue(draftRoleFilters, setDraftRoleFilters, id)} /><span className="filter-option-text" title={name}>{name}</span></label>) : <span className="tag-filter-empty">Нет назначенных ролей.</span>}
+              </div>
+            </details>
+          </section>
+          <section className="filter-section">
+            <div className="selected-filter-row"><span>Роли</span><span className="selected-category-empty">{draftRoleFilters.length ? `Выбрано: ${draftRoleFilters.length}` : "Все роли"}</span></div>
+            <div className="filter-checklist-menu employee-filter-options" role="group" aria-label="Роли сотрудников">
+              {userRoleOptions.length ? userRoleOptions.map(([id, name]) => <label key={id}><input type="checkbox" checked={draftRoleFilters.includes(id)} onChange={() => toggleFilterValue(draftRoleFilters, setDraftRoleFilters, id)} /><span>{name}</span></label>) : <span className="tag-filter-empty">Нет назначенных ролей.</span>}
+            </div>
+          </section>
+          <section className="filter-section">
+            <div className="selected-filter-row selected-tags-row">
+              <span>Группы</span>
+              {draftGroupFilters.length === 0
+                ? <span className="selected-category-empty">Все группы</span>
+                : draftGroupFilters.map((id) => {
+                  const name = userGroupOptions.find(([optionId]) => optionId === id)?.[1] ?? id;
+                  return <span className="filter-value-with-remove" key={id}>
+                    <span className="filter-value-cloud group-filter-cloud" title={name}><span>{name}</span></span>
+                    <button type="button" aria-label={`Убрать группу ${name}`} onClick={() => toggleFilterValue(draftGroupFilters, setDraftGroupFilters, id)}>×</button>
+                  </span>;
+                })}
+            </div>
+            <details className="filter-checklist employee-group-filter-checklist">
+              <summary>Выбрать группы <span>{draftGroupFilters.length ? `Выбрано: ${draftGroupFilters.length}` : "Все"}</span></summary>
+              <div className="filter-checklist-menu" role="group" aria-label="Группы сотрудников">
+                {userGroupOptions.length ? userGroupOptions.map(([id, name]) => <label key={id}><input type="checkbox" checked={draftGroupFilters.includes(id)} onChange={() => toggleFilterValue(draftGroupFilters, setDraftGroupFilters, id)} /><span className="filter-option-text" title={name}>{name}</span></label>) : <span className="tag-filter-empty">Нет назначенных групп.</span>}
+              </div>
+            </details>
+          </section>
+          <div className="modal-actions filters-modal-actions">
+            <button className="secondary-button" type="button" onClick={() => setIsUserFiltersOpen(false)}>Отмена</button>
+            <button className="secondary-button" type="button" onClick={resetUserFilters}>Сбросить</button>
+            <button className="primary-button" type="button" onClick={() => { setRoleFilters(draftRoleFilters); setGroupFilters(draftGroupFilters); setIsUserFiltersOpen(false); }}>Применить</button>
+          </div>
+        </div>
+      </Modal>}
 
       {isCreateModalOpen && (
         <Modal

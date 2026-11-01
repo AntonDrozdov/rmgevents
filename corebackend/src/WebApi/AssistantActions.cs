@@ -11,9 +11,13 @@ using Microsoft.Extensions.Caching.Memory;
 namespace WebApi;
 
 public sealed record AssistantChange(string Field, string Before, string After);
-public sealed record AssistantActionView(string Id, long? EventId, string Title, IReadOnlyList<AssistantChange> Changes, DateTimeOffset ExpiresAt);
+public sealed record AssistantActionView(string Id, long? EventId, string Title, IReadOnlyList<AssistantChange> Changes,
+    DateTimeOffset ExpiresAt, string? CompactSummary = null, IReadOnlyList<string>? Items = null,
+    bool RequiresPlacementEditLock = false);
 public sealed record AssistantActionPreparation(string Message, [property: JsonIgnore] AssistantActionView Action);
-public sealed record AssistantActionResult(string Status, string Message, AssistantClientRequest? Request = null);
+public sealed record AssistantActionResult(string Status, string Message, AssistantClientRequest? Request = null,
+    IReadOnlyList<AssistantClientRequest>? Requests = null);
+public sealed record AssistantBatchRequest(string Operation, string? RequiredPermission, AssistantClientRequest Request);
 public sealed class AssistantActionException(int status, string message) : Exception(message) { public int Status { get; } = status; }
 
 public sealed class AssistantPendingAction(long loginId, AssistantActionView view, string kind, string fingerprint,
@@ -29,6 +33,7 @@ public sealed class AssistantPendingAction(long loginId, AssistantActionView vie
     public bool Archived { get; } = archived;
     public string? RequiredPermission { get; init; }
     public AssistantClientRequest? Request { get; init; }
+    public IReadOnlyList<AssistantBatchRequest>? Requests { get; init; }
     public int State;
     public AssistantActionResult? Result;
 }
@@ -41,7 +46,7 @@ public sealed class AssistantActionStore(IDistributedCache? distributed = null) 
     private const string Prefix = "rmgevents:assistant:action:";
     private sealed record Snapshot(long LoginId, AssistantActionView View, string Kind, string Fingerprint,
         string Name, string? Description, DateOnly Date, bool Archived, string? RequiredPermission,
-        AssistantClientRequest? Request, int State, AssistantActionResult? Result);
+        AssistantClientRequest? Request, IReadOnlyList<AssistantBatchRequest>? Requests, int State, AssistantActionResult? Result);
 
     public void Add(AssistantPendingAction action)
     {
@@ -75,7 +80,7 @@ public sealed class AssistantActionStore(IDistributedCache? distributed = null) 
         var ttl = action.View.ExpiresAt - DateTimeOffset.UtcNow;
         if (ttl <= TimeSpan.Zero) return;
         var snapshot = new Snapshot(action.LoginId, action.View, action.Kind, action.Fingerprint, action.Name,
-            action.Description, action.Date, action.Archived, action.RequiredPermission, action.Request, action.State, action.Result);
+            action.Description, action.Date, action.Archived, action.RequiredPermission, action.Request, action.Requests, action.State, action.Result);
         distributed.SetString(Prefix + action.View.Id, JsonSerializer.Serialize(snapshot),
             new DistributedCacheEntryOptions { AbsoluteExpiration = action.View.ExpiresAt });
     }
@@ -92,6 +97,7 @@ public sealed class AssistantActionStore(IDistributedCache? distributed = null) 
         {
             RequiredPermission = snapshot.RequiredPermission,
             Request = snapshot.Request,
+            Requests = snapshot.Requests,
             State = snapshot.State,
             Result = snapshot.Result
         };
@@ -162,7 +168,8 @@ public sealed class AssistantActions(ApplicationDbContext db, IUserService users
     {
         var action = await catalog.BuildAsync(args, loginId, eventId, ct);
         var view = new AssistantActionView(Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), eventId,
-            action.Title, action.Changes, DateTimeOffset.UtcNow.AddMinutes(10));
+            action.Title, action.Changes, DateTimeOffset.UtcNow.AddMinutes(10), action.CompactSummary,
+            RequiresPlacementEditLock: action.Request.RequiresPlacementEditLock);
         store.Add(new(loginId, view, action.Operation, "", "", null, default, false)
         {
             RequiredPermission = action.RequiredPermission,
@@ -171,10 +178,52 @@ public sealed class AssistantActions(ApplicationDbContext db, IUserService users
         return new("Действие подготовлено, но ещё не выполнено. Проверьте карточку и подтвердите его кнопкой.", view);
     }
 
+    public async Task<AssistantActionPreparation> PrepareClientActionsAsync(JsonElement args, long loginId, long? eventId, CancellationToken ct)
+    {
+        if (args.ValueKind != JsonValueKind.Object || args.EnumerateObject().Any(x => x.Name is not ("title" or "actions"))
+            || !args.TryGetProperty("actions", out var supplied) || supplied.ValueKind != JsonValueKind.Array
+            || supplied.GetArrayLength() is < 2 or > 25)
+            throw new AssistantActionException(400, "Пакет должен содержать от 2 до 25 действий.");
+
+        var actions = new List<AssistantClientAction>();
+        foreach (var item in supplied.EnumerateArray())
+            actions.Add(await catalog.BuildAsync(item, loginId, eventId, ct));
+
+        var title = "Выполнить пакет действий";
+        if (args.TryGetProperty("title", out var suppliedTitle) && suppliedTitle.ValueKind == JsonValueKind.String)
+        {
+            var value = suppliedTitle.GetString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(value) && value.Length <= 200
+                && !value.Contains("/events", StringComparison.OrdinalIgnoreCase)) title = value;
+        }
+        var items = actions.Select(CompactItem).ToArray();
+        var view = new AssistantActionView(Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), eventId,
+            title, [], DateTimeOffset.UtcNow.AddMinutes(10), $"Подготовлено действий: {actions.Count}", items,
+            actions.Any(x => x.Request.RequiresPlacementEditLock));
+        store.Add(new(loginId, view, "batch", "", "", null, default, false)
+        {
+            Requests = actions.Select(x => new AssistantBatchRequest(x.Operation, x.RequiredPermission, x.Request)).ToArray()
+        });
+        return new("Пакет действий подготовлен, но ещё не выполнен. Проверьте общий список и подтвердите его одной кнопкой.", view);
+    }
+
+    private static string CompactItem(AssistantClientAction action)
+    {
+        if (!string.IsNullOrWhiteSpace(action.CompactSummary)) return action.CompactSummary;
+        var details = action.Changes.Where(x => x.Field != "Что будет сделано" && !string.IsNullOrWhiteSpace(x.After))
+            .Take(8).Select(x => $"{x.Field}: {x.After}").ToArray();
+        return details.Length == 0 ? action.Title : $"{action.Title} · {string.Join(" · ", details)}";
+    }
+
     public async Task<AssistantActionResult> DecideAsync(string id, long loginId, long? eventId, bool confirm, CancellationToken ct)
     {
         var pending = store.Get(id, loginId, eventId);
-        if (pending.Request is not null)
+        if (pending.Requests is { Count: > 0 })
+        {
+            foreach (var request in pending.Requests)
+                await catalog.RecheckAsync(loginId, eventId, request.Operation, request.RequiredPermission);
+        }
+        else if (pending.Request is not null)
             await catalog.RecheckAsync(loginId, eventId, pending.Kind, pending.RequiredPermission);
         else if (eventId is long currentEventId)
             await CheckAccess(loginId, currentEventId); // Recheck even for retry; permission may have been revoked.
@@ -185,6 +234,13 @@ public sealed class AssistantActions(ApplicationDbContext db, IUserService users
         if (!confirm)
         {
             pending.Result = new("cancelled", "Изменение отменено.");
+            store.Save(pending);
+            return pending.Result;
+        }
+        if (pending.Requests is { Count: > 0 } requests)
+        {
+            pending.Result = new("approved", "Права проверены. Пакет передан обычному API приложения для выполнения.",
+                Requests: requests.Select(x => x.Request).ToArray());
             store.Save(pending);
             return pending.Result;
         }

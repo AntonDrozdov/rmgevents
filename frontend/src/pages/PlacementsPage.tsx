@@ -150,7 +150,7 @@ export const PlacementsPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const autoFocusedSearchResultRef = useRef<number | null>(null);
   const [zoom, setZoom] = useState(1);
-  const [objectListCollapsed, setObjectListCollapsed] = useState(false);
+  const [objectListCollapsed, setObjectListCollapsed] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches);
   const [depth, setDepth] = useState(0);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [editing, setEditing] = useState<Placement | null>(null);
@@ -215,7 +215,7 @@ export const PlacementsPage: React.FC = () => {
   const drag = useRef<number | null>(null);
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<number | "root" | null>(null);
-  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const pan = useRef<{ x: number; y: number; left: number; top: number; didMove: boolean } | null>(null);
   const selectionStart = useRef<{ x: number; y: number } | null>(null);
   const selectionBoxRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
   const placementFocusSequence = useRef(0);
@@ -245,6 +245,9 @@ export const PlacementsPage: React.FC = () => {
     media.addEventListener("change", syncMobileMode);
     return () => media.removeEventListener("change", syncMobileMode);
   }, []);
+  useEffect(() => {
+    setObjectListCollapsed(mobileOnlySeating);
+  }, [mobileOnlySeating]);
   useEffect(() => {
     if (!mobileOnlySeating || placementMode === "seating") return;
     seatViewport.current = null;
@@ -616,6 +619,13 @@ export const PlacementsPage: React.FC = () => {
   };
   const isTextPlacement = (placement: Placement) => placement.isLabel
     || (!placement.isRow && !placement.displayChildrenAsRows && placement.quota === null);
+  const rowInfoWidth = (placement: Placement) => {
+    const groupName = flatGroups.find(group => group.id === placement.groupId)?.name ?? "Без группы";
+    const nameWidth = rowLabelWidthFor(placement.name);
+    if (placementMode !== "schema") return Math.min(240, Math.max(150, nameWidth + 22));
+    const metaWidth = rowLabelWidthFor(`Группа: ${groupName}`) + rowLabelWidthFor(seatCountLabel(placement.quota ?? 0)) + 30;
+    return Math.min(240, Math.max(150, nameWidth + 22, metaWidth));
+  };
   const placementFootprint = (placement: Placement) => {
     if (isTextPlacement(placement)) {
       const size = placement.fontSize ?? 18;
@@ -624,12 +634,7 @@ export const PlacementsPage: React.FC = () => {
       return { width: Math.max(1, Math.ceil(rowLabelMeasureContext?.measureText(placement.name).width ?? placement.name.length * size * .6)), height: Math.ceil(size * 1.3) };
     }
     if (placement.isRow) {
-      const groupName = flatGroups.find(group => group.id === placement.groupId)?.name ?? "Без группы";
-      const labelWidth = Math.min(220, Math.max(
-        rowLabelWidthFor(placementMode === "schema" ? `${placement.name} · ${seatCountLabel(placement.quota ?? 0)}` : placement.name),
-        placementMode === "schema" ? rowLabelWidthFor(groupName) : 0
-      ));
-      return { width: labelWidth + 12 + Math.max(28, (placement.quota ?? 1) * (rowSeatWidth(placement) + 5) - 5), height: 32 + (placement.parentId !== null ? 40 : 0) };
+      return { width: rowInfoWidth(placement) + 12 + Math.max(28, (placement.quota ?? 1) * (rowSeatWidth(placement) + 5) - 5), height: 54 + (placement.parentId !== null ? 40 : 0) };
     }
     if (placement.displayChildrenAsRows) return { width: 250, height: 92 };
     const radius = tableRadiusFor(placement.quota ?? 0, rowSeatWidth(placement));
@@ -929,14 +934,18 @@ export const PlacementsPage: React.FC = () => {
     const bottom = Math.max(...layouts.map(layout => layout.y + layout.height));
     const width = Math.max(1, right - left);
     const height = Math.max(1, bottom - top);
-    const nextZoom = Math.min(1, Math.max(.05, Math.min((el.clientWidth - 120) / width, (el.clientHeight - 120) / height)));
+    const compactViewport = window.matchMedia("(max-width: 720px)").matches;
+    const minFitZoom = compactViewport ? .2 : .05;
+    const nextZoom = Math.min(1, Math.max(minFitZoom, Math.min((el.clientWidth - 120) / width, (el.clientHeight - 120) / height)));
     const centerX = left + width / 2;
     const centerY = top + height / 2;
     setZoom(nextZoom);
     return window.requestAnimationFrame(() => {
       el.scrollTo({
         left: Math.max(0, (canvasOrigin + centerX) * nextZoom - el.clientWidth / 2),
-        top: Math.max(0, (canvasOrigin + centerY) * nextZoom - el.clientHeight / 2)
+        top: Math.max(0, compactViewport
+          ? (canvasOrigin + top) * nextZoom - 16
+          : (canvasOrigin + centerY) * nextZoom - el.clientHeight / 2)
       });
       onFocused?.();
     });
@@ -1532,13 +1541,13 @@ export const PlacementsPage: React.FC = () => {
             setFocusedPlacementId(p.id);
             setPlacementSelection(new Set(members.map(member => member.id)));
           }}
-          style={{ left: x, top: y, zIndex: layer, transform: p.isRow ? `rotate(${p.rotation ?? 0}deg)` : undefined, transformOrigin: "center center", "--row-seat-width": `${rowSeatWidth(p)}px`, "--table-radius": `${tableRadius}px`, "--container-width": containerSize ? `${containerSize.width}px` : undefined, "--container-height": containerSize ? `${containerSize.height}px` : undefined, "--placement-font-size": `${p.fontSize ?? 18}px`, "--placement-color": p.color ?? undefined } as React.CSSProperties}
+          style={{ left: x, top: y, zIndex: layer, transform: p.isRow ? `rotate(${p.rotation ?? 0}deg)` : undefined, transformOrigin: "center center", "--row-seat-width": `${rowSeatWidth(p)}px`, "--row-info-width": p.isRow ? `${rowInfoWidth(p)}px` : undefined, "--table-radius": `${tableRadius}px`, "--container-width": containerSize ? `${containerSize.width}px` : undefined, "--container-height": containerSize ? `${containerSize.height}px` : undefined, "--placement-font-size": `${p.fontSize ?? 18}px`, "--placement-color": p.color ?? undefined } as React.CSSProperties}
           draggable={false} onPointerDownCapture={e => startPlacementMove(e, p, members)}
           onDragOver={e => hoverDrop(e, p.id)} onDragLeave={leaveDrop} onDrop={e => drop(e, p.id)}>
           <div className="placement-node-content">
             <button className="placement-node-title" type="button" title={placementMode === "schema" && !isLabelObject ? `${p.name} · Группа: ${groupName}${isRow || (!p.displayChildrenAsRows && p.quota !== null) ? ` · ${seatCountLabel(p.quota ?? 0)}` : ""}` : p.name} disabled={!canEditStructure} onClick={e => { e.stopPropagation(); if (!suppressNodeClick.current) open(p); }}>
-              <span className="placement-node-title-name"><span className="placement-node-primary-name">{p.name}</span>{placementMode === "schema" && isRow && <span className="placement-row-title-seat-count">{seatCountLabel(p.quota ?? 0)}</span>}</span>
-              {placementMode === "schema" && !isLabelObject && <span className="placement-node-meta"><span>{isRow ? groupName : `Группа: ${groupName}`}</span>{!isRow && !p.displayChildrenAsRows && p.quota !== null && <span className="placement-node-seat-count">{seatCountLabel(p.quota ?? 0)}</span>}</span>}
+              <span className="placement-node-title-name"><span className="placement-node-primary-name">{p.name}</span></span>
+              {placementMode === "schema" && !isLabelObject && <span className="placement-node-meta"><span>{`Группа: ${groupName}`}</span>{(isRow || (!p.displayChildrenAsRows && p.quota !== null)) && <span className="placement-node-seat-count">{seatCountLabel(p.quota ?? 0)}</span>}</span>}
             </button>
           </div>
           {p.quota !== null && p.quota > 0 && <div className={`placement-seats${isRow ? " placement-row-seats" : " placement-table-seats"}`} role="img" aria-label={`Места: занято ${p.guestCount} из ${p.quota}`} title={`Занято: ${p.guestCount}. Свободно: ${Math.max(0, p.quota - p.guestCount)}.`}>
@@ -1653,6 +1662,7 @@ export const PlacementsPage: React.FC = () => {
     }
     if (pan.current) {
       const renderedScale = renderedElementScale(el);
+      if (!pan.current.didMove && Math.hypot(e.clientX - pan.current.x, e.clientY - pan.current.y) >= 5) pan.current.didMove = true;
       el.scrollLeft = pan.current.left - (e.clientX - pan.current.x) / renderedScale.x;
       el.scrollTop = pan.current.top - (e.clientY - pan.current.y) / renderedScale.y;
     }
@@ -1685,6 +1695,16 @@ export const PlacementsPage: React.FC = () => {
         window.setTimeout(() => { suppressNodeClick.current = false; }, 0);
         const item = resizedContainerAtPointer(resized, e.clientX, e.clientY);
         void act(async () => setItems(await apiClient.updatePlacement(eventId, item.id, { ...item, preserveRowBatch: !!item.rowBatchId })));
+      }
+      return;
+    }
+
+    const panned = pan.current;
+    if (panned) {
+      pan.current = null;
+      if (panned.didMove) {
+        suppressNodeClick.current = true;
+        window.setTimeout(() => { suppressNodeClick.current = false; }, 0);
       }
       return;
     }
@@ -1855,7 +1875,7 @@ export const PlacementsPage: React.FC = () => {
         onDragOver={e => { if (canEditStructure && !busy && drag.current !== null) e.preventDefault(); }}
         onDrop={dropOnCanvas}
         onContextMenu={e => e.preventDefault()}
-        onPointerDown={e => { const el = canvas.current!; const target = e.target as HTMLElement; if ((e.pointerType === "touch" && !target.closest(".placement-seat")) || e.button === 2) { pan.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }; el.setPointerCapture(e.pointerId); return; } if (target.closest(".placement-node")) return; if (e.button === 0 && canEditStructure) { selectionStart.current = canvasPointAtPointer(el, e.clientX, e.clientY); const initialSelectionBox = { left: selectionStart.current.x, top: selectionStart.current.y, width: 0, height: 0 }; selectionBoxRef.current = initialSelectionBox; setSelectionBox(initialSelectionBox); } el.setPointerCapture(e.pointerId); }}
+        onPointerDown={e => { const el = canvas.current!; const target = e.target as HTMLElement; if (e.pointerType === "touch" || e.button === 2) { pan.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop, didMove: false }; el.setPointerCapture(e.pointerId); return; } if (target.closest(".placement-node")) return; if (e.button === 0 && canEditStructure) { selectionStart.current = canvasPointAtPointer(el, e.clientX, e.clientY); const initialSelectionBox = { left: selectionStart.current.x, top: selectionStart.current.y, width: 0, height: 0 }; selectionBoxRef.current = initialSelectionBox; setSelectionBox(initialSelectionBox); } el.setPointerCapture(e.pointerId); }}
         onPointerMove={handleCanvasPointerMove}
         onPointerUp={handleCanvasPointerUp}
         onPointerCancel={handleCanvasPointerCancel}>

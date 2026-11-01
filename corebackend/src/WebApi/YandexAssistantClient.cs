@@ -4,7 +4,9 @@ using System.Text.Json.Nodes;
 
 namespace WebApi;
 
-public sealed record AssistantAnswer(string Answer, IReadOnlyList<string> Sources, IReadOnlyList<AssistantActionView>? Actions = null);
+public sealed record AssistantTokenUsage(long InputTokens, long OutputTokens, long TotalTokens);
+public sealed record AssistantAnswer(string Answer, IReadOnlyList<string> Sources,
+    IReadOnlyList<AssistantActionView>? Actions = null, AssistantTokenUsage? Usage = null);
 public sealed class YandexAssistantException(int statusCode) : Exception("Yandex AI request failed")
 {
     public int StatusCode { get; } = statusCode;
@@ -15,21 +17,31 @@ public sealed class YandexAssistantClient(IHttpClientFactory clients, IConfigura
     private const int MaxRounds = 6;
     private const int MaxToolCalls = 12;
     private static readonly string[] ZeroArgumentReadTools =
-        ["get_event_summary", "get_groups", "get_placements", "get_event_catalogs"];
+        ["get_event_summary", "list_guests", "get_groups", "get_placements", "get_event_catalogs", "list_staff", "get_staff_summary"];
+    private static readonly string[] ArgumentReadTools = ["search_guests", "get_guest_neighbors", "search_guests_across_events", "search_staff", "search_staff_across_events"];
 
     public async Task<AssistantAnswer> CompleteAsync(IEnumerable<object> initialMessages, long loginId, long? eventId,
-        string modelUri, CancellationToken ct, string? requiredInitialTool = null)
+        string modelUri, CancellationToken ct, string? requiredInitialTool = null, JsonElement? requiredInitialArguments = null)
     {
         if (!modelUri.StartsWith("gpt://", StringComparison.Ordinal) || modelUri.Length > 300)
             throw new ArgumentOutOfRangeException(nameof(modelUri));
-        if (requiredInitialTool is not null && !ZeroArgumentReadTools.Contains(requiredInitialTool, StringComparer.Ordinal))
+        if (requiredInitialTool is not null
+            && !ZeroArgumentReadTools.Contains(requiredInitialTool, StringComparer.Ordinal)
+            && !ArgumentReadTools.Contains(requiredInitialTool, StringComparer.Ordinal))
             throw new ArgumentOutOfRangeException(nameof(requiredInitialTool));
+        var forcedArguments = requiredInitialTool is not null && ArgumentReadTools.Contains(requiredInitialTool, StringComparer.Ordinal)
+            ? requiredInitialArguments ?? throw new ArgumentNullException(nameof(requiredInitialArguments))
+            : JsonSerializer.Deserialize<JsonElement>("{}");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(TimeSpan.FromSeconds(50));
         var folderId = configuration["YandexAI:FolderId"];
         var messages = JsonSerializer.SerializeToNode(initialMessages)!.AsArray();
         var sources = new HashSet<string>();
         var calls = 0;
+        long inputTokens = 0, outputTokens = 0, totalTokens = 0;
+        var hasUsage = false;
+        AssistantTokenUsage? Usage() => hasUsage ? new(inputTokens, outputTokens,
+            totalTokens > 0 ? totalTokens : inputTokens + outputTokens) : null;
         var client = clients.CreateClient("YandexAI");
         // A write request can require several dependent reads (guest, group and catalogs)
         // before the model has enough server IDs to prepare the confirmation card.
@@ -61,6 +73,23 @@ public sealed class YandexAssistantClient(IHttpClientFactory clients, IConfigura
                 buffer.Write(chunk, 0, length);
             }
             using var json = JsonDocument.Parse(buffer.ToArray());
+            if (json.RootElement.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+            {
+                static long Read(JsonElement value, params string[] names)
+                {
+                    foreach (var name in names)
+                        if (value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Number
+                            && item.TryGetInt64(out var result) && result >= 0) return result;
+                    return 0;
+                }
+                var currentInput = Read(usage, "prompt_tokens", "input_tokens");
+                var currentOutput = Read(usage, "completion_tokens", "output_tokens");
+                var currentTotal = Read(usage, "total_tokens");
+                inputTokens += currentInput;
+                outputTokens += currentOutput;
+                totalTokens += currentTotal > 0 ? currentTotal : currentInput + currentOutput;
+                hasUsage = true;
+            }
             var choices = json.RootElement.GetProperty("choices");
             if (choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0) throw new JsonException("No choices");
             var message = choices[0].GetProperty("message");
@@ -78,16 +107,18 @@ public sealed class YandexAssistantClient(IHttpClientFactory clients, IConfigura
                         role = "assistant", content = (string?)null,
                         tool_calls = new[] { new { id = callId, type = "function", function = new { name = fallbackTool, arguments = "{}" } } }
                     }));
-                    var result = await tools.ExecuteAsync(fallbackTool, JsonSerializer.Deserialize<JsonElement>("{}"), loginId, eventId, deadline.Token);
+                    var fallbackArguments = round == 0 && fallbackTool == requiredInitialTool
+                        ? forcedArguments : JsonSerializer.Deserialize<JsonElement>("{}");
+                    var result = await tools.ExecuteAsync(fallbackTool, fallbackArguments, loginId, eventId, deadline.Token);
                     var resultElement = JsonSerializer.SerializeToElement(result);
                     if (!resultElement.TryGetProperty("error", out _)) sources.Add(fallbackTool);
                     messages.Add(JsonSerializer.SerializeToNode(new { role = "tool", tool_call_id = callId, content = JsonSerializer.Serialize(result) }));
                     continue;
                 }
                 // Internal function names are implementation details and must never be instructions to the user.
-                if (ZeroArgumentReadTools.Any(name => answer.Contains(name, StringComparison.Ordinal)))
+                if (ZeroArgumentReadTools.Concat(ArgumentReadTools).Any(name => answer.Contains(name, StringComparison.Ordinal)))
                     throw new JsonException("Provider exposed an internal tool name");
-                return new(answer, sources.ToArray());
+                return new(answer, sources.ToArray(), Usage: Usage());
             }
             if (round == MaxRounds - 1 || toolCalls.GetArrayLength() > MaxToolCalls - calls) throw new JsonException("Tool call limit exceeded");
             messages.Add(JsonNode.Parse(message.GetRawText()));
@@ -103,13 +134,16 @@ public sealed class YandexAssistantClient(IHttpClientFactory clients, IConfigura
                     using var args = JsonDocument.Parse(rawArgs);
                     // Some compatible models wrap an empty argument object as {"properties":{}}.
                     // Read tools below accept no model-controlled scope, so discard that harmless wrapper.
-                    var normalizedArgs = ZeroArgumentReadTools.Contains(name, StringComparer.Ordinal)
-                        ? JsonSerializer.Deserialize<JsonElement>("{}")
-                        : args.RootElement;
+                    var normalizedArgs = round == 0 && name == requiredInitialTool
+                        ? forcedArguments
+                        : ZeroArgumentReadTools.Contains(name, StringComparer.Ordinal)
+                            ? JsonSerializer.Deserialize<JsonElement>("{}")
+                            : args.RootElement;
                     result = await tools.ExecuteAsync(name, normalizedArgs, loginId, eventId, deadline.Token);
                     var resultElement = JsonSerializer.SerializeToElement(result);
                     if (result is AssistantActionPreparation proposal)
-                        return new("Подготовлено изменение. Проверьте значения в карточке и подтвердите или отмените действие.", sources.ToArray(), [proposal.Action]);
+                        return new("Подготовлено изменение. Проверьте значения в карточке и подтвердите или отмените действие.",
+                            sources.ToArray(), [proposal.Action], Usage());
                     // Only successful reads appear as sources in the UI.
                     if (!resultElement.TryGetProperty("error", out _)) sources.Add(name);
                 }

@@ -1533,7 +1533,7 @@ export const GuestsPage: React.FC = () => {
       <div className="modal-actions"><button type="button" className="secondary-button" disabled={importingGuests} onClick={() => setIsImportModalOpen(false)}>Закрыть</button></div>
     </Modal>}
 
-    {(isCreateModalOpen || editingGuest) && <Modal className={`guest-form-modal${isCreateModalOpen && !editingGuest ? " guest-create-form-modal" : ""}`} title={editingGuest?.isDeleted ? "Удалённый гость" : editingGuest ? "Редактировать гостя" : "Добавить гостя"} description={editingGuest?.isDeleted ? "Данные доступны только для просмотра. Восстановите гостя, чтобы снова редактировать его." : editingGuest ? "Измените данные гостя и просмотрите цепочку согласования." : "Гость будет сохранён в выбранной группе."} onClose={closeForm}>{error && <div className="alert alert-error">{error}</div>}<form className={`form guest-edit-form guest-edit-form-with-tags${isCreateModalOpen && !editingGuest ? " guest-create-form-with-person-picker" : ""}${editingGuest?.isDeleted ? " guest-form-readonly" : ""}`} onSubmit={submitGuest}><fieldset className="guest-form-fieldset" disabled={saving || Boolean(editingGuest?.isDeleted)}>
+    {(isCreateModalOpen || editingGuest) && <Modal className={`guest-form-modal${isCreateModalOpen && !editingGuest ? " guest-create-form-modal" : ""}`} title={editingGuest?.isDeleted ? "Удалённый гость" : editingGuest ? "Редактировать гостя" : "Добавить гостя"} description={editingGuest?.isDeleted ? "Данные доступны только для просмотра. Восстановите гостя, чтобы снова редактировать его." : editingGuest ? undefined : "Гость будет сохранён в выбранной группе."} onClose={closeForm}>{error && <div className="alert alert-error">{error}</div>}<form className={`form guest-edit-form guest-edit-form-with-tags${isCreateModalOpen && !editingGuest ? " guest-create-form-with-person-picker" : ""}${editingGuest?.isDeleted ? " guest-form-readonly" : ""}`} onSubmit={submitGuest}><fieldset className="guest-form-fieldset" disabled={saving || Boolean(editingGuest?.isDeleted)}>
       {isCreateModalOpen && !editingGuest && (
         <aside className="organization-picker guest-person-picker" aria-label="Оригинальная структура">
           <div className="organization-picker-header">
@@ -1574,11 +1574,10 @@ export const GuestsPage: React.FC = () => {
         </aside>
       )}
       <div className="guest-form-main">
+        {editingGuest && !editingGuest.isDeleted && <div className="guest-qr-inline guest-qr-mobile"><h3>QR-код гостя</h3><GuestQrCode guest={editingGuest} small />{canDownloadGuestTicket(editingGuest) && <button type="button" className="secondary-button guest-ticket-download-button" onClick={() => void openTicketMenu(editingGuest)}>Скачать билет</button>}</div>}
+        {editingGuest && <div className="guest-workflow-section"><h3 className="workflow-title">Цепочка согласования</h3>{renderWorkflow(editingGuest)}</div>}
         {editingGuest && (
-          <label className="field">
-            <span>Дата создания</span>
-            <input value={formatDateTime(editingGuest.createdAt)} readOnly />
-          </label>
+          <div className="guest-created-at">Создан: {formatDateTime(editingGuest.createdAt)}</div>
         )}
         {isCreateModalOpen && !editingGuest && selectedOrganizationEmployeePosition && (
           <div className="alert alert-info guest-person-source-message">
@@ -1663,7 +1662,6 @@ export const GuestsPage: React.FC = () => {
             </div>
           )}
         </div>}
-        {editingGuest && <div className="guest-workflow-section"><h3 className="workflow-title">Цепочка согласования</h3>{renderWorkflow(editingGuest)}</div>}
       </div>
 
       <aside className="guest-tags-side-panel" aria-label="Метки гостя">
@@ -1736,7 +1734,7 @@ export const GuestsPage: React.FC = () => {
             </div>
           )}
         </div>
-        {editingGuest && !editingGuest.isDeleted && <><div className="guest-qr-inline"><h3>QR-код гостя</h3><GuestQrCode guest={editingGuest} small /></div>{canDownloadGuestTicket(editingGuest) && <button type="button" className="secondary-button guest-ticket-download-button" onClick={() => void openTicketMenu(editingGuest)}>Скачать билет</button>}</>}
+        {editingGuest && !editingGuest.isDeleted && <div className="guest-qr-inline guest-qr-desktop"><h3>QR-код гостя</h3><GuestQrCode guest={editingGuest} small />{canDownloadGuestTicket(editingGuest) && <button type="button" className="secondary-button guest-ticket-download-button" onClick={() => void openTicketMenu(editingGuest)}>Скачать билет</button>}</div>}
       </aside>
 
       </fieldset><div className="modal-actions"><button className="secondary-button" type="button" onClick={closeForm} disabled={saving}>Закрыть</button>{!editingGuest?.isDeleted && <button className="primary-button" type="submit" disabled={saving || Boolean(editingGuest && !isGuestEditDirty)}>{saving ? "Сохраняем..." : "Сохранить"}</button>}</div>

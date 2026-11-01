@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Modal } from "../components/Modal";
+import { DraggableTableWrap } from "../components/DraggableTableWrap";
 import { apiClient } from "../services/apiClient";
 import { EventLogDto, EventLogFilterOptionsDto } from "../types";
 
@@ -185,6 +186,14 @@ export const EventLogsPage: React.FC = () => {
 
     <section className="panel logs-panel">
       <div className="logs-toolbar">
+        <label className="field event-log-search-field">
+          <input
+            value={logSearch}
+            onChange={(event) => setLogSearch(event.target.value)}
+            placeholder="Поиск"
+            aria-label="Поиск по описанию логов"
+          />
+        </label>
         <button
           className={`secondary-button filter-modal-button${activeFiltersCount > 0 ? " active" : ""}`}
           type="button"
@@ -193,14 +202,6 @@ export const EventLogsPage: React.FC = () => {
         >
           Фильтровать{activeFiltersCount > 0 ? ` (${activeFiltersCount})` : ""}
         </button>
-        <label className="field event-log-search-field">
-          <span>Поиск по описанию</span>
-          <input
-            value={logSearch}
-            onChange={(event) => setLogSearch(event.target.value)}
-            placeholder="Например: имя гостя или категория"
-          />
-        </label>
         {activeFiltersCount > 0 && <span className="guest-search-count">Найдено: {totalCount}</span>}
       </div>
 
@@ -210,7 +211,7 @@ export const EventLogsPage: React.FC = () => {
         <div className="empty-state compact">Логов по выбранным фильтрам пока нет.</div>
       ) : (
         <>
-          <div className="table-wrap">
+          <DraggableTableWrap>
             <table className="event-log-table">
               <thead>
                 <tr>
@@ -245,7 +246,7 @@ export const EventLogsPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
-          </div>
+          </DraggableTableWrap>
 
           <div className="pagination-row">
             <div className="pagination-summary">Показаны {pageStart}-{pageEnd} из {totalCount}</div>
@@ -270,33 +271,36 @@ export const EventLogsPage: React.FC = () => {
     {isFiltersModalOpen && <Modal className="filters-modal event-log-filters-modal" title="Фильтры логов" description="Можно сузить ленту по пользователю, типу действия, сущности и дате." onClose={() => setIsFiltersModalOpen(false)}>
       <div className="filters-form">
         <div className="log-filter-grid">
-          <label className="field">
-            <span>Пользователь</span>
-            <select value={draftUserFilter} onChange={(event) => setDraftUserFilter(event.target.value)}>
-              <option value="">Все пользователи</option>
-              {options.users.map((user) => (
-                <option key={user.userId} value={user.userId}>{user.name}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Действие</span>
-            <select value={draftActionFilter} onChange={(event) => setDraftActionFilter(event.target.value)}>
-              <option value="">Все действия</option>
-              {options.actions.map((action) => (
-                <option key={action} value={action}>{actionLabels[action] ?? action}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Сущность</span>
-            <select value={draftEntityTypeFilter} onChange={(event) => setDraftEntityTypeFilter(event.target.value)}>
-              <option value="">Все сущности</option>
-              {options.entityTypes.map((entityType) => (
-                <option key={entityType} value={entityType}>{entityLabels[entityType] ?? entityType}</option>
-              ))}
-            </select>
-          </label>
+          <section className="filter-section event-log-filter-section">
+            <div className="selected-filter-row"><span>Пользователь</span><span className="selected-category-empty">{selectedUserName}</span></div>
+            <details className="filter-checklist">
+              <summary>Выбрать пользователя <span>{draftUserFilter ? "Выбран" : "Все"}</span></summary>
+              <div className="filter-checklist-menu" role="group" aria-label="Пользователи">
+                <label><input type="checkbox" checked={!draftUserFilter} onChange={() => setDraftUserFilter("")} /><span>Все пользователи</span></label>
+                {options.users.map((user) => <label key={user.userId}><input type="checkbox" checked={draftUserFilter === String(user.userId)} onChange={() => setDraftUserFilter((current) => current === String(user.userId) ? "" : String(user.userId))} /><span className="filter-option-text">{user.name}</span></label>)}
+              </div>
+            </details>
+          </section>
+          <section className="filter-section event-log-filter-section">
+            <div className="selected-filter-row"><span>Действие</span><span className="selected-category-empty">{selectedActionName}</span></div>
+            <details className="filter-checklist">
+              <summary>Выбрать действие <span>{draftActionFilter ? "Выбрано" : "Все"}</span></summary>
+              <div className="filter-checklist-menu" role="group" aria-label="Действия в логах">
+                <label><input type="checkbox" checked={!draftActionFilter} onChange={() => setDraftActionFilter("")} /><span>Все действия</span></label>
+                {options.actions.map((action) => <label key={action}><input type="checkbox" checked={draftActionFilter === action} onChange={() => setDraftActionFilter((current) => current === action ? "" : action)} /><span className="filter-option-text">{actionLabels[action] ?? action}</span></label>)}
+              </div>
+            </details>
+          </section>
+          <section className="filter-section event-log-filter-section">
+            <div className="selected-filter-row"><span>Сущность</span><span className="selected-category-empty">{selectedEntityName}</span></div>
+            <details className="filter-checklist">
+              <summary>Выбрать сущность <span>{draftEntityTypeFilter ? "Выбрана" : "Все"}</span></summary>
+              <div className="filter-checklist-menu" role="group" aria-label="Сущности в логах">
+                <label><input type="checkbox" checked={!draftEntityTypeFilter} onChange={() => setDraftEntityTypeFilter("")} /><span>Все сущности</span></label>
+                {options.entityTypes.map((entityType) => <label key={entityType}><input type="checkbox" checked={draftEntityTypeFilter === entityType} onChange={() => setDraftEntityTypeFilter((current) => current === entityType ? "" : entityType)} /><span className="filter-option-text">{entityLabels[entityType] ?? entityType}</span></label>)}
+              </div>
+            </details>
+          </section>
           <div className="event-log-date-filter-row">
             <label className="field">
               <span>Дата с</span>

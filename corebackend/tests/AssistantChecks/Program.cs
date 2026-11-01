@@ -28,6 +28,7 @@ async Task Reject<T>(Func<Task> action, string label) where T : Exception
 }
 JsonElement Args(string value = "{}") => JsonSerializer.Deserialize<JsonElement>(value);
 string Error(object value) => JsonSerializer.SerializeToElement(value).GetProperty("error").GetString()!;
+Check(JsonSerializer.Serialize(AssistantTools.Definitions).Contains("propose_actions"), "batch proposal tool is exposed to the model");
 
 Check(AssistantController.IsValidHistory([new("user", "Как пригласить гостя?")]), "valid question");
 Check(!AssistantController.IsValidHistory([]), "empty history rejected");
@@ -38,10 +39,21 @@ Check(!AssistantController.IsValidHistory([new("user", " ")]), "blank question r
 Check(!AssistantController.IsValidHistory([new("user", new string('x', 6001))]), "oversized question rejected");
 Check(!AssistantController.IsValidHistory([new("user", "One"), new("user", "Two"), new("user", "Three")]), "non-alternating history rejected");
 Check(!AssistantController.IsValidHistory(Enumerable.Range(0, 19).Select(i => new AssistantMessage(i % 2 == 0 ? "user" : "assistant", new string('x', 3000))).ToList()), "total history budget enforced");
-Check(AssistantReadIntent.Select([new("user", "Сколько доступных мест в рассадке?")], true) == "get_placements", "placement facts force a placement read");
-Check(AssistantReadIntent.Select([new("user", "Сколько гостей в мероприятии?")], true) == "get_event_summary", "guest facts force a summary read");
+string? IntentName(string text, bool selected = true) => AssistantReadIntent.Select([new("user", text)], selected)?.Name;
+Check(IntentName("Сколько доступных мест в рассадке?") == "get_placements", "placement facts force a placement read");
+Check(IntentName("Сколько гостей в мероприятии?") == "get_event_summary", "guest facts force a summary read");
+Check(IntentName("Выведи список гостей по именам") == "list_guests", "guest list requests force a guest list read");
+var guestSearchIntent = AssistantReadIntent.Select([new("user", "Есть ли гость Ельцин?")], true);
+Check(guestSearchIntent?.Name == "search_guests" && guestSearchIntent.Arguments.GetProperty("query").GetString() == "Ельцин",
+    "guest existence question forces a search with extracted name");
+var neighborIntent = AssistantReadIntent.Select([new("user", "С кем рядом сидит Петров?")], true);
+Check(neighborIntent?.Name == "get_guest_neighbors" && neighborIntent.Arguments.GetProperty("query").GetString() == "Петров",
+    "neighbor question forces a neighbor lookup with extracted name");
+var seatNextToIntent = AssistantReadIntent.Select([new("user", "Посади Иванова рядом с Петровым")], true);
+Check(seatNextToIntent?.Name == "get_guest_neighbors" && seatNextToIntent.Arguments.GetProperty("query").GetString() == "Петровым",
+    "seat-next-to command first resolves the target guest");
 Check(AssistantReadIntent.Select([new("user", "Создай рассадку на 20 мест")], true) is null, "write requests are not replaced with forced reads");
-Check(AssistantReadIntent.Select([new("user", "Какие группы доступны?")], false) is null, "event reads require selected event");
+Check(IntentName("Какие группы доступны?", false) is null, "event reads require selected event");
 
 Group G(long id, long? parent) => new() { Id = id, ParentGroupId = parent, EventId = 1, Name = "Test" };
 var scope = AssistantTools.GroupScope([G(1, null), G(2, 1), G(3, 1), G(4, 2), G(5, 4)], 2);
@@ -77,6 +89,9 @@ Check(guestAction.Request.Method == "POST" && guestAction.Request.Path == "/even
 Check(guestAction.RequiredPermission == "create_guest" && guestAction.Changes.First(x => x.Field == "Что будет сделано").After.Contains("Иванова")
     && guestAction.Changes.Any(x => x.Field == "Имя гостя" && x.After == "Иванов")
     && guestAction.Changes.All(x => !x.After.Contains("/events") && !x.After.Contains("POST ")), "catalog creates a human review without HTTP request details");
+Check(guestAction.CompactSummary is not null && guestAction.CompactSummary.Contains("Создать гостя «Иванов»")
+    && guestAction.CompactSummary.Contains("группа #2") && guestAction.CompactSummary.Contains("без меток"),
+    "guest creation exposes a compact confirmation summary");
 var minimalGuest = await catalog.BuildAsync(Args("""{"operation":"create_guest","data":{"body":{"name":"Минимальный гость","categoryId":3}}}"""), 7, 9);
 var minimalGuestBody = minimalGuest.Request.Body!.Value;
 Check(minimalGuestBody.GetProperty("groupId").GetInt64() == actor.GroupId
@@ -103,7 +118,8 @@ Check(minimalUser.Request.Body!.Value.GetProperty("groupId").GetInt64() == actor
     "employee creation defaults the group and leaves optional contacts empty");
 var minimalPlacement = await catalog.BuildAsync(Args("""{"operation":"create_placement","data":{"body":{"name":"Стол"}}}"""), 7, 9);
 Check(minimalPlacement.Request.Body!.Value.GetProperty("groupId").GetInt64() == actor.GroupId
-    && minimalPlacement.Request.Body!.Value.GetProperty("quota").GetInt32() == 10,
+    && minimalPlacement.Request.Body!.Value.GetProperty("quota").GetInt32() == 10
+    && minimalPlacement.Request.RequiresPlacementEditLock,
     "placement creation applies table defaults and the current group");
 var minimalTicket = await catalog.BuildAsync(Args("""{"operation":"create_ticket_template","data":{"body":{"name":"Билет","backgroundImageId":8}}}"""), 7, 9);
 Check(minimalTicket.Request.Body!.Value.GetProperty("qrX").GetInt32() == 1600
@@ -192,6 +208,9 @@ using (var cacheProvider = new ServiceCollection().AddDistributedMemoryCache().B
 object[] initial = [new { role = "system", content = "App only" }, new { role = "user", content = "Count guests" }];
 const string selectedModelUri = "gpt://test-folder/deepseek-v4.1-flash";
 string Completion(object message) => JsonSerializer.Serialize(new { choices = new[] { new { message } } });
+string CompletionWithUsage(object message, int input, int output) => JsonSerializer.Serialize(new {
+    choices = new[] { new { message } }, usage = new { prompt_tokens = input, completion_tokens = output, total_tokens = input + output }
+});
 object ToolCall(string name = "get_event_summary", string arguments = "{}") => new { id = "call_1", type = "function", function = new { name, arguments } };
 var tools = new ToolStub();
 var preview = new AssistantActionView(new string('A', 48), 9, "Rename", [new("Name", "Before", "After")], DateTimeOffset.UtcNow.AddMinutes(10));
@@ -218,15 +237,16 @@ var handler = new Handler(async (request, index, ct) => {
     Check(request.Headers.GetValues("OpenAI-Project").Single() == "test-folder", "provider project header");
     using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
     Check(body.RootElement.GetProperty("model").GetString() == "gpt://test-folder/deepseek-v4.1-flash", "request-selected model URI");
-    if (index == 0) return Reply(Completion(new { role = "assistant", content = (string?)null, tool_calls = new[] { ToolCall() } }));
+    if (index == 0) return Reply(CompletionWithUsage(new { role = "assistant", content = (string?)null, tool_calls = new[] { ToolCall() } }, 100, 20));
     var last = body.RootElement.GetProperty("messages").EnumerateArray().Last();
     Check(last.GetProperty("role").GetString() == "tool" && last.GetProperty("tool_call_id").GetString() == "call_1", "tool response linked to call");
     Check(last.GetProperty("content").GetString()!.Contains("42"), "tool result included in follow-up");
-    return Reply(Completion(new { role = "assistant", content = "42 guests" }));
+    return Reply(CompletionWithUsage(new { role = "assistant", content = "42 guests" }, 140, 12));
 });
 HttpResponseMessage Reply(string body, HttpStatusCode status = HttpStatusCode.OK) => new(status) { Content = new StringContent(body) };
 var result = await new YandexAssistantClient(new Factory(handler), configuration, tools).CompleteAsync(initial, 7, 9, selectedModelUri, default);
 Check(result.Answer == "42 guests" && result.Sources.SequenceEqual(["get_event_summary"]), "final answer identifies actual data sources");
+Check(result.Usage == new AssistantTokenUsage(240, 32, 272), "token usage is summed across model tool rounds");
 Check(tools.Calls == 1 && tools.LoginId == 7 && tools.EventId == 9, "tool uses server identity and event");
 
 var forcedTools = new ToolStub();

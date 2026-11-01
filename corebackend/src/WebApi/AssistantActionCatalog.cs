@@ -6,14 +6,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace WebApi;
 
-public sealed record AssistantClientRequest(string Method, string Path, JsonElement? Body = null);
+public sealed record AssistantClientRequest(string Method, string Path, JsonElement? Body = null,
+    bool RequiresPlacementEditLock = false);
 
 public sealed record AssistantClientAction(
     string Operation,
     string Title,
     string? RequiredPermission,
     AssistantClientRequest Request,
-    IReadOnlyList<AssistantChange> Changes);
+    IReadOnlyList<AssistantChange> Changes,
+    string? CompactSummary = null);
 
 /// <summary>
 /// The only client API calls AIMode may propose. The model never supplies an URL or HTTP method.
@@ -24,7 +26,7 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
     public static readonly string[] Operations =
     [
         "create_event", "update_event", "set_event_archived",
-        "create_guest", "update_guest", "submit_guest", "approve_guest", "reject_guest", "invite_guest",
+        "create_guest", "update_guest", "reseat_guest", "submit_guest", "approve_guest", "reject_guest", "invite_guest",
         "restore_guest_to_saved", "delete_guest", "restore_deleted_guest", "bulk_guest_action",
         "create_group", "update_group", "delete_group", "reset_groups", "apply_original_structure",
         "save_group_template", "apply_group_template",
@@ -64,10 +66,17 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
                 throw new AssistantActionException(403, $"Для действия требуется разрешение {permission}.");
         }
 
+        var explicitlySuppliedFields = SuppliedBodyFields(data);
         data = await CompleteCreateBodyAsync(operation, eventId, data, member, ct);
         data = await CompleteUpdateBodyAsync(operation, eventId, data, ct);
         var action = Build(operation, eventId, data);
-        return action with { RequiredPermission = permission };
+        var compactSummary = await BuildCompactGuestSummaryAsync(operation, eventId, action.Request.Body,
+            explicitlySuppliedFields, ct);
+        return action with {
+            RequiredPermission = permission,
+            CompactSummary = compactSummary,
+            Request = action.Request with { RequiresPlacementEditLock = RequiresPlacementEditLock(operation) }
+        };
     }
 
     public async Task RecheckAsync(long loginId, long? eventId, string operation, string? permission)
@@ -83,6 +92,11 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
         if (permission is not null && !await permissions.HasPermissionAsync(loginId, id, permission))
             throw new AssistantActionException(403, $"Разрешение {permission} было отозвано.");
     }
+
+    private static bool RequiresPlacementEditLock(string operation) => operation is
+        "create_placement" or "update_placement" or "delete_placement" or "reset_placements" or
+        "copy_placements" or "group_placement_rows" or "ungroup_placement_rows" or
+        "rotate_placement_rows" or "apply_placement_template";
 
     private static AssistantClientAction Build(string operation, long? eventId, JsonElement data)
     {
@@ -101,6 +115,7 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
 
             "create_guest" => A(operation, "Добавить гостя", "POST", EventPath(id, "/guests"), RequiredBody(body), Describe(data, "Создание гостя")),
             "update_guest" => A(operation, $"Изменить гостя #{Long(data, "guestId")}", "PUT", EventPath(id, $"/guests/{Long(data, "guestId")}"), RequiredBody(body), Describe(data, "Изменение данных гостя")),
+            "reseat_guest" => A(operation, $"Пересадить гостя #{Long(data, "guestId")}", "PUT", EventPath(id, $"/guests/{Long(data, "guestId")}"), RequiredBody(body), Describe(data, "Пересадка гостя на другое место")),
             "submit_guest" => GuestPost(operation, id, data, "submit-for-review", "Отправить гостя на согласование"),
             "approve_guest" => GuestApproval(operation, id, data, true),
             "reject_guest" => GuestApproval(operation, id, data, false),
@@ -150,6 +165,70 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
             "delete_ticket_template" => A(operation, "Удалить шаблон билета", "DELETE", EventPath(id, $"/ticket-templates/{Long(data, "templateId")}"), null, "Удаление шаблона билета"),
             _ => throw new AssistantActionException(400, "Неизвестное действие.")
         };
+    }
+
+    private static HashSet<string> SuppliedBodyFields(JsonElement data)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        if (data.ValueKind != JsonValueKind.Object) return result;
+        if (data.TryGetProperty("body", out var body) && body.ValueKind == JsonValueKind.Object)
+            foreach (var property in body.EnumerateObject()) result.Add(property.Name);
+        foreach (var property in data.EnumerateObject())
+            if (property.Name is not ("body" or "summary" or "guestId")) result.Add(property.Name);
+        return result;
+    }
+
+    private async Task<string?> BuildCompactGuestSummaryAsync(string operation, long? eventId, JsonElement? body,
+        HashSet<string> explicitlySuppliedFields, CancellationToken ct)
+    {
+        if (operation is not ("create_guest" or "update_guest" or "reseat_guest") || eventId is not long id
+            || body is not { ValueKind: JsonValueKind.Object } value) return null;
+
+        static long? OptionalId(JsonElement source, string name) => source.TryGetProperty(name, out var item)
+            && item.ValueKind == JsonValueKind.Number && item.TryGetInt64(out var result) ? result : null;
+        static string? OptionalText(JsonElement source, string name) => source.TryGetProperty(name, out var item)
+            && item.ValueKind == JsonValueKind.String ? item.GetString()?.Trim() : null;
+        static string Quoted(string? text, long? fallback) => !string.IsNullOrWhiteSpace(text) ? $"«{text}»" : $"#{fallback}";
+
+        var name = OptionalText(value, "name") ?? "без имени";
+        var parts = new List<string> { operation switch {
+            "create_guest" => $"Создать гостя «{name}»",
+            "reseat_guest" => $"Пересадить гостя «{name}»",
+            _ => $"Изменить гостя «{name}»"
+        } };
+        var categoryId = OptionalId(value, "categoryId");
+        var groupId = OptionalId(value, "groupId");
+        var placementId = OptionalId(value, "placementId");
+        var categoryName = db is not null && categoryId.HasValue
+            ? await db.Categories.AsNoTracking().Where(x => x.EventId == id && x.Id == categoryId.Value).Select(x => x.Name).SingleOrDefaultAsync(ct) : null;
+        var groupName = db is not null && groupId.HasValue
+            ? await db.Groups.AsNoTracking().Where(x => x.EventId == id && x.Id == groupId.Value).Select(x => x.Name).SingleOrDefaultAsync(ct) : null;
+        var placementName = db is not null && placementId.HasValue
+            ? await db.Placements.AsNoTracking().Where(x => x.EventId == id && x.Id == placementId.Value).Select(x => x.Name).SingleOrDefaultAsync(ct) : null;
+
+        if (operation == "create_guest" || explicitlySuppliedFields.Contains("categoryId"))
+            parts.Add($"категория {Quoted(categoryName, categoryId)}");
+        if (operation == "create_guest" || explicitlySuppliedFields.Contains("groupId"))
+            parts.Add($"группа {Quoted(groupName, groupId)}");
+        if (explicitlySuppliedFields.Contains("tagIds") && value.TryGetProperty("tagIds", out var tags) && tags.ValueKind == JsonValueKind.Array)
+        {
+            var tagIds = tags.EnumerateArray().Where(x => x.TryGetInt64(out _)).Select(x => x.GetInt64()).ToArray();
+            if (tagIds.Length == 0) parts.Add("без меток");
+            else
+            {
+                var tagNames = db is null ? [] : await db.Tags.AsNoTracking().Where(x => x.EventId == id && tagIds.Contains(x.Id))
+                    .OrderBy(x => x.Name).Select(x => x.Name).ToListAsync(ct);
+                parts.Add(tagNames.Count > 0 ? $"метки: {string.Join(", ", tagNames)}" : $"метки: {string.Join(", ", tagIds.Select(x => $"#{x}"))}");
+            }
+        }
+        if (explicitlySuppliedFields.Contains("email") && OptionalText(value, "email") is { Length: > 0 } email) parts.Add($"email {email}");
+        if (explicitlySuppliedFields.Contains("phone") && OptionalText(value, "phone") is { Length: > 0 } phone) parts.Add($"телефон {phone}");
+        if (explicitlySuppliedFields.Contains("placementId") && placementId.HasValue)
+        {
+            var seat = OptionalId(value, "placementSeatNumber");
+            parts.Add($"размещение {Quoted(placementName, placementId)}{(seat.HasValue ? $", место {seat}" : "")}");
+        }
+        return string.Join(" · ", parts);
     }
 
     private async Task<JsonElement> CompleteCreateBodyAsync(string operation, long? eventId, JsonElement data,
@@ -272,9 +351,13 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
 
     private async Task<JsonElement> CompleteUpdateBodyAsync(string operation, long? eventId, JsonElement data, CancellationToken ct)
     {
-        if (db is null || eventId is not long id || !operation.StartsWith("update_", StringComparison.Ordinal)) return data;
+        if (db is null || eventId is not long id
+            || (!operation.StartsWith("update_", StringComparison.Ordinal) && operation != "reseat_guest")) return data;
         var root = JsonNode.Parse(data.GetRawText())?.AsObject() ?? throw new AssistantActionException(400, "Некорректное поле data.");
-        if (root["body"] is not JsonObject body) throw new AssistantActionException(400, "Для изменения требуется объект data.body.");
+        JsonObject body;
+        if (root["body"] is JsonObject suppliedBody) body = suppliedBody;
+        else if (operation == "reseat_guest") { body = new JsonObject(); root["body"] = body; }
+        else throw new AssistantActionException(400, "Для изменения требуется объект data.body.");
         static void Fill(JsonObject target, string name, object? value)
         {
             if (!target.ContainsKey(name)) target[name] = value is null ? null : JsonSerializer.SerializeToNode(value);
@@ -289,6 +372,7 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
                 Fill(body, "eventDate", item.EventDate); Fill(body, "logoImageId", item.LogoImageId);
                 break;
             case "update_guest":
+            case "reseat_guest":
                 var guestId = Long(data, "guestId");
                 var guest = await db.Guests.AsNoTracking().SingleOrDefaultAsync(x => x.Id == guestId && x.EventId == id, ct)
                     ?? throw new AssistantActionException(404, "Гость не найден.");
@@ -297,6 +381,17 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
                 Fill(body, "name", guest.Name); Fill(body, "email", guest.Email); Fill(body, "phone", guest.Phone);
                 Fill(body, "groupId", guest.GroupId); Fill(body, "categoryId", categoryId); Fill(body, "tagIds", tagIds);
                 Fill(body, "placementId", guest.PlacementId); Fill(body, "placementSeatNumber", guest.PlacementSeatNumber);
+                if (operation == "reseat_guest")
+                {
+                    var targetPlacementId = Long(data, "placementId");
+                    var targetSeatNumber = Int(data, "seatNumber");
+                    var targetExists = await db.Placements.AsNoTracking().AnyAsync(x => x.Id == targetPlacementId && x.EventId == id && !x.IsLabel, ct);
+                    if (!targetExists) throw new AssistantActionException(404, "Объект размещения не найден.");
+                    if (guest.PlacementId == targetPlacementId && guest.PlacementSeatNumber == targetSeatNumber)
+                        throw new AssistantActionException(409, "Гость уже находится на выбранном месте.");
+                    body["placementId"] = targetPlacementId;
+                    body["placementSeatNumber"] = targetSeatNumber;
+                }
                 break;
             case "update_group":
                 var groupId = Long(data, "groupId");
@@ -405,7 +500,7 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
         "group_placement_rows" or "ungroup_placement_rows" or "rotate_placement_rows" or "update_seat_label" or
         "assign_guest_seat" or "remove_guest_seat" or "save_placement_template" or "apply_placement_template" => "create_group",
         "approve_guest" or "reject_guest" or "restore_guest_to_saved" => "approve_guest",
-        "create_guest" or "update_guest" or "submit_guest" or "invite_guest" or "delete_guest" or "restore_deleted_guest" => "create_guest",
+        "create_guest" or "update_guest" or "reseat_guest" or "submit_guest" or "invite_guest" or "delete_guest" or "restore_deleted_guest" => "create_guest",
         "create_user" or "update_user" or "delete_user" or "reset_user_password" => "create_user",
         "bulk_guest_action" => null,
         _ => throw new AssistantActionException(400, "Неизвестное действие.")

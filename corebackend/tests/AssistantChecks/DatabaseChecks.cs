@@ -51,6 +51,20 @@ public static class DatabaseChecks
             var search = await Call("search_guests", "{\"query\":\"alice\"}");
             check(search.GetProperty("total").GetInt32() == 2, "PostgreSQL case-insensitive scoped search");
             check(!search.GetRawText().Contains("secret@example.com") && !search.GetRawText().Contains("+70000000000"), "PostgreSQL projection excludes contacts");
+            var guestList = await Call("list_guests");
+            check(guestList.GetProperty("total").GetInt32() == 2
+                && guestList.GetProperty("items")[0].GetProperty("Name").GetString() == "Alice Allowed"
+                && guestList.GetProperty("items")[1].GetProperty("Name").GetString() == "Alice Child",
+                "PostgreSQL guest list is sorted and restricted to the current group branch");
+            check(!guestList.GetRawText().Contains("secret@example.com") && !guestList.GetRawText().Contains("+70000000000"),
+                "PostgreSQL guest list excludes contacts");
+            db.Guests.AddRange(Enumerable.Range(0, 101).Select(index => Guest(100 + index, 4, $"Bulk guest {index:D3}")));
+            await db.SaveChangesAsync();
+            var longGuestList = await Call("list_guests");
+            check(longGuestList.GetProperty("total").GetInt32() == 103
+                && longGuestList.GetProperty("items").GetArrayLength() == 100
+                && longGuestList.GetProperty("truncated").GetBoolean(),
+                "PostgreSQL guest list reports total and truncates after 100 items");
             var groups = await Call("get_groups");
             check(groups.GetProperty("total").GetInt32() == 2, "PostgreSQL group scope excludes siblings and other events");
             var placements = await Call("get_placements");
@@ -58,8 +72,19 @@ public static class DatabaseChecks
                 && placements.GetProperty("totalSeats").GetInt32() == 10
                 && placements.GetProperty("occupiedSeats").GetInt32() == 1
                 && placements.GetProperty("availableSeats").GetInt32() == 9
-                && placements.GetProperty("items")[0].GetProperty("occupiedSeats").GetInt32() == 1,
+                && placements.GetProperty("items")[0].GetProperty("occupiedSeats").GetInt32() == 1
+                && placements.GetProperty("items")[0].GetProperty("occupiedSeatNumbers")[0].GetInt32() == 1
+                && placements.GetProperty("items")[0].GetProperty("availableSeatNumbers")[0].GetInt32() == 2,
                 "PostgreSQL placement availability excludes deleted guests");
+            var neighborGuest = Guest(6, 2, "Bob Neighbor");
+            neighborGuest.PlacementSeatNumber = 2;
+            db.Guests.Add(neighborGuest);
+            await db.SaveChangesAsync();
+            var neighbors = await Call("get_guest_neighbors", "{\"query\":\"Alice Allowed\"}");
+            check(neighbors.GetProperty("seated").GetBoolean()
+                && neighbors.GetProperty("adjacentSeats")[0].GetProperty("guest").GetProperty("Name").GetString() == "Bob Neighbor"
+                && neighbors.GetProperty("availableAdjacentSeatNumbers")[0].GetInt32() == 10,
+                "PostgreSQL table neighbors include occupied next seat and circular free previous seat");
             check((await Call("search_guests", "{\"query\":\"alice\"}", 2)).GetProperty("error").GetString() == "access_denied", "PostgreSQL foreign event denied");
             check((await Call("search_guests", "{\"query\":\"a\"}")).GetProperty("error").GetString() == "query_length", "short query rejected");
             check((await Call("search_guests", "{\"query\":\"' OR 1=1 --\"}")).GetProperty("total").GetInt32() == 0, "SQL-like query treated as literal text");
@@ -78,6 +103,11 @@ public static class DatabaseChecks
             check(minimalCreate.Request.Body!.Value.GetProperty("categoryId").GetInt64() == 1
                 && minimalCreate.Request.Body!.Value.GetProperty("groupId").GetInt64() == user.GroupId,
                 "single category and current group complete minimal guest creation");
+            check(minimalCreate.CompactSummary is not null
+                && minimalCreate.CompactSummary.Contains("категория «Only category»")
+                && minimalCreate.CompactSummary.Contains("группа «Allowed»")
+                && !minimalCreate.CompactSummary.Contains("email", StringComparison.OrdinalIgnoreCase),
+                "guest confirmation resolves catalog names and omits unspecified optional fields");
             var partialUpdate = await catalog.BuildAsync(JsonSerializer.Deserialize<JsonElement>(
                 "{\"operation\":\"update_guest\",\"data\":{\"guestId\":1,\"body\":{\"groupId\":4}}}"), 1, 1);
             var mergedBody = partialUpdate.Request.Body!.Value;
@@ -87,6 +117,18 @@ public static class DatabaseChecks
                 && mergedBody.GetProperty("phone").GetString() == "+70000000000"
                 && mergedBody.GetProperty("placementId").GetInt64() == 1,
                 "partial guest update preserves current fields in reviewed API body");
+            check(partialUpdate.CompactSummary is not null && partialUpdate.CompactSummary.Contains("группа «Child»")
+                && !partialUpdate.CompactSummary.Contains("email", StringComparison.OrdinalIgnoreCase)
+                && !partialUpdate.CompactSummary.Contains("телефон", StringComparison.OrdinalIgnoreCase),
+                "guest update confirmation contains only explicitly changed optional fields");
+            var reseat = await catalog.BuildAsync(JsonSerializer.Deserialize<JsonElement>(
+                "{\"operation\":\"reseat_guest\",\"data\":{\"guestId\":1,\"placementId\":1,\"seatNumber\":2}}"), 1, 1);
+            check(reseat.Request.Path == "/events/1/guests/1"
+                && reseat.Request.Body!.Value.GetProperty("name").GetString() == "Alice Allowed"
+                && reseat.Request.Body!.Value.GetProperty("placementId").GetInt64() == 1
+                && reseat.Request.Body!.Value.GetProperty("placementSeatNumber").GetInt32() == 2
+                && reseat.CompactSummary!.Contains("место 2"),
+                "reseating uses the guest update API and preserves the remaining guest fields");
 
             var eventRepository = new EventRepository(db);
             var userRepository = new UserRepository(db);
@@ -97,6 +139,20 @@ public static class DatabaseChecks
             var writePermissions = Stub<IPermissionService>.Create((_, _) => Task.FromResult(codes.ToList()));
             var actions = new AssistantActions(db, membership, writePermissions, eventService, store, audit,
                 new AssistantActionCatalog(membership, writePermissions));
+            var batchActions = new AssistantActions(db, membership, catalogPermissions, eventService, store, audit, catalog);
+            var batch = await batchActions.PrepareClientActionsAsync(JsonSerializer.Deserialize<JsonElement>("""
+                {"title":"Создать две категории","actions":[
+                  {"operation":"create_category","data":{"body":{"name":"Batch one"}}},
+                  {"operation":"create_category","data":{"body":{"name":"Batch two"}}}
+                ]}
+                """), 1, 1, default);
+            check(batch.Action.Items?.Count == 2 && batch.Action.CompactSummary == "Подготовлено действий: 2",
+                "multiple operations produce one confirmation card");
+            var approvedBatch = await batchActions.DecideAsync(batch.Action.Id, 1, 1, true, default);
+            check(approvedBatch.Requests?.Count == 2
+                && approvedBatch.Requests.All(x => x.Path == "/events/1/categories")
+                && await db.Categories.CountAsync() == 1,
+                "one confirmation approves all requests without executing them on the model path");
             async Task Reject(Func<Task> action, int status, string label) {
                 try { await action(); } catch (AssistantActionException e) when (e.Status == status) { check(true, label); return; }
                 throw new Exception("Expected action rejection: " + label);

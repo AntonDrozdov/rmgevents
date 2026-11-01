@@ -25,7 +25,6 @@ export function ReferenceCollection<T extends ReferenceItem>({ items, variant, l
       <label className="field reference-search">
         <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск по названию" aria-label="Поиск по названию" />
       </label>
-      <span className="muted" role="status">{loading ? "Загрузка..." : `Показано: ${filtered.length} из ${items.length}`}</span>
     </div>
     {loading ? <div className="empty-state compact">Загрузка...</div>
       : items.length === 0 ? <div className="empty-state compact">{variant === "categories" ? "Категорий пока нет." : "Меток пока нет."}</div>
