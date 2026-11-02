@@ -46,6 +46,8 @@ function readStoredChat(key: string): StoredChat | null {
 }
 
 function executionMessage(value: unknown) {
+  if (value && typeof value === "object" && "message" in value && typeof value.message === "string")
+    return value.message;
   if (value && typeof value === "object" && "temporaryPassword" in value && typeof value.temporaryPassword === "string")
     return `Действие выполнено. Временный пароль: ${value.temporaryPassword}`;
   if (value && typeof value === "object" && "changedCount" in value) {

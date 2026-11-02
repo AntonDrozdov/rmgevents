@@ -17,6 +17,8 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
 
         return await query
             .Include(x => x.Group)
+            .Include(x => x.ParentGuest)
+            .Include(x => x.Companions)
             .Include(x => x.CreatedByUser)
             .ThenInclude(x => x!.Role)
             .Include(x => x.DeletedByUser)
@@ -32,6 +34,8 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
     {
         return await db.Guests.AsNoTracking()
             .Include(x => x.Group)
+            .Include(x => x.ParentGuest)
+            .Include(x => x.Companions)
             .Include(x => x.GuestCategory).ThenInclude(x => x!.Category)
             .Include(x => x.GuestTags).ThenInclude(x => x.Tag)
             .FirstOrDefaultAsync(x => x.PublicId == publicId);
@@ -52,6 +56,23 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .ToListAsync();
     }
 
+    public async Task<List<Application.Entities.Guest>> GetCompanionsByParentIdAsync(long parentGuestId)
+    {
+        return await db.Guests
+            .Where(x => x.ParentGuestId == parentGuestId)
+            .OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Include(x => x.Group)
+            .Include(x => x.ParentGuest)
+            .Include(x => x.Companions)
+            .Include(x => x.CreatedByUser).ThenInclude(x => x!.Role)
+            .Include(x => x.DeletedByUser)
+            .Include(x => x.GuestCategory).ThenInclude(x => x!.Category)
+            .Include(x => x.GuestTags).ThenInclude(x => x.Tag)
+            .Include(x => x.Decisions)
+            .AsSplitQuery()
+            .ToListAsync();
+    }
+
     public async Task<(List<Application.Entities.Guest> Items, int TotalCount, int Page)> GetPageByEventIdAsync(
         long eventId,
         string? search,
@@ -61,6 +82,7 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         IReadOnlyCollection<long> tagIds,
         IReadOnlyCollection<long> groupIds,
         IReadOnlyCollection<long> createdByUserIds,
+        bool hasCompanions,
         bool includeDeleted,
         string? sortBy,
         bool sortDescending,
@@ -102,6 +124,11 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
         if (createdByUserIds.Count > 0)
         {
             query = query.Where(guest => createdByUserIds.Contains(guest.CreatedByUserId));
+        }
+
+        if (hasCompanions)
+        {
+            query = query.Where(guest => guest.Companions.Any(companion => !companion.IsDeleted));
         }
 
         var trimmedSearch = search?.Trim();
@@ -222,6 +249,8 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Include(guest => guest.Group)
+            .Include(guest => guest.ParentGuest)
+            .Include(guest => guest.Companions)
             .Include(guest => guest.CreatedByUser)
             .ThenInclude(user => user!.Role)
             .Include(guest => guest.DeletedByUser)
@@ -232,6 +261,28 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
             .Include(guest => guest.Decisions)
             .AsSplitQuery()
             .ToListAsync();
+
+        var parentIds = items.Where(item => item.ParentGuestId.HasValue)
+            .Select(item => item.ParentGuestId!.Value)
+            .Where(parentId => items.All(item => item.Id != parentId))
+            .Distinct()
+            .ToArray();
+        if (parentIds.Length > 0)
+        {
+            var parents = await db.Guests.IgnoreQueryFilters().AsNoTracking()
+                .Where(guest => guest.EventId == eventId && parentIds.Contains(guest.Id))
+                .Include(guest => guest.Group)
+                .Include(guest => guest.ParentGuest)
+                .Include(guest => guest.Companions)
+                .Include(guest => guest.CreatedByUser).ThenInclude(user => user!.Role)
+                .Include(guest => guest.DeletedByUser)
+                .Include(guest => guest.GuestCategory).ThenInclude(category => category!.Category)
+                .Include(guest => guest.GuestTags).ThenInclude(tag => tag.Tag)
+                .Include(guest => guest.Decisions)
+                .AsSplitQuery()
+                .ToListAsync();
+            items.AddRange(parents);
+        }
 
         return (items, totalCount, page);
     }
@@ -255,6 +306,8 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
                 query = query.Where(guest => selection.GroupIds.Contains(guest.GroupId));
             if (selection.CreatedByUserIds.Count > 0)
                 query = query.Where(guest => selection.CreatedByUserIds.Contains(guest.CreatedByUserId));
+            if (selection.HasCompanions)
+                query = query.Where(guest => guest.Companions.Any(companion => !companion.IsDeleted));
             if (selection.ExcludedGuestIds.Count > 0)
                 query = query.Where(guest => !selection.ExcludedGuestIds.Contains(guest.Id));
 
@@ -277,6 +330,8 @@ public sealed class GuestRepository(ApplicationDbContext db) : IGuestRepository
 
         return await query
             .Include(guest => guest.Group)
+            .Include(guest => guest.ParentGuest)
+            .Include(guest => guest.Companions)
             .Include(guest => guest.CreatedByUser).ThenInclude(user => user!.Role)
             .Include(guest => guest.DeletedByUser)
             .Include(guest => guest.GuestCategory).ThenInclude(category => category!.Category)

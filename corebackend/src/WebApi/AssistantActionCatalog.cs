@@ -106,6 +106,10 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
         static AssistantClientAction A(string operation, string title, string method, string path, JsonElement? body, string summary) =>
             new(operation, title, null, new(method, path, body), Review(operation, summary, body));
         static string Enc(string value) => Uri.EscapeDataString(value);
+        static int CompanionCount(JsonElement? source) => source is { ValueKind: JsonValueKind.Object } value
+            && value.TryGetProperty("companions", out var companions) && companions.ValueKind == JsonValueKind.Array
+            ? companions.GetArrayLength() : 0;
+        var companionCount = CompanionCount(body);
 
         return operation switch
         {
@@ -113,7 +117,10 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
             "update_event" => A(operation, "Изменить мероприятие", "PUT", EventPath(id, ""), RequiredBody(body), Describe(data, "Изменение настроек мероприятия")),
             "set_event_archived" => A(operation, "Изменить статус мероприятия", "PATCH", EventPath(id, "/archive-status"), RequiredBody(body), Describe(data, "Изменение статуса мероприятия")),
 
-            "create_guest" => A(operation, "Добавить гостя", "POST", EventPath(id, "/guests"), RequiredBody(body), Describe(data, "Создание гостя")),
+            "create_guest" => A(operation,
+                companionCount > 0 ? "Добавить гостя с сопровождающими" : "Добавить гостя",
+                "POST", EventPath(id, companionCount > 0 ? "/guests/with-companions" : "/guests"), RequiredBody(body),
+                Describe(data, "Создание гостя")),
             "update_guest" => A(operation, $"Изменить гостя #{Long(data, "guestId")}", "PUT", EventPath(id, $"/guests/{Long(data, "guestId")}"), RequiredBody(body), Describe(data, "Изменение данных гостя")),
             "reseat_guest" => A(operation, $"Пересадить гостя #{Long(data, "guestId")}", "PUT", EventPath(id, $"/guests/{Long(data, "guestId")}"), RequiredBody(body), Describe(data, "Пересадка гостя на другое место")),
             "submit_guest" => GuestPost(operation, id, data, "submit-for-review", "Отправить гостя на согласование"),
@@ -210,6 +217,9 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
             parts.Add($"категория {Quoted(categoryName, categoryId)}");
         if (operation == "create_guest" || explicitlySuppliedFields.Contains("groupId"))
             parts.Add($"группа {Quoted(groupName, groupId)}");
+        if (operation == "create_guest" && value.TryGetProperty("companions", out var companions)
+            && companions.ValueKind == JsonValueKind.Array && companions.GetArrayLength() > 0)
+            parts.Add($"сопровождающих: {companions.GetArrayLength()}");
         if (explicitlySuppliedFields.Contains("tagIds") && value.TryGetProperty("tagIds", out var tags) && tags.ValueKind == JsonValueKind.Array)
         {
             var tagIds = tags.EnumerateArray().Where(x => x.TryGetInt64(out _)).Select(x => x.GetInt64()).ToArray();
@@ -254,6 +264,39 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
         }
         static bool Bool(JsonObject target, string name)
             => target[name] is JsonValue value && value.TryGetValue<bool>(out var result) && result;
+        static void CompleteGuestCompanions(JsonObject target)
+        {
+            var requestedCount = 0;
+            if (target["companionCount"] is JsonValue countValue && !countValue.TryGetValue<int>(out requestedCount))
+                throw new AssistantActionException(400, "Количество сопровождающих должно быть целым числом.");
+            if (requestedCount is < 0 or > 50)
+                throw new AssistantActionException(400, "Допустимо от 1 до 50 сопровождающих.");
+
+            if (target["companions"] is not null && target["companions"] is not JsonArray)
+                throw new AssistantActionException(400, "Сопровождающие должны быть списком.");
+            var companions = target["companions"] as JsonArray;
+            if (companions is null)
+            {
+                companions = new JsonArray();
+                target["companions"] = companions;
+            }
+            if (requestedCount > 0 && companions.Count == 0)
+                for (var index = 1; index <= requestedCount; index++) companions.Add(new JsonObject { ["name"] = $"Сопровождающий {index}" });
+            if (requestedCount > 0 && companions.Count != requestedCount)
+                throw new AssistantActionException(400, "Количество сопровождающих не совпадает со списком.");
+            if (companions.Count > 50)
+                throw new AssistantActionException(400, "Допустимо не более 50 сопровождающих.");
+
+            for (var index = 0; index < companions.Count; index++)
+            {
+                if (companions[index] is not JsonObject companion)
+                    throw new AssistantActionException(400, "Каждый сопровождающий должен быть объектом.");
+                if (companion["name"] is null) companion["name"] = $"Сопровождающий {index + 1}";
+                if (companion["groupId"] is null) companion["groupId"] = target["groupId"]?.DeepClone();
+                if (companion["categoryId"] is null) companion["categoryId"] = target["categoryId"]?.DeepClone();
+            }
+            target.Remove("companionCount");
+        }
         void CopyFlatFields(params string[] names)
         {
             foreach (var name in names)
@@ -267,7 +310,7 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
                 Fill(body, "logoImageId", null);
                 break;
             case "create_guest":
-                CopyFlatFields("name", "email", "phone", "groupId", "categoryId", "tagIds", "placementId", "placementSeatNumber");
+                CopyFlatFields("name", "email", "phone", "groupId", "categoryId", "tagIds", "placementId", "placementSeatNumber", "companionCount", "companions");
                 if (member is not null) Fill(body, "groupId", member.GroupId);
                 if (!body.ContainsKey("categoryId") && db is not null && eventId is long guestEventId)
                 {
@@ -276,6 +319,7 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
                     if (categoryIds.Count == 1) Fill(body, "categoryId", categoryIds[0]);
                 }
                 Fill(body, "tagIds", Array.Empty<long>());
+                CompleteGuestCompanions(body);
                 break;
             case "create_group":
                 CopyFlatFields("name", "quota", "parentGroupId");
@@ -330,6 +374,20 @@ public sealed class AssistantActionCatalog(IUserService users, IPermissionServic
                 if (!completedBody.TryGetProperty("categoryId", out var category) || category.ValueKind != JsonValueKind.Number
                     || !category.TryGetInt64(out var categoryId) || categoryId <= 0)
                     throw new AssistantActionException(400, "Для создания гостя укажите категорию. Email, телефон, метки и размещение необязательны.");
+                if (completedBody.TryGetProperty("companions", out var companions))
+                {
+                    if (companions.ValueKind != JsonValueKind.Array || companions.GetArrayLength() > 50)
+                        throw new AssistantActionException(400, "Некорректный список сопровождающих.");
+                    foreach (var companion in companions.EnumerateArray())
+                    {
+                        if (companion.ValueKind != JsonValueKind.Object)
+                            throw new AssistantActionException(400, "Некорректные данные сопровождающего.");
+                        String(companion, "name", 500); Long(companion, "groupId");
+                        if (!companion.TryGetProperty("categoryId", out var companionCategory) || companionCategory.ValueKind != JsonValueKind.Number
+                            || !companionCategory.TryGetInt64(out var companionCategoryId) || companionCategoryId <= 0)
+                            throw new AssistantActionException(400, "Для сопровождающего укажите категорию.");
+                    }
+                }
                 break;
             case "create_group": String(completedBody, "name", 500); break;
             case "create_category": String(completedBody, "name", 50); break;

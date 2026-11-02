@@ -6,6 +6,7 @@ public sealed class Guest
     public Guid PublicId { get; set; } = Guid.NewGuid();
     public long EventId { get; set; }
     public long GroupId { get; set; }
+    public long? ParentGuestId { get; set; }
     public long? PlacementId { get; set; }
     public int? PlacementSeatNumber { get; set; }
     public long CreatedByUserId { get; set; }
@@ -23,6 +24,8 @@ public sealed class Guest
     // Navigation properties
     public Event? Event { get; set; }
     public Group? Group { get; set; }
+    public Guest? ParentGuest { get; set; }
+    public ICollection<Guest> Companions { get; set; } = [];
     public User? CreatedByUser { get; set; }
     public User? DeletedByUser { get; set; }
     public GuestCategory? GuestCategory { get; set; }

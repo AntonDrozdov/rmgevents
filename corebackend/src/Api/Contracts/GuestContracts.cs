@@ -7,6 +7,9 @@ public sealed record GuestDto(
     Guid PublicId,
     long EventId,
     long GroupId,
+    long? ParentGuestId,
+    string? ParentGuestName,
+    int CompanionCount,
     string? GroupName,
     long? CategoryId,
     string? CategoryName,
@@ -73,6 +76,35 @@ public sealed record CreateGuestRequest(
     long? PlacementId = null,
     int? PlacementSeatNumber = null);
 
+public sealed record CreateGuestCompanionRequest(
+    string Name,
+    long GroupId,
+    [Required] long? CategoryId);
+
+public sealed record CreateGuestWithCompanionsRequest(
+    string Name,
+    string? Email,
+    string? Phone,
+    long GroupId,
+    [Required] long? CategoryId,
+    List<long>? TagIds,
+    List<CreateGuestCompanionRequest>? Companions,
+    long? PlacementId = null,
+    int? PlacementSeatNumber = null);
+
+public sealed record CreateGuestWithCompanionsResponse(
+    string Message,
+    GuestDto Guest,
+    List<GuestDto> Companions);
+
+public sealed record CompanionInput(
+    long? Id,
+    string Name,
+    long GroupId,
+    [Required] long? CategoryId);
+
+public sealed record SaveCompanionsRequest(List<CompanionInput> Companions);
+
 public sealed record ApproveGuestRequest(
     long GuestId,
     bool Approve);
@@ -97,7 +129,8 @@ public sealed record GuestBulkSelectionRequest(
     List<long>? CategoryIds,
     List<long>? TagIds,
     List<long>? GroupIds,
-    List<long>? CreatedByUserIds);
+    List<long>? CreatedByUserIds,
+    bool HasCompanions = false);
 
 public sealed record GuestBulkActionRequest(string Action, GuestBulkSelectionRequest Selection);
 public sealed record GuestBulkActionOptionDto(string Action, string Label, int EligibleCount);

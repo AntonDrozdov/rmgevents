@@ -33,8 +33,45 @@ public sealed class GuestService(
         "createdBy"
     };
 
-    public Task<Application.Entities.Guest> CreateGuestAsync(long eventId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null)
-        => placements.Transaction(eventId, () => CreateGuestCoreAsync(eventId, loginId, name, email, phone, groupId, categoryId, tagIds, placementId, placementSeatNumber));
+    public Task<Application.Entities.Guest> CreateGuestAsync(long eventId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null, long? parentGuestId = null)
+        => placements.Transaction(eventId, () => CreateGuestCoreAsync(eventId, loginId, name, email, phone, groupId, categoryId, tagIds, placementId, placementSeatNumber, parentGuestId));
+
+    public Task<(Application.Entities.Guest Guest, List<Application.Entities.Guest> Companions)> CreateGuestWithCompanionsAsync(
+        long eventId,
+        long loginId,
+        string name,
+        string? email,
+        string? phone,
+        long groupId,
+        long? categoryId,
+        IReadOnlyCollection<long> tagIds,
+        IReadOnlyCollection<(string Name, long GroupId, long? CategoryId)> companions,
+        long? placementId = null,
+        int? placementSeatNumber = null)
+    {
+        if (companions.Count is < 1 or > 50)
+            throw new InvalidOperationException("A guest can have from 1 to 50 companions");
+
+        return placements.Transaction(eventId, async () =>
+        {
+            var guest = await CreateGuestCoreAsync(eventId, loginId, name, email, phone, groupId, categoryId, tagIds,
+                placementId, placementSeatNumber);
+            var createdCompanions = new List<Application.Entities.Guest>(companions.Count);
+
+            foreach (var companion in companions)
+            {
+                if (string.IsNullOrWhiteSpace(companion.Name))
+                    throw new InvalidOperationException("Companion name is required");
+                if (!companion.CategoryId.HasValue)
+                    throw new InvalidOperationException("Guest category is required");
+
+                createdCompanions.Add(await CreateGuestCoreAsync(eventId, loginId, companion.Name.Trim(), null, null,
+                    companion.GroupId, companion.CategoryId, [], null, null, guest.Id));
+            }
+
+            return (guest, createdCompanions);
+        });
+    }
 
     private async Task<Application.Entities.Guest> CreateGuestCoreAsync(
         long eventId,
@@ -44,7 +81,7 @@ public sealed class GuestService(
         string? phone,
         long groupId,
         long? categoryId,
-        IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null)
+        IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null, long? parentGuestId = null)
     {
         await eventStateGuard.EnsureActiveAsync(eventId);
 
@@ -53,6 +90,14 @@ public sealed class GuestService(
             throw new UnauthorizedAccessException("No permission to create guests");
         
         var actor = await GetActorAsync(loginId, eventId);
+
+        if (parentGuestId.HasValue)
+        {
+            var parent = await guestRepository.GetByIdAsync(parentGuestId.Value)
+                ?? throw new InvalidOperationException("Parent guest not found");
+            if (parent.EventId != eventId || parent.ParentGuestId.HasValue)
+                throw new InvalidOperationException("Invalid parent guest");
+        }
         
         // Получаем группу пользователя
         var userGroupId = actor.GroupId;
@@ -75,6 +120,7 @@ public sealed class GuestService(
             Id = 0,
             EventId = eventId,
             GroupId = groupId,
+            ParentGuestId = parentGuestId,
             CreatedByUserId = actor.Id,
             PlacementId = placementId,
             PlacementSeatNumber = resolvedSeatNumber,
@@ -120,6 +166,69 @@ public sealed class GuestService(
         return await guestRepository.GetByEventIdAsync(eventId);
     }
 
+    public async Task<List<Application.Entities.Guest>> GetCompanionsAsync(long parentGuestId, long loginId)
+    {
+        var parent = await guestRepository.GetByIdAsync(parentGuestId)
+            ?? throw new InvalidOperationException("Guest not found");
+        await EnsureCanManageGuestAsync(parent, loginId);
+        return await guestRepository.GetCompanionsByParentIdAsync(parentGuestId);
+    }
+
+    public async Task<List<Application.Entities.Guest>> SaveCompanionsAsync(long parentGuestId, long loginId,
+        IReadOnlyCollection<(long? Id, string Name, long GroupId, long? CategoryId)> companions)
+    {
+        var parent = await guestRepository.GetByIdAsync(parentGuestId)
+            ?? throw new InvalidOperationException("Guest not found");
+        if (parent.ParentGuestId.HasValue)
+            throw new InvalidOperationException("A companion cannot have companions");
+        if (companions.Count > 50)
+            throw new InvalidOperationException("A guest can have at most 50 companions at once");
+        if (companions.Where(x => x.Id.HasValue).GroupBy(x => x.Id).Any(x => x.Count() > 1))
+            throw new InvalidOperationException("The companion list contains duplicate guests");
+
+        return await placements.Transaction(parent.EventId, async () =>
+        {
+            await eventStateGuard.EnsureActiveAsync(parent.EventId);
+            await EnsureCanManageGuestAsync(parent, loginId);
+            var existingCompanions = await guestRepository.GetCompanionsByParentIdAsync(parentGuestId);
+            var requestedIds = companions.Where(companion => companion.Id.HasValue)
+                .Select(companion => companion.Id!.Value)
+                .ToHashSet();
+
+            if (requestedIds.Any(id => existingCompanions.All(companion => companion.Id != id)))
+                throw new InvalidOperationException("Companion does not belong to this guest");
+
+            foreach (var removedCompanion in existingCompanions.Where(companion => !requestedIds.Contains(companion.Id)))
+            {
+                await DeleteGuestAsync(removedCompanion.Id, loginId);
+            }
+
+            var saved = new List<Application.Entities.Guest>();
+            foreach (var companion in companions)
+            {
+                if (string.IsNullOrWhiteSpace(companion.Name))
+                    throw new InvalidOperationException("Companion name is required");
+                if (!companion.CategoryId.HasValue)
+                    throw new InvalidOperationException("Guest category is required");
+
+                if (companion.Id.HasValue)
+                {
+                    var existing = existingCompanions.First(existingCompanion => existingCompanion.Id == companion.Id!.Value);
+                    await UpdateGuestCoreAsync(existing.Id, loginId, companion.Name.Trim(), existing.Email, existing.Phone,
+                        companion.GroupId, companion.CategoryId, existing.GuestTags.Select(x => x.TagId).ToArray(),
+                        existing.PlacementId, existing.PlacementSeatNumber);
+                    saved.Add(await guestRepository.GetByIdAsync(existing.Id) ?? existing);
+                }
+                else
+                {
+                    saved.Add(await CreateGuestCoreAsync(parent.EventId, loginId, companion.Name.Trim(), null, null,
+                        companion.GroupId, companion.CategoryId, [], null, null, parentGuestId));
+                }
+            }
+            return saved;
+        });
+    }
+
     public async Task<(List<Application.Entities.Guest> Items, int TotalCount, int Page, int PageSize)> GetGuestsPageByEventAsync(
         long eventId,
         int page,
@@ -131,6 +240,7 @@ public sealed class GuestService(
         IReadOnlyCollection<long>? tagIds = null,
         IReadOnlyCollection<long>? groupIds = null,
         IReadOnlyCollection<long>? createdByUserIds = null,
+        bool hasCompanions = false,
         bool includeDeleted = false,
         string? sortBy = null,
         string? sortDirection = null)
@@ -183,6 +293,7 @@ public sealed class GuestService(
             normalizedTagIds,
             normalizedGroupIds,
             normalizedCreatedByUserIds,
+            hasCompanions,
             includeDeleted,
             normalizedSortBy,
             sortDescending,

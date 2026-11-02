@@ -5,6 +5,7 @@ public interface IGuestRepository
     Task<Entities.Guest?> GetByIdAsync(long id, bool includeDeleted = false);
     Task<Entities.Guest?> GetByPublicIdAsync(Guid publicId);
     Task<List<Entities.Guest>> GetByEventIdAsync(long eventId);
+    Task<List<Entities.Guest>> GetCompanionsByParentIdAsync(long parentGuestId);
     Task<(List<Entities.Guest> Items, int TotalCount, int Page)> GetPageByEventIdAsync(
         long eventId,
         string? search,
@@ -14,6 +15,7 @@ public interface IGuestRepository
         IReadOnlyCollection<long> tagIds,
         IReadOnlyCollection<long> groupIds,
         IReadOnlyCollection<long> createdByUserIds,
+        bool hasCompanions,
         bool includeDeleted,
         string? sortBy,
         bool sortDescending,

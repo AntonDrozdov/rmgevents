@@ -30,6 +30,9 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
             guest.PublicId,
             guest.EventId,
             guest.GroupId,
+            guest.ParentGuestId,
+            guest.ParentGuest?.Name,
+            guest.Companions.Count(companion => !companion.IsDeleted),
             guest.Group?.Name,
             guest.GuestCategory?.CategoryId,
             guest.GuestCategory?.Category?.Name,
@@ -75,7 +78,8 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
         request.CategoryIds ?? [],
         request.TagIds ?? [],
         request.GroupIds ?? [],
-        request.CreatedByUserIds ?? []);
+        request.CreatedByUserIds ?? [],
+        request.HasCompanions);
 
     [HttpGet]
     public async Task<ActionResult<PagedResultDto<GuestDto>>> GetGuests(
@@ -89,11 +93,12 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
         [FromQuery(Name = "tagIds")] List<long>? tagIds = null,
         [FromQuery(Name = "groupIds")] List<long>? groupIds = null,
         [FromQuery(Name = "createdByUserIds")] List<long>? createdByUserIds = null,
+        [FromQuery] bool hasCompanions = false,
         [FromQuery] bool includeDeleted = false,
         [FromQuery] string? sortBy = null,
         [FromQuery] string? sortDirection = null)
     {
-        var guests = await guestService.GetGuestsPageByEventAsync(eventId, page, pageSize, search, statuses, eligibleForSeating, categoryIds, tagIds, groupIds, createdByUserIds, includeDeleted, sortBy, sortDirection);
+        var guests = await guestService.GetGuestsPageByEventAsync(eventId, page, pageSize, search, statuses, eligibleForSeating, categoryIds, tagIds, groupIds, createdByUserIds, hasCompanions, includeDeleted, sortBy, sortDirection);
         var result = guests.Items.Select(MapGuest).ToList();
 
         return Ok(new PagedResultDto<GuestDto>(
@@ -109,6 +114,38 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
     {
         var guest = await guestService.GetGuestAsync(guestId, includeDeleted: true);
         return guest == null || guest.EventId != eventId ? NotFound() : Ok(MapGuest(guest));
+    }
+
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpGet("{guestId:long}/companions")]
+    public async Task<ActionResult<List<GuestDto>>> GetCompanions(long eventId, long guestId)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        try
+        {
+            var parent = await guestService.GetGuestAsync(guestId);
+            if (parent == null || parent.EventId != eventId) return NotFound();
+            return Ok((await guestService.GetCompanionsAsync(guestId, loginId)).Select(MapGuest).ToList());
+        }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+    }
+
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpPut("{guestId:long}/companions")]
+    public async Task<ActionResult<List<GuestDto>>> SaveCompanions(long eventId, long guestId, SaveCompanionsRequest request)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        try
+        {
+            var parent = await guestService.GetGuestAsync(guestId);
+            if (parent == null || parent.EventId != eventId) return NotFound();
+            var saved = await guestService.SaveCompanionsAsync(guestId, loginId,
+                (request.Companions ?? []).Select(item => (item.Id, item.Name, item.GroupId, item.CategoryId)).ToList());
+            return Ok(saved.Select(MapGuest).ToList());
+        }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
     }
 
     [Authorize(Policy = "CanCreateGuest")]
@@ -132,6 +169,30 @@ public sealed class GuestsController(IGuestService guestService) : ControllerBas
             guest.CreatedAt)).ToList());
     }
     
+    [Authorize(Policy = "CanCreateGuest")]
+    [HttpPost("with-companions")]
+    public async Task<ActionResult<CreateGuestWithCompanionsResponse>> CreateGuestWithCompanions(
+        long eventId,
+        CreateGuestWithCompanionsRequest request)
+    {
+        var loginId = long.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var companions = request.Companions ?? [];
+
+        try
+        {
+            var created = await guestService.CreateGuestWithCompanionsAsync(
+                eventId, loginId, request.Name, request.Email, request.Phone, request.GroupId, request.CategoryId,
+                request.TagIds ?? [], companions.Select(item => (item.Name, item.GroupId, item.CategoryId)).ToList(),
+                request.PlacementId, request.PlacementSeatNumber);
+            var response = new CreateGuestWithCompanionsResponse(
+                $"Создан гость «{created.Guest.Name}» и сопровождающих: {created.Companions.Count}.",
+                MapGuest(created.Guest), created.Companions.Select(MapGuest).ToList());
+            return Created($"/guests/{created.Guest.Id}", response);
+        }
+        catch (UnauthorizedAccessException ex) { return Forbid(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+    }
+
     [Authorize(Policy = "CanCreateGuest")]
     [HttpPost]
     public async Task<ActionResult<GuestDto>> CreateGuest(

@@ -33,6 +33,9 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
         builder.Property(x => x.GroupId)
             .HasColumnName("group_id")
             .IsRequired();
+
+        builder.Property(x => x.ParentGuestId)
+            .HasColumnName("parent_guest_id");
         
         builder.Property(x => x.CreatedByUserId)
             .HasColumnName("created_by_user_id")
@@ -82,6 +85,11 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
             .WithMany(x => x.Guests)
             .HasForeignKey(x => x.GroupId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.ParentGuest)
+            .WithMany(x => x.Companions)
+            .HasForeignKey(x => x.ParentGuestId)
+            .OnDelete(DeleteBehavior.Restrict);
         
         builder.HasOne(x => x.CreatedByUser)
             .WithMany(x => x.CreatedGuests)
@@ -103,6 +111,9 @@ public sealed class GuestConfiguration : IEntityTypeConfiguration<Guest>
 
         builder.HasIndex(x => new { x.EventId, x.IsDeleted })
             .HasDatabaseName("IX_guests_event_id_is_deleted");
+
+        builder.HasIndex(x => x.ParentGuestId)
+            .HasDatabaseName("IX_guests_parent_guest_id");
 
         builder.HasIndex(x => new { x.PlacementId, x.PlacementSeatNumber })
             .IsUnique()

@@ -323,6 +323,9 @@ export interface GuestDto {
   id: number;
   eventId: number;
   groupId: number;
+  parentGuestId?: number | null;
+  parentGuestName?: string | null;
+  companionCount: number;
   groupName?: string | null;
   categoryId?: number | null;
   categoryName?: string | null;
@@ -344,6 +347,13 @@ export interface GuestDto {
   deletedByName?: string | null;
 }
 
+export interface CompanionInput {
+  id?: number | null;
+  name: string;
+  groupId: number;
+  categoryId: number | null;
+}
+
 export interface GuestBulkSelectionRequest {
   selectAllMatching: boolean;
   guestIds: number[];
@@ -355,6 +365,7 @@ export interface GuestBulkSelectionRequest {
   tagIds: number[];
   groupIds: number[];
   createdByUserIds: number[];
+  hasCompanions: boolean;
 }
 
 export interface GuestBulkActionOptionDto { action: string; label: string; eligibleCount: number; }

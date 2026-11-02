@@ -375,6 +375,10 @@ namespace Infrastructure.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("placement_id");
 
+                    b.Property<long?>("ParentGuestId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("parent_guest_id");
+
                     b.Property<int?>("PlacementSeatNumber")
                         .HasColumnType("integer")
                         .HasColumnName("placement_seat_number");
@@ -411,6 +415,9 @@ namespace Infrastructure.Migrations
                     b.HasIndex("PlacementId", "PlacementSeatNumber")
                         .IsUnique()
                         .HasFilter("placement_id IS NOT NULL AND placement_seat_number IS NOT NULL");
+
+                    b.HasIndex("ParentGuestId")
+                        .HasDatabaseName("IX_guests_parent_guest_id");
 
                     b.HasIndex("EventId", "Status", "CreatedAt")
                         .HasDatabaseName("IX_guests_event_id_status_created_at");
@@ -1239,6 +1246,11 @@ namespace Infrastructure.Migrations
                         .HasForeignKey("PlacementId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Application.Entities.Guest", "ParentGuest")
+                        .WithMany("Companions")
+                        .HasForeignKey("ParentGuestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("CreatedByUser");
 
                     b.Navigation("DeletedByUser");
@@ -1246,6 +1258,8 @@ namespace Infrastructure.Migrations
                     b.Navigation("Event");
 
                     b.Navigation("Group");
+
+                    b.Navigation("ParentGuest");
                 });
 
             modelBuilder.Entity("Application.Entities.GuestCategory", b =>

@@ -30,6 +30,7 @@ import {
   CreateGroupRequest,
   CreateGroupTemplateRequest,
   CreateGuestRequest,
+  CompanionInput,
   CreateTagRequest,
   CreateUserRequest,
   EventDetailDto,
@@ -392,7 +393,7 @@ class ApiClient {
 
   async getGuests(
     eventId: string | number,
-    query: { page?: number; pageSize?: number; search?: string; statuses?: string[]; eligibleForSeating?: boolean; categoryIds?: number[]; tagIds?: number[]; groupIds?: number[]; createdByUserIds?: number[]; includeDeleted?: boolean; sortBy?: string; sortDirection?: "asc" | "desc" } = {}
+    query: { page?: number; pageSize?: number; search?: string; statuses?: string[]; eligibleForSeating?: boolean; categoryIds?: number[]; tagIds?: number[]; groupIds?: number[]; createdByUserIds?: number[]; hasCompanions?: boolean; includeDeleted?: boolean; sortBy?: string; sortDirection?: "asc" | "desc" } = {}
   ): Promise<PagedResultDto<GuestDto>> {
     const response = await this.client.get<PagedResultDto<GuestDto>>(`/events/${eventId}/guests`, {
       params: query,
@@ -409,6 +410,14 @@ class ApiClient {
   async getGuest(eventId: string | number, guestId: number): Promise<GuestDto> {
     const response = await this.client.get<GuestDto>(`/events/${eventId}/guests/${guestId}`);
     return response.data;
+  }
+
+  async getGuestCompanions(eventId: string | number, guestId: number): Promise<GuestDto[]> {
+    return (await this.client.get<GuestDto[]>(`/events/${eventId}/guests/${guestId}/companions`)).data;
+  }
+
+  async saveGuestCompanions(eventId: string | number, guestId: number, companions: CompanionInput[]): Promise<GuestDto[]> {
+    return (await this.client.put<GuestDto[]>(`/events/${eventId}/guests/${guestId}/companions`, { companions })).data;
   }
 
   async getPublicGuest(publicId: string): Promise<PublicGuestDto> {

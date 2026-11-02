@@ -2,10 +2,24 @@ namespace Application.Services;
 
 public interface IGuestService
 {
-    Task<Entities.Guest> CreateGuestAsync(long eventId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null);
+    Task<Entities.Guest> CreateGuestAsync(long eventId, long loginId, string name, string? email, string? phone, long groupId, long? categoryId, IReadOnlyCollection<long> tagIds, long? placementId = null, int? placementSeatNumber = null, long? parentGuestId = null);
+    Task<(Entities.Guest Guest, List<Entities.Guest> Companions)> CreateGuestWithCompanionsAsync(
+        long eventId,
+        long loginId,
+        string name,
+        string? email,
+        string? phone,
+        long groupId,
+        long? categoryId,
+        IReadOnlyCollection<long> tagIds,
+        IReadOnlyCollection<(string Name, long GroupId, long? CategoryId)> companions,
+        long? placementId = null,
+        int? placementSeatNumber = null);
     Task<Entities.Guest?> GetGuestAsync(long guestId, bool includeDeleted = false);
     Task<Entities.Guest?> GetGuestByPublicIdAsync(Guid publicId);
     Task<List<Entities.Guest>> GetGuestsByEventAsync(long eventId);
+    Task<List<Entities.Guest>> GetCompanionsAsync(long parentGuestId, long loginId);
+    Task<List<Entities.Guest>> SaveCompanionsAsync(long parentGuestId, long loginId, IReadOnlyCollection<(long? Id, string Name, long GroupId, long? CategoryId)> companions);
     Task<(List<Entities.Guest> Items, int TotalCount, int Page, int PageSize)> GetGuestsPageByEventAsync(
         long eventId,
         int page,
@@ -17,6 +31,7 @@ public interface IGuestService
         IReadOnlyCollection<long>? tagIds = null,
         IReadOnlyCollection<long>? groupIds = null,
         IReadOnlyCollection<long>? createdByUserIds = null,
+        bool hasCompanions = false,
         bool includeDeleted = false,
         string? sortBy = null,
         string? sortDirection = null);

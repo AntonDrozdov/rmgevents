@@ -10,4 +10,5 @@ public sealed record GuestSelection(
     IReadOnlyCollection<long> CategoryIds,
     IReadOnlyCollection<long> TagIds,
     IReadOnlyCollection<long> GroupIds,
-    IReadOnlyCollection<long> CreatedByUserIds);
+    IReadOnlyCollection<long> CreatedByUserIds,
+    bool HasCompanions);
